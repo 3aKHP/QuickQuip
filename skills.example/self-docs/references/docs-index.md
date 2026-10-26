@@ -37,7 +37,7 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [admin/installation.md](admin/installation.md) | 安装与部署方式——本地／云端、源码／Docker 两个维度的定义、前提与四种组合的教程入口 |
 | [admin/deployment.md](admin/deployment.md) | 云端 Docker 部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
 | [admin/storage-migration.md](admin/storage-migration.md) | 配置与运行存储停服迁移、生产升级及回退 |
-| [admin/config-sync.md](admin/config-sync.md) | 本地与线上配置同步、共同基线、冲突与恢复 |
+| [admin/config-sync.md](admin/config-sync.md) | qqsync 的本地生效、单向推送回流、字段冲突与恢复 |
 | [admin/config-workspace.md](admin/config-workspace.md) | qqconf 的展开、编辑、只读预览、打包与恢复 |
 | [admin/llm-configuration.md](admin/llm-configuration.md) | LLM 数据库配置管理——迁移、草稿保存与应用、JSON 交换、备份恢复及 1.16.1 回退 |
 | [admin/client-fingerprints.md](admin/client-fingerprints.md) | 请求指纹 Profile——品牌 UA、安装与纪元身份及模板配置 |

@@ -7,7 +7,7 @@ param(
     [switch]$Migrate,
     [switch]$SkipHealth,
     [switch]$MigrateStorage,
-    [ValidateSet('auto','push','pull','off')][string]$ConfigSync = 'auto',
+    [ValidateSet('push','pull','off')][string]$ConfigSync = 'push',
     [ValidateSet('server','local')][string]$EnvSource = 'server',
     [switch]$Plan,
     [string]$HostAlias = "quickquip-prod",
@@ -40,6 +40,10 @@ if ($MigrateStorage) {
     $ConfigSync = 'off'
 }
 $SyncOperation = ''
+$SelectedEnvSource = $EnvSource
+if ($ConfigSync -ne 'off' -and $PSBoundParameters.ContainsKey('EnvSource')) {
+    throw 'EnvSource is for ConfigSync off; normal synchronization includes root .env'
+}
 $SyncPython = ''
 $Version = ""
 $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
@@ -61,7 +65,7 @@ try {
                 Where-Object { Get-Command $_ -ErrorAction SilentlyContinue } | Select-Object -First 1
             if (-not $SyncPython) { throw 'Local Python environment required for configuration sync' }
             if ($Plan) {
-                Invoke-Native 'configuration plan' { & $SyncPython -m quickquip.config_sync.cli --plan --mode $ConfigSync --host-alias $HostAlias --remote-dir $RemoteDir }
+                Invoke-Native 'configuration plan' { & $SyncPython -m quickquip.config_sync.deployment plan --mode $ConfigSync --host-alias $HostAlias --remote-dir $RemoteDir }
                 return
             }
         }
@@ -99,8 +103,9 @@ try {
             }
         }
         if (-not $DryRun -and $ConfigSync -ne 'off') {
-            $SyncOperation = & $SyncPython -m quickquip.config_sync.cli deploy-prepare --mode $ConfigSync --host-alias $HostAlias --remote-dir $RemoteDir
+            $SyncOperation = & $SyncPython -m quickquip.config_sync.deployment deploy-prepare --mode $ConfigSync --host-alias $HostAlias --remote-dir $RemoteDir
             if ($LASTEXITCODE -ne 0 -or $SyncOperation -cnotmatch '^[a-f0-9]{32}$') { throw 'Configuration preparation failed; inspect sync status' }
+            $SelectedEnvSource = 'sync'
             Write-Host "Configuration operation: $SyncOperation"
         }
         New-Item -ItemType Directory $Temp | Out-Null
@@ -124,10 +129,11 @@ try {
     if ($Mode -in @('deploy', 'migrate')) {
         Invoke-Native 'archive upload' { scp @SshArgs $Archive "${HostAlias}:$Incoming/release.tar.gz" }
         $shared = @('prod/check_bot.sh', 'prod/cron_check_bot.sh')
-        if ($EnvSource -eq 'local') {
+        if ($SelectedEnvSource -eq 'local') {
             $shared += '.env'
         }
         foreach ($item in @('prod/sendkey.env', 'data/fonts/NotoSansSC-Regular.ttf', 'data/tieba/storage_state.json', 'prod/host_metrics_collector.py')) {
+            if ($ConfigSync -ne 'off' -and $item -eq 'prod/sendkey.env') { continue }
             if (Test-Path $item) { $shared += $item }
         }
         foreach ($item in $shared) {
@@ -139,7 +145,7 @@ try {
     $skip = if ($SkipHealth) { '1' } else { '0' }
     $storage = if ($MigrateStorage) { '1' } else { '0' }
     Invoke-Native 'launch (if uncertain, inspect operation log before retrying)' {
-        ssh @SshArgs $HostAlias "DEPLOY_VERSION='$Version' DETACH=1 MIGRATE_STORAGE=$storage SKIP_HEALTH=$skip ENV_SOURCE='$EnvSource' CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'"
+        ssh @SshArgs $HostAlias "DEPLOY_VERSION='$Version' DETACH=1 MIGRATE_STORAGE=$storage SKIP_HEALTH=$skip ENV_SOURCE='$SelectedEnvSource' CONFIG_SYNC_PROTOCOL=2 CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'"
     }
     $Log = "$RemoteDir/.deploy/$Id.log"
     $ExitFile = "$RemoteDir/.deploy/$Id.exit"
@@ -155,7 +161,7 @@ try {
     if ($LASTEXITCODE -ne 0 -or "$code".Trim() -ne '0') { throw "Remote action failed (exit $code): $Log" }
     if ($SyncOperation) {
         Invoke-Native 'configuration acknowledgement; resume if interrupted' {
-            & $SyncPython -m quickquip.config_sync.cli deploy-finish --operation $SyncOperation --host-alias $HostAlias --remote-dir $RemoteDir
+            & $SyncPython -m quickquip.config_sync.deployment deploy-finish --operation $SyncOperation --host-alias $HostAlias --remote-dir $RemoteDir
         }
     }
     Write-Host "$Mode complete. Status: prod/deploy-v4.ps1 -Status -HostAlias $HostAlias -RemoteDir $RemoteDir"

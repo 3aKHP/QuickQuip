@@ -41,17 +41,21 @@ First application setup, including a standalone search-service route and the req
 
 ## Configuration Synchronization
 
-First upgrade the server to synchronization-capable code with `bash prod/deploy-v4.sh --config-sync off`. This preserves server configuration and credentials. A new server additionally needs `--env local`. Then choose the initial source explicitly:
+Set `QUICKQUIP_DEPLOY_LOCATION=cloud` and `QUICKQUIP_DEPLOY_RUNTIME=docker` in the real root `.env` on both ends. Upgrade an existing server with `bash prod/deploy-v4.sh --config-sync off`; a new server additionally needs `--env local`. Initialize configuration storage before the first synchronization.
+
+Choose the first source through the command direction:
 
 ```bash
-bash prod/config-v1.sh sync init --from remote
-bash prod/config-v1.sh sync --plan
-bash prod/config-v1.sh sync --mode auto
+qqsync refresh --direction pull
+qqsync pull
+qqconf unpack
 ```
 
-Normal deployment defaults to `--config-sync auto` once the baseline exists. `push` and `pull` select a direction; `off` retains server configuration without advancing the baseline. `--plan` reads the remote configuration without building or modifying files. Root `.env` is retained by default; pass `--env local` to update it. PowerShell uses `-ConfigSync`, `-Plan`, and `-EnvSource`.
+`pull` brings published server configuration into local real files; `push` deploys local real configuration. Subsequent operations merge independent field edits and report conflicts. Root `.env`, Compose and notification settings share the same configuration plan. See the [qqsync guide](../docs/admin/config-sync.md) for the managed scope, drafts and conflict choices.
 
-Configuration drivers require the installed local Python environment. File synchronization can recreate Bot and Web containers. Database-only updates use Bot-owned application and target-revision acknowledgement. Both endpoints retain private snapshots and operation journals. See [configuration synchronization](../docs/admin/config-sync.md) for conflicts, unpublished drafts, recovery, PowerShell examples, and the exact asset scope.
+Normal code deployment defaults to `--config-sync push`. `pull` receives server changes before packaging; `off` retains server configuration. `--plan` previews without building or modifying configuration. The independent `--env` option is available with `off` for bootstrap or maintenance; ordinary synchronization already includes root `.env`. PowerShell uses `-ConfigSync`, `-Plan`, and `-EnvSource`.
+
+The deployment transaction stages the reconciled configuration and environment before image validation, publishes while consumers are stopped, then switches and starts the new release. Repeating the same command continues or recovers interrupted work using its recorded destination. Standalone qqsync preserves each service's original running/stopped state; a code deployment starts the new version and checks its health.
 
 ## Commands
 
@@ -59,7 +63,7 @@ Both local drivers share `remote-deploy-v4.sh` and `deploy-state.py`.
 
 | Action | Bash | PowerShell |
 |---|---|---|
-| Deploy after initializing configuration sync | `bash prod/deploy-v4.sh` | `prod/deploy-v4.ps1` |
+| Deploy with configuration push | `bash prod/deploy-v4.sh` | `prod/deploy-v4.ps1` |
 | Local preview | `bash prod/deploy-v4.sh --dry-run` | `prod/deploy-v4.ps1 -DryRun` |
 | Status | `bash prod/deploy-v4.sh --status` | `prod/deploy-v4.ps1 -Status` |
 | Previous release | `bash prod/deploy-v4.sh --rollback` | `prod/deploy-v4.ps1 -Rollback` |
@@ -159,4 +163,4 @@ PowerShell equivalents use `-Action`, `-File`, `-Revision`, `-Source`, `-HostAli
 
 Before rollback to 1.16.1, use the migration backup TOML and independent assets. Back up the configuration, conversation and Trace databases before changing versions. The new configuration database remains available for a subsequent upgrade; configuration changes made after migration have no reverse TOML export. After running older code, stop bot and Web and reset the conversation Session identity columns before upgrading again; preserve a current conversation backup first. The database paths and maintenance SQL are in [rollback and re-upgrade](../docs/admin/llm-configuration.md#回退旧版本后再次升级).
 
-Local editing uses [qqconf](../docs/admin/config-workspace.md). Its `pack` command writes real configuration when both local application services are confirmed stopped, otherwise it generates `.config-staging/`. Configuration activation remains a deployment/application step. The current remote drivers consume real files within their documented synchronization scope; candidate-directory deployment belongs to the upcoming deployment CLI.
+Local editing uses [qqconf](../docs/admin/config-workspace.md). With cloud deployment selected, `pack` writes local real configuration for qqsync or deploy-v4 to send. With local deployment selected, `pack` writes `.config-staging/` and `qqsync push` installs it. The workspace remains owned by qqconf.

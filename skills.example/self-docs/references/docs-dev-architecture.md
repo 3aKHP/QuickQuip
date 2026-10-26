@@ -126,7 +126,7 @@ QuickQuip/
 src/quickquip/
 ├── chat/                    # 框架无关的聊天业务（时区猜测、复读、彩蛋规则、接龙、统计、规则开关、语境规则、每日总结/播报收集与生成编排、周期报告、唤醒、词云、节日检测）
 ├── common/                  # 通用工具（限流、持久化、消息去重、最近消息缓冲）
-├── config_sync/             # 配置包、共同基线、端点事务和 SSH 同步
+├── config_sync/             # qqsync 单向同步、服务生效、SSH/Compose 与部署事务
 ├── config_workspace/        # qqconf 工作副本编码、布局、配置候选和编辑恢复
 ├── configuration/           # 配置归属、逻辑快照、字段合并、原格式文本和持久写入
 ├── games/                   # 游戏模块（registry、scores、economy、config、各游戏实现）

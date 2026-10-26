@@ -33,6 +33,11 @@ def files(root):
     }
 
 
+def local_mode(root):
+    path = root / ".env"
+    path.write_text(path.read_text().replace("LOCATION=cloud", "LOCATION=local"))
+
+
 def test_roundtrip_keeps_values_text_and_runtime_and_is_idempotent(workspace, project):
     root, service = project
     before = content.read(root)
@@ -95,6 +100,7 @@ def test_running_service_creates_complete_candidate_without_changing_source(
     workspace, project, role
 ):
     root, service = project
+    local_mode(root)
     original = content.read(root)
     edit(provider(workspace), lambda value: value["parameters"].update(temperature=0.4))
     with service_guard(root, role):
@@ -117,15 +123,16 @@ def test_running_service_creates_complete_candidate_without_changing_source(
         assert files(root / ".config-staging") == before
 
 
-def test_unknown_service_state_uses_candidate(workspace, project):
+def test_cloud_pack_uses_real_files_without_previous_service_records(workspace, project):
     root, _ = project
     (root / "data/qqconf/services/web.json").unlink()
     edit(provider(workspace), lambda value: value["parameters"].update(temperature=0.2))
-    assert workspace.pack()["destination"] == "candidate"
+    assert workspace.pack()["destination"] == "source"
 
 
 def test_unpack_uses_actual_source_and_keeps_pending_workspace_changes(workspace, project):
     root, service = project
+    local_mode(root)
     edit(provider(workspace), lambda value: value["parameters"].update(temperature=0.6))
     with service_guard(root, "web"):
         workspace.pack()
@@ -269,6 +276,7 @@ def test_pack_flushes_writable_files_for_windows(workspace, project, monkeypatch
     monkeypatch.setattr(os, "fsync", require_write_access)
     edit(provider(workspace), lambda value: value["parameters"].update(temperature=0.2))
     assert workspace.pack()["destination"] == "source"
+    local_mode(root)
     edit(provider(workspace), lambda value: value["parameters"].update(temperature=0.3))
     with service_guard(root, "web"):
         assert workspace.pack()["destination"] == "candidate"

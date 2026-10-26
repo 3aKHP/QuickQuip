@@ -15,7 +15,9 @@ from quickquip.common.config_utils import expansion_environment
 from quickquip.configuration.errors import ConfigError
 from quickquip.configuration.paths import StoragePaths
 from quickquip.configuration.validation import validate_asset_tree
-from quickquip.configuration.inventory import body, read_files, safe_path, GROUP_FILES
+from quickquip.configuration.inventory import (
+    body, read_files, safe_path, in_scope, GROUP_FILES, MAX_FILE_BYTES, MAX_TOTAL_BYTES,
+)
 from quickquip.configuration import text
 from quickquip.configuration.images import read_only
 from quickquip.llm.config_document import validate_document
@@ -25,7 +27,7 @@ from quickquip.llm.config import REASONING_EFFORT_CHOICES
 from quickquip.llm.config_store import projection_consistent
 
 
-def read(root):
+def read(root, *, files=None):
     root = Path(root)
     path = StoragePaths(root).configuration
     if not path.exists():
@@ -59,10 +61,30 @@ def read(root):
                     scope[key] = bool(scope[key])
         modes = dict(connection.execute("SELECT group_id,text_mode FROM niuniu_group_text"))
         document = json.loads(meta["document"])
-    return {"document": document, "scopes": scopes, "text_modes": modes, "files": read_files(root)}
+    return {
+        "document": document, "scopes": scopes, "text_modes": modes,
+        "files": read_files(root) if files is None else files,
+    }
 
 
 def validate(snapshot):
+    if not isinstance(snapshot, dict) or set(snapshot) != {
+        "document", "scopes", "text_modes", "files"
+    } or any(not isinstance(snapshot[key], dict) for key in snapshot):
+        raise ConfigError("invalid_configuration", "Expected a logical configuration snapshot")
+    total = 0
+    for name, item in snapshot["files"].items():
+        if not isinstance(name, str) or not in_scope(name):
+            raise ConfigError("invalid_configuration", "File is outside managed configuration")
+        if (
+            not isinstance(item, dict) or set(item) != {"content", "mode"}
+            or type(item["mode"]) is not int or not 0 <= item["mode"] <= 0o777
+        ):
+            raise ConfigError("invalid_configuration", "Invalid configuration file entry", name)
+        size = len(body(item))
+        total += size
+        if size > MAX_FILE_BYTES or total > MAX_TOTAL_BYTES:
+            raise ConfigError("body_too_large", "Configuration exceeds its size limit", name)
     environment = dict(os.environ)
     dotenv = snapshot["files"].get(".env")
     if dotenv is not None:

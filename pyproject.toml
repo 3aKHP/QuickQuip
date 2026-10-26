@@ -10,6 +10,7 @@ dynamic = ["dependencies"]
 
 [project.scripts]
 qqconf = "quickquip.config_workspace.__main__:main"
+qqsync = "quickquip.config_sync.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

@@ -31,7 +31,7 @@
 
 ## 项目术语
 
-- `docs/glossary.md` → `references/docs-glossary.md` — QuickQuip 项目术语表 ｜ 关键词：provider_id、model、(provider_id, model)、.config-workspace/、unpack、refresh、pack、.config-staging/、revision、loaded_revision
+- `docs/glossary.md` → `references/docs-glossary.md` — QuickQuip 项目术语表 ｜ 关键词：provider_id、model、(provider_id, model)、.config-workspace/、unpack、refresh、pack、.config-staging/、push、pull
 
 ## 用户文档（群友）
 
@@ -45,7 +45,7 @@
 ## 管理文档（部署与运维）
 
 - `docs/admin/client-fingerprints.md` → `references/docs-admin-client-fingerprints.md` — 请求指纹 Profile ｜ 关键词：client_fingerprint、default、quickquip、opencode2、codex、claude-code、system、gemini-cli、legacy-gemini、legacy-claude
-- `docs/admin/config-sync.md` → `references/docs-admin-config-sync.md` — 本地与线上配置同步 ｜ 关键词：prod.example/、prod/、bash prod/deploy-v4.sh --config-sync off、.env、--migrate、--config-sync off --env local、--skip-health、--from local、python -m quickquip.llm.config_cli init、data/config-sync/
+- `docs/admin/config-sync.md` → `references/docs-admin-config-sync.md` — 用 qqsync 同步和部署配置 ｜ 关键词：qqsync、refresh、push、pull、.env、QUICKQUIP_DEPLOY_LOCATION、local、cloud、QUICKQUIP_DEPLOY_RUNTIME、source
 - `docs/admin/config-workspace.md` → `references/docs-admin-config-workspace.md` — 用 qqconf 编辑本地配置 ｜ 关键词：qqconf、config/managed/config.db、python -m quickquip.config_workspace、--root /path/to/QuickQuip、--workspace /path/to/workspace、unpack、refresh、pack、--json、.config-workspace/
 - `docs/admin/configuration.md` → `references/docs-admin-configuration.md` — QuickQuip 配置参考 ｜ 关键词：.env、DRIVER、~websockets、~fastapi+~websockets、HOST、0.0.0.0、PORT、8080、QQ_ACCOUNT、ONEBOT_WS_URLS
 - `docs/admin/deployment.md` → `references/docs-admin-deployment.md` — QuickQuip 云端 Docker 部署指南 ｜ 关键词：prod.example/、prod/、.env、QQ_ACCOUNT、ONEBOT_ACCESS_TOKEN、DRIVER、~fastapi+~websockets、WEB_ADMIN_PASSWORD、QUICKQUIP_SEARXNG_BASE_URL、OPENAI_API_KEY
@@ -106,11 +106,12 @@
 - `docs/dev/adr/0016-trusted-skill-execution.md` → `references/docs-dev-adr-0016-trusted-skill-execution.md` — ADR-0016：由部署者管理受信任 Skill 并约束脚本执行 ｜ 状态：Accepted
 - `docs/dev/adr/0017-preset-skill-distribution.md` → `references/docs-dev-adr-0017-preset-skill-distribution.md` — ADR-0017：保留可选 Skill 副本并显式检测和同步漂移 ｜ 状态：Accepted
 - `docs/dev/adr/0018-mcp-result-normalization.md` → `references/docs-dev-adr-0018-mcp-result-normalization.md` — ADR-0018：将 MCP 结果归一化为受控内部内容 ｜ 状态：Accepted
-- `docs/dev/adr/0019-configuration-three-way-sync.md` → `references/docs-dev-adr-0019-configuration-three-way-sync.md` — ADR-0019：通过共同配置基线协调双向同步 ｜ 状态：Accepted ｜ 关键词：.env
+- `docs/dev/adr/0019-configuration-three-way-sync.md` → `references/docs-dev-adr-0019-configuration-three-way-sync.md` — ADR-0019：通过共同配置基线协调双向同步 ｜ 状态：Superseded ｜ 替代记录：[0024-directional-configuration-deployment.md](docs-dev-adr-0024-directional-configuration-deployment.md) ｜ 关键词：.env
 - `docs/dev/adr/0020-editable-configuration-workspaces.md` → `references/docs-dev-adr-0020-editable-configuration-workspaces.md` — ADR-0020：以持久 TOML 工作副本编辑配置包 ｜ 状态：Superseded ｜ 替代记录：[0022-local-configuration-workspace-cli.md](docs-dev-adr-0022-local-configuration-workspace-cli.md)
 - `docs/dev/adr/0021-configuration-runtime-storage-separation.md` → `references/docs-dev-adr-0021-configuration-runtime-storage-separation.md` — ADR-0021：先分离配置与运行数据，再重构本地配置工具 ｜ 状态：Accepted ｜ 关键词：.env、data/llm.db、group_settings、data/niuniu.db、niuniu_group_text、data/llm_config.db、config_operations、bot_runtime、enabled、config/managed/config.db
-- `docs/dev/adr/0022-local-configuration-workspace-cli.md` → `references/docs-dev-adr-0022-local-configuration-workspace-cli.md` — ADR-0022：以 qqconf 统一编辑本地持久化配置 ｜ 状态：Accepted ｜ 关键词：.env、config/、data/、qqconf、unpack、refresh、pack、.config-workspace/、db/、.config-staging/
+- `docs/dev/adr/0022-local-configuration-workspace-cli.md` → `references/docs-dev-adr-0022-local-configuration-workspace-cli.md` — ADR-0022：以 qqconf 统一编辑本地持久化配置 ｜ 状态：Superseded ｜ 替代记录：[0024-directional-configuration-deployment.md](docs-dev-adr-0024-directional-configuration-deployment.md) ｜ 关键词：.env、config/、data/、qqconf、unpack、refresh、pack、.config-workspace/、db/、.config-staging/
 - `docs/dev/adr/0023-online-and-offline-configuration-publication.md` → `references/docs-dev-adr-0023-online-and-offline-configuration-publication.md` — ADR-0023：通过不可变快照完成在线与停服发布 ｜ 状态：Accepted ｜ 关键词：.env
+- `docs/dev/adr/0024-directional-configuration-deployment.md` → `references/docs-dev-adr-0024-directional-configuration-deployment.md` — ADR-0024：工作副本与单向配置部署 ｜ 状态：Accepted ｜ 关键词：.qqconf/、.env、QUICKQUIP_DEPLOY_LOCATION=local|cloud、QUICKQUIP_DEPLOY_RUNTIME=source|docker、.config-staging/、refresh、push、pull
 - `docs/dev/adr/README.md` → `references/docs-dev-adr-readme.md` — 架构决策记录 ｜ 关键词：NNNN-short-title.md、Proposed、Accepted、Rejected、Superseded、status、superseded_by
 - `docs/dev/adr/template.md` → `references/docs-dev-adr-template.md` — ADR 模板 ｜ 关键词：NNNN-short-title.md
 

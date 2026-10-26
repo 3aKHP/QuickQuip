@@ -103,6 +103,13 @@ def require_ready(root):
         raise ConfigError(
             "recovery_required", "Run qqconf pack to recover interrupted configuration"
         )
+    marker = Path(root) / "data/config-sync/maintenance.json"
+    if marker.exists():
+        state = json.loads(marker.read_text(encoding="utf-8"))
+        if state.get("protocol") == 2 and not state.get("allow_start", False):
+            raise ConfigError(
+                "recovery_required", "Repeat qqsync push or pull to finish installation"
+            )
 
 
 @contextmanager

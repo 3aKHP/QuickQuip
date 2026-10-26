@@ -10,6 +10,8 @@ Action="${4:?action required}"
 Target="${5:-}"
 ConfigSync=${CONFIG_SYNC:-off}
 SyncOperation=${SYNC_OPERATION:-}
+ConfigSyncProtocol=${CONFIG_SYNC_PROTOCOL:-1}
+[[ "$ConfigSyncProtocol" =~ ^[12]$ ]] || exit 2
 MigrateStorage=${MIGRATE_STORAGE:-0}
 [[ "$MigrateStorage" =~ ^[01]$ ]] || exit 2
 [[ "$MigrateStorage" = 0 || ( "$ConfigSync" = off && "${SKIP_HEALTH:-0}" = 0 ) ]] || exit 2
@@ -152,6 +154,18 @@ compose() {
     local release="$1"; shift
     QUICKQUIP_RELEASE="$release" docker compose --env-file "$QUICKQUIP_ENV_FILE" \
         -f "$Root/releases/$release/prod/docker-compose.yml" "$@"
+}
+sync_rpc() {
+    local release="$1"; shift
+    if [ "$ConfigSyncProtocol" = 2 ]; then
+        compose "$release" run --rm --no-deps -T -v "$Root:/qqsync-host" \
+            -e QUICKQUIP_SYNC_UID="$(id -u)" -e QUICKQUIP_SYNC_GID="$(id -g)" web-admin \
+            python -m quickquip.config_sync.deployment_worker "$@" \
+            --root /qqsync-host --application-release "$release"
+    else
+        compose "$release" run --rm --no-deps -T web-admin \
+            python -m quickquip.config_sync.rpc "$@"
+    fi
 }
 verify_release() {
     local release="$1" image images
@@ -358,11 +372,17 @@ finish() {
             migrate-storage --services-stopped --rollback "$StorageBackup" \
             || { step "STORAGE RECOVERY FAILED; keep migration backup"; exit 2; }
     fi
+    if [ "$Succeeded" = 0 ] && [ -n "$SyncOperation" ] && [ "$Changed" = 1 ] \
+        && [ "$ConfigSyncProtocol" = 2 ]; then
+        compose "$Id" stop quickquip web-admin || exit 2
+        shared_state restore "$Root" "$Backup" || exit 2
+    fi
     if [ "$Succeeded" = 0 ] && [ -n "$SyncOperation" ]; then
         if [ "$Activated" = 1 ]; then
+            RecoveryRelease="$Id"
+            if [ "$ConfigSyncProtocol" = 2 ]; then RecoveryRelease="$Prev"; fi
             if ! compose "$Id" stop quickquip web-admin \
-                || ! compose "$Id" run --rm --no-deps web-admin python -m quickquip.config_sync.rpc \
-                    recover --operation "$SyncOperation" --services-stopped; then
+                || ! sync_rpc "$RecoveryRelease" recover --operation "$SyncOperation" --services-stopped; then
                 step "CONFIG RECOVERY FAILED; preserve operation $SyncOperation and $Incoming"
                 exit 2
             fi
@@ -373,8 +393,7 @@ finish() {
                 compose "$Prev" stop quickquip web-admin || exit 2
                 RecoveryArgs=(--services-stopped)
             fi
-            if ! compose "$Prev" run --rm --no-deps web-admin python -m quickquip.config_sync.rpc \
-                recover --operation "$SyncOperation" "${RecoveryArgs[@]}"; then
+            if ! sync_rpc "$Prev" recover --operation "$SyncOperation" "${RecoveryArgs[@]}"; then
                 step "CONFIG RECOVERY FAILED; preserve operation $SyncOperation and $Incoming"
                 exit 2
             fi
@@ -408,8 +427,7 @@ finish() {
         up "$Prev" && health "$Prev" || { step "RECOVERY FAILED: previous services unavailable"; exit 2; }
     fi
     if [ "$Succeeded" = 0 ] && [ -n "$SyncOperation" ] && [ -n "$Prev" ]; then
-        compose "$Prev" exec -T web-admin python -m quickquip.config_sync.rpc \
-            recovery-verified --operation "$SyncOperation" || { step "CONFIG RECOVERY UNVERIFIED"; exit 2; }
+        sync_rpc "$Prev" recovery-verified --operation "$SyncOperation" || { step "CONFIG RECOVERY UNVERIFIED"; exit 2; }
     fi
     # Secrets are transient; retain only logs and numeric exit status.
     if [ "$SharedSudo" = 1 ]; then sudo -n rm -rf "$Backup" || exit 2; fi
@@ -456,8 +474,7 @@ if [ "$Action" = recover ]; then
 fi
 if [ -n "$SyncOperation" ]; then
     record_transaction
-    compose "$Prev" exec -T web-admin python -m quickquip.config_sync.rpc \
-        bind-deployment --operation "$SyncOperation" --release "$Id" || fail "configuration deployment binding failed"
+    sync_rpc "$Prev" bind-deployment --operation "$SyncOperation" --release "$Id" || fail "configuration deployment binding failed"
 fi
 
 if [ "$Action" = rollback ]; then
@@ -532,6 +549,9 @@ rsync -ar --chmod=D755,F644 --exclude=__pycache__ --exclude='*.pyc' \
     "${LinkDest[@]}" "$Incoming/tree/" "$Release/"
 chmod 700 "$Release"
 mkdir -p "$Release/config/managed"
+if [ -n "$SyncOperation" ] && [ "$ConfigSyncProtocol" = 2 ]; then
+    sync_rpc "$Prev" stage --operation "$SyncOperation" --release "$Id" || fail "configuration stage failed"
+fi
 export QUICKQUIP_ENV_FILE="$Incoming/shared/.env"
 compose "$Id" config --quiet
 # Resolved values stay within the private transaction and never enter the release.
@@ -555,8 +575,9 @@ BuildStamp="$(date +%Y%m%d.%H%M%S)"
 VersionId="${DEPLOY_VERSION:-unknown}+build.$BuildStamp"
 step "image built: quickquip-app:$Id ($VersionId)"
 if [ -n "$SyncOperation" ]; then
-    compose "$Id" run --rm --no-deps web-admin python -m quickquip.config_sync.rpc \
-        stage --operation "$SyncOperation" --release "$Id" || fail "configuration stage failed"
+    if [ "$ConfigSyncProtocol" != 2 ]; then
+        sync_rpc "$Id" stage --operation "$SyncOperation" --release "$Id" || fail "configuration stage failed"
+    fi
 elif [ -n "$Prev" ] && [ -f "$Release/src/quickquip/config_sync/rpc.py" ]; then
     compose "$Id" run --rm --no-deps web-admin python -m quickquip.config_sync.rpc idle \
         || fail "finish or recover pending configuration synchronization first"
@@ -593,8 +614,11 @@ if [ -n "$SyncOperation" ]; then
     ServicesStopped=1
     record_transaction
     compose "$Prev" stop quickquip web-admin || fail "configuration consumers could not stop"
-    compose "$Id" run --rm --no-deps web-admin python -m quickquip.config_sync.rpc \
-        restart-fence --operation "$SyncOperation" || fail "could not fence previous bot heartbeat"
+    if [ "$ConfigSyncProtocol" = 2 ]; then
+        sync_rpc "$Id" candidate-commit --operation "$SyncOperation" || fail "offline configuration publication failed"
+    else
+        sync_rpc "$Id" restart-fence --operation "$SyncOperation" || fail "could not fence previous bot heartbeat"
+    fi
 fi
 Activated=1
 record_transaction
@@ -609,10 +633,10 @@ else
 fi
 if [ -n "$SyncOperation" ]; then
     [ "${SKIP_HEALTH:-0}" = 0 ] || fail "synchronization requires health verification"
-    compose "$Id" exec -T web-admin python -m quickquip.config_sync.rpc \
-        candidate-commit --operation "$SyncOperation" || fail "configuration commit failed"
-    compose "$Id" exec -T web-admin python -m quickquip.config_sync.rpc \
-        wait --operation "$SyncOperation" || fail "configuration application failed"
+    if [ "$ConfigSyncProtocol" != 2 ]; then
+        sync_rpc "$Id" candidate-commit --operation "$SyncOperation" || fail "configuration commit failed"
+    fi
+    sync_rpc "$Id" wait --operation "$SyncOperation" || fail "configuration application failed"
 fi
 set_link previous "$Prev"
 Succeeded=1

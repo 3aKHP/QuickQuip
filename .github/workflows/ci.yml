@@ -49,3 +49,34 @@ jobs:
           tests/unit/llm/test_config_deployment.py
           tests/integration/test_native_web_lifecycle.py
           --basetemp "${{ runner.temp }}/pytest-config-activation"
+      - name: Verify directional configuration sessions
+        run: >-
+          python -m pytest tests/unit/config_sync/test_session.py
+          tests/unit/config_sync/test_installation.py tests/unit/config_sync/test_reconciliation.py
+          --basetemp "${{ runner.temp }}/pytest-qqsync"
+
+  docker-config:
+    name: Docker configuration lifecycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install test dependencies
+        run: python -m pip install -r requirements-dev.txt
+      - name: Build application smoke image
+        run: >-
+          docker build -f prod.example/Dockerfile -t quickquip-qqsync-smoke
+          --build-arg PLAYWRIGHT_BASE_IMAGE=python:3.12-slim
+          --build-arg PIP_INDEX_URL=https://pypi.org/simple
+          --build-arg PIP_TRUSTED_HOST=pypi.org .
+      - name: Verify real Compose synchronization
+        env:
+          QUICKQUIP_DOCKER_SMOKE: "1"
+        run: >-
+          sudo --preserve-env=QUICKQUIP_DOCKER_SMOKE
+          "$(command -v python)" -m pytest tests/integration/test_docker_config_sync.py
+          --basetemp "${{ runner.temp }}/pytest-docker-config"

@@ -1,98 +1,113 @@
 <!-- Generated from docs/admin/config-sync.md; do not edit -->
 
-# 本地与线上配置同步
+# 用 qqsync 同步和部署配置
 
-配置同步面向同时使用本地工作区与服务器 Web Admin 的部署者。工具记录双方上次一致的内容作为基线，判断本地修改应推送、线上热修应回流，或双方修改需要人工处理。需要本地已安装项目 Python 环境、可用 SSH，以及运行新版 Bot 和 Web 的版本目录服务器。
+`qqsync` 连接本地真实配置与部署环境。日常只需三个命令：`refresh` 看变化，`push` 推送，`pull` 回流。它与[qqconf 工作副本](config-workspace.md)配合使用，完整配置范围见该页的受管清单。
 
-## 建立第一次同步
+## 先设置部署方式
 
-先将 `prod.example/` 中的新驱动合入自己的 `prod/`。采用混合存储的已有安装先完成[存储迁移](storage-migration.md)。已有服务器升级同步能力时，执行一次 `bash prod/deploy-v4.sh --config-sync off`，保留服务器配置与根 `.env`。平铺目录同时指定 `--migrate`。新服务器首次部署使用 `--config-sync off --env local`；等待 QQ 登录时可以再加 `--skip-health`，登录和健康检查完成后建立配置基线。
+在真实项目根 `.env` 中明确设置两个值：
 
-在本地项目根目录选择首次配置来源。以下命令以线上已发布配置覆盖本地草稿和受管文件，覆盖前保存恢复副本：
-
-```bash
-bash prod/config-v1.sh sync init --from remote --host-alias quickquip-prod
+```dotenv
+QUICKQUIP_DEPLOY_LOCATION=cloud
+QUICKQUIP_DEPLOY_RUNTIME=docker
 ```
 
-以本地配置为初始来源时改为 `--from local`。已有本地旧 TOML 需要迁移时，先运行 `python -m quickquip.llm.config_cli init`。首次回流可以初始化空的本地数据库。首次来源选择后，两端基线保存在各自的 `data/config-sync/`，不要单独删除其中一端的状态。
-
-PowerShell 对应命令：
-
-```powershell
-prod/config-v1.ps1 -Action sync -SyncAction init -From remote -HostAlias quickquip-prod
-```
-
-每个本地工作区与服务器环境分别维护同步关系。复制数据目录建立新环境时，将复制的 `data/config-sync/` 移至备份位置，再初始化新的同步身份；两端身份相同会被拒绝。改变 SSH 目标前核对端点身份，未完成操作使用原连接参数恢复。
-
-## 查看和执行同步
-
-```bash
-bash prod/config-v1.sh sync --plan
-bash prod/config-v1.sh sync --mode auto
-bash prod/config-v1.sh sync status
-```
-
-预览显示变更方向、删除、冲突、线上未发布草稿、重启需求，以及认证变量是否已配置。变量值不进入预览。预览不建立基线、不修改配置、不构建前端。
-
-| 状态 | auto 行为 |
+| 配置 | 可选值 |
 |---|---|
-| 两端均未修改 | 保持内容并确认同步关系 |
-| 仅本地修改 | 推送本地修改 |
-| 仅线上修改 | 回流线上修改 |
-| 双方修改为相同内容 | 接受共同结果 |
-| 同一配置单元双方修改不同 | 返回冲突，保留双方内容 |
+| `QUICKQUIP_DEPLOY_LOCATION` | `local` 本地部署、`cloud` 云端部署 |
+| `QUICKQUIP_DEPLOY_RUNTIME` | `source` 原生 Python 进程、`docker` Docker Compose |
 
-LLM 文档整体为一个配置单元，每个文件各为一个配置单元。不同单元的修改会组合后统一校验。同一单元的修改由部署者选择处理方向，工具展示 LLM 字段差异，不自动合并文档内容。
+[安装指南](installation.md)说明四种组合。源码运行和 Windows 懒人包使用 `source`；容器内挂载源码的部署使用 `docker`。云端同步时，本地与服务器的根 `.env` 都填写 `cloud` 和相应运行方式。
 
-显式推送与回流使用 `--mode push`、`--mode pull`。确认要替换目标侧独立修改时加 `--overwrite`，例如：
+云端连接使用 SSH 配置中的别名，默认 `quickquip-prod`、远端根目录 `/opt/QuickQuip`。可以在本地根 `.env` 中设置：
 
-```bash
-bash prod/config-v1.sh sync --mode pull --overwrite
+```dotenv
+QUICKQUIP_DEPLOY_SSH_HOST=quickquip-prod
+QUICKQUIP_DEPLOY_REMOTE_DIR=/opt/QuickQuip
 ```
 
-覆盖也会检查目标的修订和内容摘要。目标在读取后发生变化时操作停止，需要重新查看差异。推送改变 LLM 文档且服务器已有未发布草稿时，需要先完成草稿或明确覆盖；回流读取已发布配置，保留线上草稿。
+首次安装或升级先补齐真实 `.env` 中的两个部署值，再运行 `qqconf unpack`。日常修改在工作副本中完成。读取与预览可以报告缺失的部署方式；写入要求两个值均已设置。
 
-PowerShell 使用 `-Action sync -Mode auto -Plan` 预览，去掉 `-Plan` 执行，使用 `-Overwrite` 明确覆盖。
+## 本地修改后生效
 
-## 配置范围与生效
+```bash
+qqconf unpack
+# 编辑 .config-workspace/ 中的配置
+qqconf refresh
+qqconf pack
+qqsync refresh
+qqsync push
+```
 
-[qqconf](config-workspace.md) 负责编辑本地工作副本。本文工具直接连接本地真实文件和服务器；线上热修回流后运行 `qqconf unpack` 接入副本。qqconf 的管理范围包含更多本地配置，现有同步工具仍按下述清单交换内容，且尚未读取 `.config-staging/`。
+两个预览命令都可省略。
 
-同步包括 LLM 草稿／发布文档、`config/personas/*.toml`、`config/client_profiles/*.toml`，以及 generation、chat_rules、games、awakening、sensitive_words、admins、niuniu_text、niuniu_text_safe 的 TOML 文件。`llm_about` 的全局和群目录中 `vocab.yaml`、`identities.yaml` 同时同步。
+- **本地部署**：`pack` 始终生成 `.config-staging/`，`push` 将其安装到真实目录并生效。成功后消费暂存，工作副本保持原样。没有暂存时，`push` 报告无待部署配置。
+- **云端部署**：`pack` 写入本地真实目录，`push` 将本地修改同步到服务器。首次推送以本地完整配置为准。
 
-两份牛牛文案受 Git 追踪，回流会成为本地工作区修改。示例文件和内置 Profile 随代码分发；旧 `llm.toml`、数据库历史、运行任务、聊天数据、群覆盖、Skills 和登录态不进入配置包。文件内容保持原字节，新写入的私有资产采用 owner-only 权限，两份公开文案采用普通可读权限。
+本地修改 `.env` 中的 API key 与修改其他配置采用同一流程。根 `.env`、Compose、运维通知配置一起进入同步计划。
 
-线上纯 LLM 文档更新通过 Bot 热应用，只有目标任务成功、Bot 已加载目标修订且核心就绪后才确认。文件推送会短暂停止并重建 Bot 与 Web；候选资产须支持当前已发布配置启动，随后应用目标配置。需要同时删除旧默认人格并切换默认人格时，可以先发布新的默认选择，再删除旧文件。
+源码环境可使用 `python -m quickquip.config_sync` 替代 `qqsync`。升级源码安装后，运行 `python -m pip install --no-deps -e .` 更新命令入口。Windows 懒人包使用 `python\python.exe -m quickquip.config_sync`。在子命令后加 `--root /path/to/QuickQuip` 可以指定本地项目根。
 
-本地回流更新草稿与文件，不自动应用到本地 Bot。本地委托 LLM 编辑时，使用配置服务／CLI 提交，维护正文、修订和关系投影。直接 SQL 修改导致投影不一致时，同步返回 `projection_mismatch`，应先核对修改意图并通过配置服务修复。
+## 把线上热修带回来
 
-## 随部署同步
+在 Web Admin 完成线上修改和应用后：
 
-建立基线后，无参数部署默认使用 `--config-sync auto`。文件回流发生在打包前，候选版本激活后完成配置应用，整个部署成功后确认基线。
+```bash
+qqsync refresh --direction pull
+qqsync pull
+qqconf unpack
+```
+
+`pull` 更新本地真实配置，`unpack` 再接入工作副本。首次回流以线上完整配置为准。两端均需已完成[配置存储初始化或迁移](storage-migration.md)。
+
+默认回流线上**已发布**的 LLM 配置。要带回尚未应用的草稿，执行 `qqsync pull --source draft`；该操作保留草稿尚未发布的事实，随后 `push` 仍可将其部署到线上。
+
+本地部署下，`qqsync pull` 提示使用 `qqconf unpack`，不执行写入。qqsync 的桥接对象始终是真实目录与部署环境，工作副本由 qqconf 管理。
+
+## 两边都修改时怎么办
+
+同步严格按照命令方向写入接收端。工具记录上次双方一致的字段：不同字段的修改自动组合，接收端的独立修改保留，下一次反向同步仍能发现它们。
+
+例如本地调整模型温度、线上调整超时：`push` 把温度传到线上并保留线上超时；随后 `pull` 可以把超时带回本地。
+
+同一字段两边改成不同值时，预览列出冲突，写入停止。整理配置后重试，或选择本次冲突字段的来源：
+
+```bash
+qqsync push --prefer source
+qqsync pull --prefer target
+```
+
+`source` 指本次发送端，`target` 指本次接收端。选择只影响冲突字段。需要整份来源覆盖接收端时使用 `--overwrite`，它与 `--prefer` 互斥。
+
+线上独立未发布草稿会保留，并接入部署带来的非冲突变化。草稿与部署修改同一字段，或资产变更使草稿引用失效时，会报告冲突供处理。
+
+## 服务如何生效
+
+qqsync 保留各服务原来的启停状态：运行中的服务按变更需要热应用或重启，原本停止的服务保持停止。
+
+纯 LLM 文档更新在 Bot 运行时热应用。文件、环境变量或组合配置变化会暂停消费者，安装完整目标后恢复；Docker 按新的 Compose 和环境配置启动原本运行的服务。停止状态下也会完成 LLM 发布，下一次 Bot 启动直接加载目标版本。实际加载状态由 Bot 回报。
+
+源码服务通过新版 `bot.py`、`web_api.py` 或 Windows `start.bat` 启动，自动具备暂停与恢复能力。升级前已经运行的原生进程需要先通过新版入口重启一次。
+
+跨环境交换的是配置内容。本环境修订历史、运行任务、聊天和业务数据保留在各自环境。
+
+## 与代码一起部署
+
+将公开模板更新到自己的 `prod/` 后，deploy-v4 默认推送配置：
 
 ```bash
 bash prod/deploy-v4.sh --plan
 bash prod/deploy-v4.sh
-bash prod/deploy-v4.sh --config-sync off
+bash prod/deploy-v4.sh --config-sync pull
 ```
 
-`off` 保留服务器受管配置，暂停旧服务写入后复制到候选版本，不推进同步基线。`--dry-run` 保持本地构建和上传预览功能。`--skip-health` 仅与 `--config-sync off` 配合使用。
+PowerShell 使用 `prod/deploy-v4.ps1`、`-Plan` 和 `-ConfigSync pull`。部署脚本复用 qqsync 的计划和安装流程，把候选配置、镜像构建、停服发布、版本切换及健康检查放进同一笔部署。代码发布会启动新版本并检查健康状态。
 
-已有服务器默认保留根 `.env`。需要更新应用凭据时显式指定 `--env local`；PowerShell 使用 `-EnvSource local`。同步检查认证变量引用，凭据文件由此独立选项管理。人工代码回滚不倒退同步基线，下一次同步按实际配置检测变化。
+已有服务器首次升级到支持 qqsync 的代码时使用 `--config-sync off`；新服务器首次部署再加 `--env local`。`off` 保留服务器配置，独立的 `--env` / `-EnvSource` 选项用于这个流程。普通 push/pull 部署已经包含 `.env`。平铺目录迁移和完整运维步骤见[生产模板](../../prod.example/README.md)。
 
-## 中断与恢复
+## 预览、输出与中断
 
-操作编号、恢复副本和两端回执保存在私有同步状态中；服务器执行日志位于 `.deploy/sync-<操作编号>.log`。部署联动同时保留 `.deploy/<release>.transaction.json` 恢复记录、`<release>.log` 执行日志和 `<release>.exit` 结果回执。恢复完成前保留这些文件及对应上传目录。出现失败时使用输出中的操作编号：
+预览按字段显示变化，文本文件同时展示可读差异。凭据默认隐藏；需要在自己的终端查看时使用 `qqsync refresh --show-secrets`。自动化可使用 `--json`，无参数运行显示帮助。没有 `auto` 或 `apply` 命令。
 
-```bash
-bash prod/config-v1.sh sync status --operation <操作编号>
-bash prod/config-v1.sh sync resume --operation <操作编号>
-```
-
-尖括号内容替换为本次 32 位操作编号。同一操作重试复用原任务，远端成功后断线可继续确认，不重复发布。部署联动等待对应部署完成。原部署进程已经退出时，恢复执行器读取持久化部署日志，恢复共享文件、版本链接和配置；部署已成功时继续完成两端确认。
-
-远端已经确认成功时，恢复命令会补齐本地确认。需要撤销未完成操作时使用 `sync recover --operation <操作编号>`。服务器恢复工作会停止 Bot／Web、还原配置并验证健康。本地已写入配置时，先停止本地应用服务，再追加 `--services-stopped` 恢复本地配置；仅处于准备阶段的本地操作可直接解除。
-
-恢复检测到维护期间的外部修改时会停止覆盖并保留状态。失败恢复不推进基线，维护状态持续阻止应用配置写入。`sync status --operation` 保留应用失败的错误原因，供数据库恢复后继续排查。检查日志、备份和当前内容后继续恢复，不要通过删除维护标记解锁。
-
-单独应用现有草稿时，可用 `bash prod/config-v1.sh apply --revision <修订号> --wait --timeout 150` 等待目标加载，或用 `status --operation <任务编号>` 查询任务。完整数据库备份恢复见 [LLM 配置管理](llm-configuration.md)。
+发生中断后，重复原来的 `push`、`pull` 或部署命令。工具从私有记录继续确认或恢复，使用中断前固定的目标和服务状态，无需输入哈希或操作编号。恢复完成前保留 `data/config-sync/` 与部署的 `.deploy/` 资料。旧工具已经完成的共同基线会接入字段同步；未完成的旧事务先按原目标处理。

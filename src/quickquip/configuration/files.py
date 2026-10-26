@@ -51,7 +51,8 @@ def install(root, before, after):
         if current.get(name) not in (before.get(name), after.get(name)):
             raise ConfigError("configuration_conflict", "External edit prevents recovery", name)
     for name in sorted(before.keys() - after.keys()):
-        checked(name)
+        if checked(name) is None:
+            continue
         path = safe_path(root, name)
         path.unlink(missing_ok=True)
         sync_directory(path.parent)

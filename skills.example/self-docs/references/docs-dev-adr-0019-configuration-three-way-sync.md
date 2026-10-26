@@ -1,14 +1,16 @@
 <!-- Generated from docs/dev/adr/0019-configuration-three-way-sync.md; do not edit -->
 
 ---
-status: Accepted
-superseded_by: []
+status: Superseded
+superseded_by: [0024-directional-configuration-deployment.md]
 ---
 
 # ADR-0019：通过共同配置基线协调双向同步
 
 - 记录日期：2026-10-24
 - 原始决策日期：2026-10-24
+
+后续决定见 [ADR-0024：工作副本与单向配置部署](0024-directional-configuration-deployment.md)。
 
 ## 背景
 

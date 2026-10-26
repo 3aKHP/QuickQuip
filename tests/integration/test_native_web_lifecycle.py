@@ -11,6 +11,9 @@ import urllib.error
 import urllib.request
 
 from quickquip.configuration.process_control import request, status
+from quickquip.config_sync.session import Session
+from quickquip.config_workspace.service import Workspace
+from quickquip.llm.config_service import ConfigService
 
 
 def test_native_web_restart_reads_updated_root_environment(tmp_path):
@@ -34,6 +37,9 @@ def test_native_web_restart_reads_updated_root_environment(tmp_path):
         )
 
     configure("first-synthetic-password")
+    with (tmp_path / ".env").open("a", encoding="utf-8") as stream:
+        stream.write("QUICKQUIP_DEPLOY_LOCATION=local\nQUICKQUIP_DEPLOY_RUNTIME=source\n")
+    ConfigService(tmp_path / "config/managed/config.db").initialize()
     env = {name: value for name, value in os.environ.items()
            if not name.startswith(("WEB_ADMIN_", "_QUICKQUIP_SERVICE_"))}
     env.pop("QUICKQUIP_MANAGED_CONTAINER", None)
@@ -87,11 +93,20 @@ def test_native_web_restart_reads_updated_root_environment(tmp_path):
             ready()
             assert call("first-synthetic-password") == 200
             first = status(tmp_path, "web")["record"]["child_pid"]
-            request(tmp_path, "web", "pause")
-            assert not status(tmp_path, "web")["running"]
-            configure("second-synthetic-password")
-            request(tmp_path, "web", "resume")
+            workspace = Workspace(root=tmp_path)
+            workspace.unpack()
+            environment = workspace.storage.directory / ".env"
+            environment.write_text(
+                environment.read_text(encoding="utf-8").replace(
+                    "first-synthetic-password", "second-synthetic-password"
+                ), encoding="utf-8",
+            )
+            assert workspace.pack()["destination"] == "candidate"
+            assert call("first-synthetic-password") == 200
+            assert Session(tmp_path).run("push")["phase"] == "confirmed"
             ready()
+            assert not status(tmp_path, "bot")["running"]
+            assert status(tmp_path, "web")["record"]["pid"] == process.pid
             assert status(tmp_path, "web")["record"]["child_pid"] != first
             assert call("first-synthetic-password") == 401
             assert call("second-synthetic-password") == 200
