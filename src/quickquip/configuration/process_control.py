@@ -1,5 +1,6 @@
 """Project-local control of native service supervisors through private files."""
 
+from contextlib import contextmanager
 import json
 from pathlib import Path
 import time
@@ -18,9 +19,25 @@ def control_path(root, role, suffix):
     return directory(root) / f"{role}.{suffix}"
 
 
+@contextmanager
+def _open_control(path):
+    with FileLock(str(path) + ".io.lock", timeout=5):
+        with Path(path).open(encoding="utf-8") as stream:
+            yield stream
+
+
+def write_control(path, value):
+    Path(path).parent.mkdir(parents=True, exist_ok=True)
+    with FileLock(str(path) + ".io.lock", timeout=5):
+        write_json(path, value)
+
+
 def read_control(path):
+    if not Path(path).exists():
+        return None
     try:
-        value = json.loads(Path(path).read_text(encoding="utf-8"))
+        with _open_control(path) as stream:
+            value = json.load(stream)
     except FileNotFoundError:
         return None
     except (OSError, ValueError):
@@ -77,7 +94,7 @@ def request(root, role, action, *, timeout=45):
                 "service_control_unavailable", "Restart the service through its updated entrypoint"
             )
         identifier = uuid.uuid4().hex
-        write_json(control_path(root, role, "request.json"), {
+        write_control(control_path(root, role, "request.json"), {
             "id": identifier, "supervisor": current["record"]["id"], "action": action,
         })
         deadline = time.monotonic() + timeout

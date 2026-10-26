@@ -13,8 +13,9 @@ ConfigSyncExplicit=0
 KeepReleases=4
 ReleaseId=""
 Version=""
-ConfigSync=auto
+ConfigSync=push
 EnvSource=server
+EnvSourceExplicit=0
 ConfigPlan=0
 SyncOperation=""
 SyncPython=""
@@ -30,7 +31,7 @@ Actions:
   --migrate            One-time migration of a legacy flat deployment
 
 Options:
-  --config-sync <mode> auto (default), push, pull, or off (retain server config)
+  --config-sync <mode> push (default), pull, or off (retain server config)
   --env <source>       server (default) or local
   --plan               Read-only remote configuration plan
   --dry-run            Build frontend locally and preview the upload manifest
@@ -55,7 +56,7 @@ while [ $# -gt 0 ]; do
         --skip-health) SkipHealth=1 ;;
         --migrate-storage) MigrateStorage=1 ;;
         --config-sync) ConfigSync="${2:?missing sync mode}"; ConfigSyncExplicit=1; shift ;;
-        --env) EnvSource="${2:?missing environment source}"; shift ;;
+        --env) EnvSource="${2:?missing environment source}"; EnvSourceExplicit=1; shift ;;
         --plan) ConfigPlan=1 ;;
         --host-alias) HostAlias="${2:?missing host}"; shift ;;
         --remote-dir) RemoteDir="${2:?missing root}"; shift ;;
@@ -75,8 +76,9 @@ if [ "$MigrateStorage" = 1 ]; then
     [[ "$ConfigSyncExplicit" = 0 || "$ConfigSync" = off ]] || die "storage migration retains server configuration; use --config-sync off"
     ConfigSync=off
 fi
-[[ "$ConfigSync" =~ ^(auto|push|pull|off)$ ]] || die "invalid configuration sync mode"
+[[ "$ConfigSync" =~ ^(push|pull|off)$ ]] || die "invalid configuration sync mode"
 [[ "$EnvSource" =~ ^(server|local)$ ]] || die "invalid environment source"
+[[ "$EnvSourceExplicit" = 0 || "$ConfigSync" = off ]] || die "--env is for --config-sync off; normal synchronization includes root .env"
 [[ "$ConfigPlan" = 0 || ( "$Mode" = deploy && "$DryRun" = 0 && "$SkipHealth" = 0 ) ]] || die "plan supports deployment only"
 [[ "$SkipHealth" = 0 || "$ConfigSync" = off ]] || die "skip-health requires --config-sync off"
 [[ "$Modes" -le 1 ]] || die "choose only one action"
@@ -106,7 +108,7 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
         done
         [ -n "$SyncPython" ] || die "local Python environment required for configuration sync"
         if [ "$ConfigPlan" = 1 ]; then
-            exec "$SyncPython" -m quickquip.config_sync.cli --plan --mode "$ConfigSync" --host-alias "$HostAlias" --remote-dir "$RemoteDir"
+            exec "$SyncPython" -m quickquip.config_sync.deployment plan --mode "$ConfigSync" --host-alias "$HostAlias" --remote-dir "$RemoteDir"
         fi
     elif [ "$ConfigPlan" = 1 ]; then
         die "--plan requires a synchronization mode"
@@ -145,8 +147,9 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
     fi
     command -v rsync >/dev/null || die "local rsync required"
     if [ "$ConfigSync" != off ]; then
-        SyncOperation="$("$SyncPython" -m quickquip.config_sync.cli deploy-prepare --mode "$ConfigSync" --host-alias "$HostAlias" --remote-dir "$RemoteDir")" || die "configuration preparation failed; inspect sync status"
+        SyncOperation="$("$SyncPython" -m quickquip.config_sync.deployment deploy-prepare --mode "$ConfigSync" --host-alias "$HostAlias" --remote-dir "$RemoteDir")" || die "configuration preparation failed; inspect sync status"
         [[ "$SyncOperation" =~ ^[a-f0-9]{32}$ ]] || die "invalid synchronization operation"
+        EnvSource=sync
         printf 'Configuration operation: %s
 ' "$SyncOperation"
     fi
@@ -166,12 +169,13 @@ if [ "$Mode" = deploy ] || [ "$Mode" = migrate ]; then
         Shared+=(.env)
     fi
     for item in prod/sendkey.env data/fonts/NotoSansSC-Regular.ttf data/tieba/storage_state.json prod/host_metrics_collector.py; do
+        if [ "$ConfigSync" != off ] && [ "$item" = prod/sendkey.env ]; then continue; fi
         [ ! -f "$item" ] || Shared+=("$item")
     done
     rsync -aR --chmod=D700,F600 "${rsync_args[@]}" "${Shared[@]}" "$HostAlias:$Incoming/shared/"
 fi
 ssh "${ssh_args[@]}" "$HostAlias" \
-    "DEPLOY_VERSION='$Version' DETACH=1 MIGRATE_STORAGE=$MigrateStorage SKIP_HEALTH=$SkipHealth ENV_SOURCE='$EnvSource' CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'" \
+    "DEPLOY_VERSION='$Version' DETACH=1 MIGRATE_STORAGE=$MigrateStorage SKIP_HEALTH=$SkipHealth ENV_SOURCE='$EnvSource' CONFIG_SYNC_PROTOCOL=2 CONFIG_SYNC='$ConfigSync' SYNC_OPERATION='$SyncOperation' bash '$Incoming/remote-deploy-v4.sh' '$RemoteDir' '$Id' '$KeepReleases' '$Mode' '$ReleaseId'" \
     || die "launch uncertain; inspect $RemoteDir/.deploy/$Id.log and .exit before retrying"
 Log="$RemoteDir/.deploy/$Id.log"
 ExitFile="$RemoteDir/.deploy/$Id.exit"
@@ -185,6 +189,6 @@ done
 code="$(ssh "${ssh_args[@]}" "$HostAlias" "cat '$ExitFile'")" || die "cannot read completion status: $ExitFile"
 [ "$code" = 0 ] || die "remote action failed (exit $code): $Log"
 if [ -n "$SyncOperation" ]; then
-    "$SyncPython" -m quickquip.config_sync.cli deploy-finish --operation "$SyncOperation" --host-alias "$HostAlias" --remote-dir "$RemoteDir" || die "deployment finished; configuration acknowledgement needs resume"
+    "$SyncPython" -m quickquip.config_sync.deployment deploy-finish --operation "$SyncOperation" --host-alias "$HostAlias" --remote-dir "$RemoteDir" || die "deployment finished; configuration acknowledgement needs resume"
 fi
 printf '%s complete. Status: bash prod/deploy-v4.sh --status --host-alias %s --remote-dir %s\n' "$Mode" "$HostAlias" "$RemoteDir"

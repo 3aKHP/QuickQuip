@@ -46,6 +46,7 @@ def project(tmp_path):
     service.replace(document, 1)
     (root / ".env").write_text(
         '# credentials\nSYNTHETIC_API_KEY="private-sentinel" # keep\nPORT=5000\n'
+        'QUICKQUIP_DEPLOY_LOCATION=cloud\nQUICKQUIP_DEPLOY_RUNTIME=source\n'
     )
     (root / "config/chat_rules.toml").write_text("# rules\n[defaults]\nweight=1\nchance=0.5\n")
     for role in ("bot", "web"):

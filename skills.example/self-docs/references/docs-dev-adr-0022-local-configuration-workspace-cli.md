@@ -1,14 +1,16 @@
 <!-- Generated from docs/dev/adr/0022-local-configuration-workspace-cli.md; do not edit -->
 
 ---
-status: Accepted
-superseded_by: []
+status: Superseded
+superseded_by: [0024-directional-configuration-deployment.md]
 ---
 
 # ADR-0022：以 qqconf 统一编辑本地持久化配置
 
 - 记录日期：2026-10-26
 - 原始决策日期：2026-10-26
+
+后续决定见 [ADR-0024：工作副本与单向配置部署](0024-directional-configuration-deployment.md)。
 
 ## 背景
 

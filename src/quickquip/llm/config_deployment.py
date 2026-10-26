@@ -71,7 +71,7 @@ def _environment(service):
     # Match load_root_env_file(override=False) in the process being restarted.
     values = {
         key: value for key, value in DotEnv(
-            service.config_dir.parent / ".env", override=False, encoding="utf-8"
+            service.data_dir.parent / ".env", override=False, encoding="utf-8"
         ).dict().items()
         if value is not None
     }
@@ -80,7 +80,7 @@ def _environment(service):
 
 
 def publish_offline(service, revision, request_id, stopped, *, environment=None):
-    root = service.config_dir.parent
+    root = service.data_dir.parent
     if not isinstance(stopped, StoppedService):
         raise ConfigError("services_running", "A stopped Bot lease is required")
     stopped.verify(root, "bot")

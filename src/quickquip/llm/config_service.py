@@ -81,13 +81,15 @@ def configuration_mutation(method):
 
 
 class ConfigService:
-    def __init__(self, path=DEFAULT_CONFIG_DB, *, config_dir=None, runtime_path=None):
+    def __init__(
+        self, path=DEFAULT_CONFIG_DB, *, config_dir=None, runtime_path=None, data_dir=None
+    ):
         self.path = Path(path)
         self.config_dir = Path(config_dir) if config_dir else (
             self.path.parent.parent if self.path.parent.name == "managed"
             else self.path.parent.parent / "config"
         )
-        self.data_dir = (self.config_dir.parent / "data"
+        self.data_dir = Path(data_dir) if data_dir is not None else (self.config_dir.parent / "data"
                          if config_dir is not None or self.path.parent.name == "managed"
                          else self.path.parent)
         from quickquip.llm.config_execution_store import ConfigExecutionStore
@@ -339,6 +341,10 @@ class ConfigService:
         from quickquip.llm.config_deployment import prepare
 
         return prepare(self, document, expected_revision, draft=draft, note=_clean_note(note))
+
+    def apply_deployment(self, revision, request_id):
+        """Apply a pinned deployment input without publishing an independent draft."""
+        return self._enqueue("apply", revision, request_id, expected_revision=revision)
 
     @configuration_mutation
     def publish_offline(self, revision, request_id, stopped, *, environment=None):

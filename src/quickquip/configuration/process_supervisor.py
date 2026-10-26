@@ -12,9 +12,8 @@ import uuid
 
 from quickquip.configuration.activity import Lease, directory
 from quickquip.configuration.errors import ConfigError
-from quickquip.configuration.files import write_json
 from quickquip.configuration.process_control import (
-    control_path, held, read_control, supervisor_running,
+    control_path, held, read_control, supervisor_running, write_control,
 )
 
 CHILD_ROLE = "_QUICKQUIP_SERVICE_CHILD"
@@ -65,7 +64,7 @@ class Supervisor:
         self.last_request = None
 
     def _record(self):
-        write_json(control_path(self.root, self.role, "supervisor.json"), {
+        write_control(control_path(self.root, self.role, "supervisor.json"), {
             "format": 1, "id": self.identity, "root": str(self.root), "role": self.role,
             "pid": os.getpid(), "child_pid": self.child.pid if self.child else None,
             "command": self.command, "state": self.state,
@@ -94,7 +93,7 @@ class Supervisor:
 
     def _pause(self):
         if self.child is not None and self.child.poll() is None:
-            write_json(control_path(self.root, self.role, "shutdown.json"), {
+            write_control(control_path(self.root, self.role, "shutdown.json"), {
                 "child": self.child_id,
             })
             try:
@@ -130,20 +129,19 @@ class Supervisor:
         except (OSError, ValueError, subprocess.SubprocessError):
             response["error"] = "Managed service control failed"
         response["state"] = self.state
-        write_json(control_path(self.root, self.role, "response.json"), response)
+        write_control(control_path(self.root, self.role, "response.json"), response)
         return action == "stop" and "error" not in response
 
     def run(self):
         lease = Lease(control_path(self.root, self.role, "supervisor.lock"), create=True)
         try:
-            lease.acquire()
+            lease.acquire(timeout=1)
         except OSError as exc:
             raise ConfigError(
                 "service_running", "Service supervisor already exists", self.role
             ) from exc
         try:
-            if held(directory(self.root) / f"{self.role}.lock"):
-                raise ConfigError("service_running", "Service is already running", self.role)
+            # The child takes the service lease; a status probe can hold it momentarily.
             self._start()
             while True:
                 if self._control():

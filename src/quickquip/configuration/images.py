@@ -96,35 +96,40 @@ def prepare(source, destination, snapshot):
                 "INSERT INTO config_revisions VALUES(?,?,?)", (revision, time.time(), "qqconf pack")
             )
             project_document(connection, document)
-        current = {
-            row["group_id"]: dict(row) for row in connection.execute("SELECT * FROM scope_settings")
-        }
-        fields = asdict(GroupSettingsOverride())
-        for key in current.keys() - snapshot["scopes"].keys():
-            connection.execute("DELETE FROM scope_settings WHERE group_id=?", (key,))
-        for key, settings in snapshot["scopes"].items():
-            values = {**fields, **settings}
-            old = {field: current[key][field] for field in fields} if key in current else None
-            if old == values:
-                continue
-            values["updated_at"] = datetime.now(timezone.utc).isoformat()
-            columns = ["group_id", *values]
+        write_settings(connection, snapshot)
+
+
+def write_settings(connection, snapshot):
+    """Install only managed scope and game settings inside the caller's transaction."""
+    current = {
+        row["group_id"]: dict(row) for row in connection.execute("SELECT * FROM scope_settings")
+    }
+    fields = asdict(GroupSettingsOverride())
+    for key in current.keys() - snapshot["scopes"].keys():
+        connection.execute("DELETE FROM scope_settings WHERE group_id=?", (key,))
+    for key, settings in snapshot["scopes"].items():
+        values = {**fields, **settings}
+        old = {field: current[key][field] for field in fields} if key in current else None
+        if old == values:
+            continue
+        values["updated_at"] = datetime.now(timezone.utc).isoformat()
+        columns = ["group_id", *values]
+        connection.execute(
+            f"INSERT INTO scope_settings({','.join(columns)}) "
+            f"VALUES({','.join('?' for _ in columns)}) ON CONFLICT(group_id) DO UPDATE SET "
+            + ",".join(f"{column}=excluded.{column}" for column in values),
+            (key, *values.values()),
+        )
+    modes = dict(connection.execute("SELECT group_id,text_mode FROM niuniu_group_text"))
+    for key in modes.keys() - snapshot["text_modes"].keys():
+        connection.execute("DELETE FROM niuniu_group_text WHERE group_id=?", (key,))
+    for key, mode in snapshot["text_modes"].items():
+        if modes.get(key) != mode:
             connection.execute(
-                f"INSERT INTO scope_settings({','.join(columns)}) "
-                f"VALUES({','.join('?' for _ in columns)}) ON CONFLICT(group_id) DO UPDATE SET "
-                + ",".join(f"{column}=excluded.{column}" for column in values),
-                (key, *values.values()),
+                "INSERT INTO niuniu_group_text VALUES(?,?) "
+                "ON CONFLICT(group_id) DO UPDATE SET text_mode=excluded.text_mode",
+                (key, mode),
             )
-        modes = dict(connection.execute("SELECT group_id,text_mode FROM niuniu_group_text"))
-        for key in modes.keys() - snapshot["text_modes"].keys():
-            connection.execute("DELETE FROM niuniu_group_text WHERE group_id=?", (key,))
-        for key, mode in snapshot["text_modes"].items():
-            if modes.get(key) != mode:
-                connection.execute(
-                    "INSERT INTO niuniu_group_text VALUES(?,?) "
-                    "ON CONFLICT(group_id) DO UPDATE SET text_mode=excluded.text_mode",
-                    (key, mode),
-                )
 
 
 def same_image(left, right):

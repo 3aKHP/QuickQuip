@@ -1,13 +1,14 @@
 """Local workspace orchestration, independent of server synchronization endpoints."""
 
 import os
-from contextlib import contextmanager
+from contextlib import contextmanager, ExitStack
 from copy import deepcopy
 from pathlib import Path
 import tempfile
 
 from quickquip.common.config_writes import configuration_write, maintenance_owner
 from quickquip.configuration import activity
+from quickquip.configuration.deployment import Deployment, read as deployment_mode
 from quickquip.configuration.errors import ConfigError
 from quickquip.configuration import snapshot as content, images as database, comparison as planning
 from quickquip.config_workspace import transactions
@@ -71,9 +72,15 @@ class Workspace:
         )
 
     @contextmanager
-    def _write(self):
+    def _write(self, mode):
         with self.storage.lock():
-            with activity.offline(self.root) as status:
+            with ExitStack() as leases:
+                if mode.location == "cloud":
+                    for role in ("bot", "web"):
+                        leases.enter_context(activity.stopped_service(self.root, role))
+                    status = "stopped"
+                else:
+                    status = leases.enter_context(activity.offline(self.root))
                 marker = self.root / "data/qqconf/active.json"
                 if marker.exists():
                     if status != "stopped":
@@ -108,8 +115,9 @@ class Workspace:
                 "message": "Run qqconf pack to recover the unfinished write",
             }
         state, tree, workspace, source, target, conflicts = self._inputs(prefer)
+        mode = deployment_mode(self.root)
         with activity.offline(self.root) as status:
-            destination = "source" if status == "stopped" else "candidate"
+            destination = {"cloud": "source", "local": "candidate"}.get(mode.location, "unset")
         result = planning.preview(
             state["base"], workspace, source, target, conflicts, show_secrets=show_secrets
         )
@@ -119,6 +127,8 @@ class Workspace:
             services=status,
             destination=destination,
             candidate_present=candidate.exists(),
+            deployment_location=mode.location,
+            deployment_runtime=mode.runtime,
         )
         if candidate.exists():
             previous = read_json(candidate)
@@ -215,12 +225,18 @@ class Workspace:
             )
 
     def pack(self, *, prefer=None):
-        with self._write() as status:
+        # An interrupted source write may already have replaced or removed root .env.
+        marker = self.root / "data/qqconf/active.json"
+        mode = Deployment("cloud", "source") if marker.exists() else deployment_mode(
+            self.root, required=True
+        )
+        with self._write(mode) as status:
+            mode = deployment_mode(self.root, required=True)
             state, tree, workspace, source, target, conflicts = self._inputs(prefer)
             self._require_resolved(conflicts, prefer)
             before = self._work_files(tree, workspace)
             after = self._render(target, tree, before)
-            destination = "source" if status == "stopped" else "candidate"
+            destination = "source" if mode.location == "cloud" else "candidate"
             state = {**state, "base": target if destination == "source" else source}
             candidate = self.root / ".config-staging"
             if destination == "candidate" and (candidate.exists() or not same(target, source)):
@@ -230,7 +246,7 @@ class Workspace:
             unchanged = (
                 same(target, source)
                 if destination == "source"
-                else (same(target, source) and not candidate.exists())
+                else False
             )
             if destination == "candidate" and candidate.exists():
                 manifest = read_json(candidate / "candidate.json")

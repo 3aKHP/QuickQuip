@@ -151,11 +151,14 @@ def apply_shared(root: Path, incoming: Path, backup: Path) -> None:
         source = incoming / "shared" / name
         if name in SHARED_FILES:
             data = source.read_bytes()
-            if name.endswith((".env", ".sh")) or name == ".env":
+            synchronized_env = (name == ".env" and os.getenv("CONFIG_SYNC_PROTOCOL") == "2"
+                                and os.getenv("CONFIG_SYNC", "off") != "off")
+            if not synchronized_env and (name.endswith((".env", ".sh")) or name == ".env"):
                 data = data.replace(b"\r\n", b"\n")
             deploy_owner = (int(os.environ.get("SUDO_UID", os.getuid())),
                             int(os.environ.get("SUDO_GID", os.getgid())))
-            atomic_write(path, data, SHARED_FILES[name], deploy_owner)
+            mode = stat.S_IMODE(source.stat().st_mode) if synchronized_env else SHARED_FILES[name]
+            atomic_write(path, data, mode, deploy_owner)
         else:
             data = json.loads((backup / name).read_text(encoding="utf-8"))
             connections = data.setdefault("ob11", {}).setdefault("connect", [])

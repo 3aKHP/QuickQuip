@@ -25,11 +25,12 @@
 
 | 编号 | 决策 | 状态 | 替代记录 |
 |---|---|---|---|
-| [ADR-0019](0019-configuration-three-way-sync.md) | 通过共同配置基线协调双向同步 | Accepted | — |
+| [ADR-0019](0019-configuration-three-way-sync.md) | 通过共同配置基线协调双向同步 | Superseded | [ADR-0024](0024-directional-configuration-deployment.md) |
 | [ADR-0020](0020-editable-configuration-workspaces.md) | 以持久 TOML 工作副本编辑配置包 | Superseded | [ADR-0022](0022-local-configuration-workspace-cli.md) |
-| [ADR-0022](0022-local-configuration-workspace-cli.md) | 以 qqconf 统一编辑本地持久化配置 | Accepted | — |
+| [ADR-0022](0022-local-configuration-workspace-cli.md) | 以 qqconf 统一编辑本地持久化配置 | Superseded | [ADR-0024](0024-directional-configuration-deployment.md) |
 | [ADR-0001](0001-config-snapshot-publication.md) | 通过不可变快照发布配置 | Superseded | [ADR-0023](0023-online-and-offline-configuration-publication.md) |
 | [ADR-0023](0023-online-and-offline-configuration-publication.md) | 通过不可变快照完成在线与停服发布 | Accepted | — |
+| [ADR-0024](0024-directional-configuration-deployment.md) | 工作副本与单向配置部署 | Accepted | — |
 | [ADR-0002](0002-business-session-identity.md) | 由业务维护 Session 身份 | Accepted | — |
 | [ADR-0003](0003-epoch-history-freezing.md) | 在纪元内冻结历史表达 | Accepted | — |
 | [ADR-0012](0012-static-prefix-turn-envelope.md) | 将动态轮次信息放入当轮信封 | Accepted | — |

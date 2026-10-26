@@ -50,6 +50,10 @@ QuickQuip 与模型服务交换请求和响应的格式约定，例如 OpenAI Ch
 
 本地配置工作副本 CLI。`unpack` 接收真实配置，`refresh` 只读预览，`pack` 校验并写回真实配置或 `.config-staging/` 候选。配置生效由应用和部署流程负责。见[命令指南](admin/config-workspace.md)。
 
+### qqsync
+
+真实配置同步与生效 CLI。`refresh` 只读预览，`push` 推送配置或安装本地暂存，`pull` 回流线上配置。部署位置和运行方式由真实根 `.env` 决定；服务保持各自原有启停状态。见[命令指南](admin/config-sync.md)。
+
 <a id="config-revision"></a>
 ### 配置修订（Configuration revision）
 

@@ -154,9 +154,10 @@ def test_unpack_refuses_partial_source_before_creating_new_workspace(workspace, 
 
 def test_duplicate_candidate_target_failure_retains_old_candidate(workspace, project, monkeypatch):
     from pathlib import Path
-    from .test_qqconf import edit, provider
+    from .test_qqconf import edit, provider, local_mode
 
     root, _ = project
+    local_mode(root)
     (root / "data/qqconf/services/web.json").unlink()
     edit(provider(workspace), lambda value: value["parameters"].update(temperature=0.2))
     workspace.pack()

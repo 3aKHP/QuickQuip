@@ -2,9 +2,11 @@
 
 from contextlib import contextmanager
 import json
+import errno
 import os
 from pathlib import Path
 import subprocess
+import time
 
 from quickquip.configuration.errors import ConfigError
 from quickquip.llm.config_durability import durable_write
@@ -14,7 +16,7 @@ class Lease:
     def __init__(self, path, *, create=False):
         self.path, self.create, self.stream = Path(path), create, None
 
-    def acquire(self):
+    def acquire(self, *, timeout=0):
         if self.create:
             self.path.parent.mkdir(parents=True, exist_ok=True)
         flags = os.O_RDWR | (os.O_CREAT if self.create else 0)
@@ -29,11 +31,25 @@ class Lease:
                         raise OSError("service lease is not initialized")
                     self.stream.write(b"0")
                     self.stream.seek(0)
-                msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
+                def lock():
+                    msvcrt.locking(descriptor, msvcrt.LK_NBLCK, 1)
             else:
                 import fcntl
 
-                fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                def lock():
+                    fcntl.flock(descriptor, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            deadline = time.monotonic() + timeout
+            while True:
+                try:
+                    lock()
+                    break
+                except OSError as exc:
+                    if (
+                        exc.errno not in (errno.EACCES, errno.EAGAIN)
+                        or time.monotonic() >= deadline
+                    ):
+                        raise
+                    time.sleep(0.01)
         except BaseException:
             self.stream.close()
             self.stream = None
@@ -103,6 +119,13 @@ def require_ready(root):
         raise ConfigError(
             "recovery_required", "Run qqconf pack to recover interrupted configuration"
         )
+    marker = Path(root) / "data/config-sync/maintenance.json"
+    if marker.exists():
+        state = json.loads(marker.read_text(encoding="utf-8"))
+        if state.get("protocol") == 2 and not state.get("allow_start", False):
+            raise ConfigError(
+                "recovery_required", "Repeat qqsync push or pull to finish installation"
+            )
 
 
 @contextmanager
@@ -110,7 +133,8 @@ def service_guard(root, role):
     path = directory(root)
     lease = Lease(path / f"{role}.lock", create=True)
     try:
-        lease.acquire()
+        # Status probes briefly take this same lock while checking whether it is free.
+        lease.acquire(timeout=1)
     except OSError as exc:
         raise ConfigError(
             "configuration_busy", "Service or configuration writer holds its lease"

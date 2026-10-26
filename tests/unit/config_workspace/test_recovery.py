@@ -12,7 +12,7 @@ from quickquip.configuration import snapshot as content
 from quickquip.config_workspace import transactions
 from quickquip.config_workspace.service import Workspace
 
-from .test_qqconf import edit, files, provider
+from .test_qqconf import edit, files, provider, local_mode
 
 
 def crash(root, patch, action="pack"):
@@ -84,6 +84,21 @@ transactions.install_database = interrupt
     assert (root / "data/config_runtime.db").read_bytes() == runtime
 
 
+def test_source_crash_recovers_route_before_reading_replaced_env(workspace, project):
+    root, _ = project
+    (workspace.storage.directory / ".env").write_text("PORT=5800\n")
+    crash(root, """
+original = transactions.install
+def interrupt(*args):
+    original(*args)
+    os._exit(71)
+transactions.install = interrupt
+""")
+    assert "QUICKQUIP_DEPLOY_LOCATION" not in (root / ".env").read_text()
+    assert workspace.pack()["destination"] == "source"
+    assert not workspace._pending()
+
+
 def test_recovery_preserves_unrelated_external_database_edit(workspace, project):
     root, service = project
     edit(provider(workspace), lambda value: value["parameters"].update(temperature=0.2))
@@ -113,6 +128,7 @@ def test_candidate_crash_recovers_and_committed_receipt_keeps_later_edits(
     workspace, project, receipt
 ):
     root, _ = project
+    local_mode(root)
     (root / "data/qqconf/services/web.json").unlink()
     edit(provider(workspace), lambda value: value["parameters"].update(temperature=0.2))
     workspace.pack()
