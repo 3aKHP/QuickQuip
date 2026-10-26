@@ -62,9 +62,23 @@ def describe(root, release=None):
     }
 
 
+def candidate(description, files, path_type=Path):
+    application = path_type(description["application"])
+    name = next((name for name in COMPOSE_NAMES if name in files), None)
+    if name is None:
+        raise ValueError("Candidate has no Compose file")
+    compose = application / name
+    overrides = [
+        str(path)
+        for suffix in (".override.yml", ".override.yaml")
+        if str((path := compose.with_name(compose.stem + suffix)).relative_to(application)) in files
+    ]
+    return {**description, "compose": str(compose), "overrides": overrides}
+
+
 if __name__ == "__main__":
     try:
-        print(json.dumps(describe(sys.argv[1])))
+        print(json.dumps(describe(sys.argv[1], sys.argv[2] if len(sys.argv) > 2 else None)))
     except (ValueError, OSError):
         print('{"error":"Deployment layout is unavailable"}')
         raise SystemExit(1)

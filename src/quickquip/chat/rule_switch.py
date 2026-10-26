@@ -133,7 +133,11 @@ class GroupRuleSwitch:
                 self.disabled[str(gid)] = valid
 
     def save(self, path: str | Path) -> None:
-        save_json(path, self.to_dict())
+        value = self.to_dict()
+        previous = load_json(path)
+        if previous == value or (previous is None and not value and not Path(path).exists()):
+            return
+        save_json(path, value)
 
     def load(self, path: str | Path) -> None:
         data = load_json(path)

@@ -44,16 +44,24 @@ def resume(root, record):
     remote = SSHRemote(destination["host"], destination["root"])
     sync = Synchronizer(Endpoint(root), remote)
     controller = Native(root)
-    original = controller.inspect()
-    controller.pause(original)
+    original = record.get("native_services")
+    if original is None:
+        original = controller.inspect()
+        record["native_services"] = original
+        sync.local.state.write(f"clients/{record['id']}.json", record)
     try:
+        controller.pause(original)
         with ExitStack() as leases:
             for role in ("bot", "web"):
                 leases.enter_context(stopped_service(root, role))
             try:
                 result = sync.resume(record["id"])
             except ConfigError as error:
-                if error.code not in ("deployment_not_started", "sync_recovered"):
+                if error.code not in (
+                    "deployment_not_started",
+                    "sync_recovered",
+                    "recovery_required",
+                ):
                     raise
                 result = sync.recover(record["id"], services_stopped=True)
     finally:

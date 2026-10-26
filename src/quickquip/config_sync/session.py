@@ -186,7 +186,10 @@ class Session:
                 "direction": direction,
                 "prefer": prefer,
             }
-            if same(record["target"], record["before"]["snapshot"]):
+            if same(record["target"], record["before"]["snapshot"]) and (
+                record["route"]["location"] != "local"
+                or same(record["target"]["document"], record["before"]["draft"])
+            ):
                 self._acknowledge(record)
                 self._consume(record)
                 return {"phase": "unchanged", "direction": direction}
@@ -231,18 +234,19 @@ class Session:
                         "target": record["target"],
                         "publish": record["publish"],
                         "prefer": record["prefer"],
+                        "retain_draft": mode.location != "local",
                     },
                 )
                 self._save(record, "prepared")
             if record["phase"] in ("prepared", "installing"):
-                if not record["hot"]:
-                    receiver.controller.pause(record["original"])
-                self._save(record, "installing")
                 environment = (
                     receiver.controller.environment(record["target"])
                     if receiver.runtime == "docker"
                     else None
                 )
+                if not record["hot"]:
+                    receiver.controller.pause(record["original"])
+                self._save(record, "installing")
                 receiver.call(
                     "install", {**operation, "hot": record["hot"], "environment": environment}
                 )

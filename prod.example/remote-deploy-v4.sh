@@ -374,15 +374,17 @@ finish() {
     fi
     if [ "$Succeeded" = 0 ] && [ -n "$SyncOperation" ] && [ "$Changed" = 1 ] \
         && [ "$ConfigSyncProtocol" = 2 ]; then
-        compose "$Id" stop quickquip web-admin || exit 2
+        QUICKQUIP_ENV_FILE="$Incoming/shared/.env" compose "$Id" stop quickquip web-admin || exit 2
         shared_state restore "$Root" "$Backup" || exit 2
     fi
     if [ "$Succeeded" = 0 ] && [ -n "$SyncOperation" ]; then
         if [ "$Activated" = 1 ]; then
             RecoveryRelease="$Id"
             if [ "$ConfigSyncProtocol" = 2 ]; then RecoveryRelease="$Prev"; fi
-            if ! compose "$Id" stop quickquip web-admin \
-                || ! sync_rpc "$RecoveryRelease" recover --operation "$SyncOperation" --services-stopped; then
+            if [ "$ConfigSyncProtocol" != 2 ]; then
+                compose "$Id" stop quickquip web-admin || exit 2
+            fi
+            if ! sync_rpc "$RecoveryRelease" recover --operation "$SyncOperation" --services-stopped; then
                 step "CONFIG RECOVERY FAILED; preserve operation $SyncOperation and $Incoming"
                 exit 2
             fi

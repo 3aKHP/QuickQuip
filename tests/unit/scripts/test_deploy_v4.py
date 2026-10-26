@@ -961,3 +961,46 @@ def test_storage_migration_precedes_start_and_reverses_before_old_release(deploy
             assert connection.execute("SELECT text_mode FROM niuniu_group_text").fetchone() == (
                 "safe",
             )
+
+
+def test_configuration_rollback_stops_candidate_with_its_staged_environment(tmp_path):
+    script = (Path(__file__).resolve().parents[3] / 'prod.example/remote-deploy-v4.sh').read_text()
+    finish = script[script.index('finish() {'):script.index('\ntrap finish EXIT')]
+    root = tmp_path / 'root'
+    incoming = root / '.deploy/incoming/new'
+    (incoming / 'shared').mkdir(parents=True)
+    (incoming / 'shared/.env').write_text('NEW_REQUIRED=present\n')
+    (root / '.env').write_text('NEW_REQUIRED=present\n')
+    trace = tmp_path / 'trace'
+    import shlex
+    program = f'''
+Root={shlex.quote(str(root))}
+Incoming={shlex.quote(str(incoming))}
+Trace={shlex.quote(str(trace))}
+Backup="$Incoming/backup"
+Action=deploy; RecoveryReady=0; Succeeded=0; StorageBackup=""
+SyncOperation=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ConfigSyncProtocol=2; Changed=1; Activated=1; ServicesStopped=1
+Prev=old; Id=new; OriginalCurrent=old; PrevPrevious=older; SharedSudo=0
+step() {{ echo "$*"; }}
+compose() {{
+    if [ "$1" = new ] && ! grep -q NEW_REQUIRED "$QUICKQUIP_ENV_FILE"; then return 1; fi
+    echo "stop:$1" >> "$Trace"
+}}
+shared_state() {{ printf 'OLD=present\\n' > "$Root/.env"; }}
+sync_rpc() {{ echo "config:$2" >> "$Trace"; }}
+set_link() {{ echo "link:$1:$2" >> "$Trace"; }}
+verify_release() {{ return 0; }}
+up() {{ echo "start:$1" >> "$Trace"; }}
+health() {{ return 0; }}
+{finish}
+trap finish EXIT
+exit 1
+'''
+    result = subprocess.run(['bash', '-c', program], text=True, capture_output=True, timeout=10)
+    assert result.returncode == 1, result.stdout + result.stderr
+    events = trace.read_text().splitlines()
+    assert events.count('stop:new') == 1
+    assert 'config:recover' in events
+    assert 'start:old' in events
+    assert 'config:recovery-verified' in events

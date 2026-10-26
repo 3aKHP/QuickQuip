@@ -46,3 +46,28 @@ def test_unlaunched_deployment_recovers_receiver_and_keeps_sender_changes(tmp_pa
         assert local.read()["document"] == original_local
     for root in roots:
         assert not (root / "data/config-sync/maintenance.json").exists()
+
+
+def test_pull_interrupted_before_local_prepare_releases_client_state(tmp_path, monkeypatch):
+    from quickquip.configuration.errors import ConfigError
+
+    roots = [tmp_path / name for name in ("local", "remote")]
+    for root in roots:
+        root.mkdir()
+        ConfigService(root / "config/managed/config.db").initialize()
+        (root / ".env").write_text(
+            "QUICKQUIP_DEPLOY_LOCATION=cloud\nQUICKQUIP_DEPLOY_RUNTIME=docker\n"
+        )
+    original = Local.call
+
+    def disconnect(self, action, body=None):
+        if self.root == roots[0] and action == "prepare":
+            raise ConfigError("transport_error", "lost local preparation")
+        return original(self, action, body)
+
+    monkeypatch.setattr(Local, "call", disconnect)
+    session = Session(roots[0], remote_factory=lambda *_: Local(roots[1]))
+    with pytest.raises(ConfigError, match="lost local"):
+        prepare(session, "pull")
+    assert finish(session)["phase"] == "recovered"
+    assert session.pending() is None

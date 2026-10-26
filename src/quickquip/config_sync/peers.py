@@ -18,6 +18,8 @@ def response(raw):
         raise ConfigError("protocol_error", "Configuration response is invalid") from None
     if "error" in result:
         error = result["error"]
+        if not isinstance(error, dict):
+            raise ConfigError("remote_command_failed", "Remote deployment layout is unavailable")
         raise ConfigError(error["code"], error["message"], details=error.get("details"))
     return result
 
@@ -99,6 +101,10 @@ class Remote:
             raise ConfigError(
                 "upgrade_required", "Upgrade remote code with --config-sync off first"
             )
+        if result.returncode == 77:
+            raise ConfigError(
+                "remote_command_failed", "Remote command failed; inspect service logs"
+            )
         if result.returncode:
             raise ConfigError(
                 "transport_error", "SSH operation failed; repeat the same qqsync command"
@@ -107,7 +113,9 @@ class Remote:
 
     def _run(self, command, environment, cwd, payload):
         exports = " ".join(f"{key}={shlex.quote(value)}" for key, value in environment.items())
-        return self._ssh(f"cd {shlex.quote(cwd)} && env {exports} {shlex.join(command)}", payload)
+        return self._ssh(
+            f"cd {shlex.quote(cwd)} && env {exports} {shlex.join(command)} || exit 77", payload
+        )
 
     def call(self, action, body=None):
         if self.runtime == "docker":

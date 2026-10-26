@@ -45,6 +45,7 @@ def execute(root, action, body):
             body["target"],
             publish=body["publish"],
             prefer=body.get("prefer"),
+            retain_draft=body.get("retain_draft", True),
         )
     if action == "inspect":
         record = installation.read(body["operation"])

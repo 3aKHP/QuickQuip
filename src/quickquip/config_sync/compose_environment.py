@@ -54,6 +54,8 @@ def resolve(description, files):
         if result.returncode:
             raise ValueError("Candidate Compose validation failed")
         services = json.loads(result.stdout)["services"]
+        if "web-admin" not in services:
+            raise ValueError("Configuration helper requires the web-admin service")
         return {
             "environment": services["quickquip"].get("environment", {}),
             "services": list(services),
@@ -65,5 +67,6 @@ if __name__ == "__main__":
         payload = json.load(sys.stdin)
         print(json.dumps(resolve(payload["description"], payload["files"])))
     except (OSError, ValueError, KeyError, subprocess.SubprocessError):
-        print('{"error":"Candidate Compose validation failed"}')
-        raise SystemExit(1)
+        print(
+            '{"error":{"code":"invalid_compose","message":"Candidate Compose validation failed"}}'
+        )

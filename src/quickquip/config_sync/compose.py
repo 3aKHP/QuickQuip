@@ -6,7 +6,7 @@ from pathlib import Path, PurePosixPath
 import subprocess
 import time
 
-from quickquip.config_sync.discovery import describe
+from quickquip.config_sync.discovery import describe, candidate
 from quickquip.configuration.errors import ConfigError
 
 
@@ -24,6 +24,7 @@ class Compose:
             raise ConfigError("compose_missing", "No real Compose file exists in this project")
 
     def run(self, arguments, *, payload=None):
+        self.refresh()
         environment = {
             "QUICKQUIP_ROOT": str(self.root),
             "QUICKQUIP_ENV_FILE": str(self.root / ".env"),
@@ -34,6 +35,20 @@ class Compose:
         for override in self.overrides:
             command.extend(["-f", override])
         return self.runner([*command, *arguments], environment, str(self.file.parent), payload)
+
+    def refresh(self):
+        release = self.application.name if self.application != self.root else None
+        if self.remote:
+            script = Path(__file__).with_name("discovery.py").read_text(encoding="utf-8")
+            command = ["python3", "-c", script, str(self.root)] + ([release] if release else [])
+            description = json.loads(self.runner(command, {}, str(self.root), None))
+            path = PurePosixPath
+        else:
+            description, path = describe(self.root, release), Path
+        if description.get("compose") is None:
+            raise ConfigError("compose_missing", "No installed Compose file exists")
+        self.description = description
+        self.file, self.overrides = path(description["compose"]), description["overrides"]
 
     @staticmethod
     def _run(command, environment, cwd, payload):
@@ -53,16 +68,14 @@ class Compose:
         return result.stdout
 
     def inspect(self):
+        definition = json.loads(self.run(["config", "--format", "json"]))
         raw = self.run(["ps", "--all", "--format", "json"]).strip()
         rows = (
             json.loads(raw)
             if raw.startswith("[")
             else [json.loads(line) for line in raw.splitlines() if line]
         )
-        services = {
-            name: {"running": False, "id": None}
-            for name in self.run(["config", "--services"]).splitlines()
-        }
+        services = {name: {"running": False, "id": None} for name in definition["services"]}
         for row in rows:
             if row.get("Service") in services:
                 services[row["Service"]] = {
@@ -73,14 +86,39 @@ class Compose:
             "bot": services.get("quickquip", {"running": False}),
             "web": services.get("web-admin", {"running": False}),
             "services": services,
+            "project": definition["name"],
         }
 
     def pause(self, original):
-        ids = [
-            value["id"]
-            for value in original["services"].values()
-            if value["running"] and value["id"]
-        ]
+        current = self.inspect()
+        ids = []
+        for project in {original["project"], current["project"]}:
+            raw = self.runner(
+                [
+                    "docker",
+                    "ps",
+                    "--all",
+                    "--filter",
+                    "label=com.docker.compose.project=" + project,
+                    "--filter",
+                    "label=com.docker.compose.oneoff=False",
+                    "--format",
+                    "{{json .}}",
+                ],
+                {},
+                str(self.root),
+                None,
+            )
+            for line in raw.splitlines():
+                row = json.loads(line)
+                labels = dict(
+                    item.split("=", 1) for item in row["Labels"].split(",") if "=" in item
+                )
+                service = labels.get("com.docker.compose.service")
+                if service in original["services"] and row["State"] == "running":
+                    if not original["services"][service]["running"]:
+                        raise ConfigError("service_state_changed", "A stopped service was started")
+                    ids.append(row["ID"])
         if ids:
             self.runner(["docker", "stop", "--time", "45", *ids], {}, str(self.root), None)
 
@@ -96,11 +134,31 @@ class Compose:
             if all(
                 current.get(name, {}).get("running", False) == value["running"]
                 for name, value in original["services"].items()
-            ):
+            ) and (not original["web"]["running"] or self.web_ready()):
                 return
             if time.monotonic() >= deadline:
                 raise ConfigError("service_start_failed", "Compose consumer states differ")
             time.sleep(0.2)
+
+    def web_ready(self):
+        program = """import os, urllib.request, urllib.error
+host = '[::1]' if ':' in os.getenv('WEB_ADMIN_HOST', '') else '127.0.0.1'
+url = 'http://' + host + ':' + os.getenv('WEB_ADMIN_PORT', '5104') + '/ops/api/auth/me'
+opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+try:
+    with opener.open(url, timeout=1) as response:
+        print('ready' if response.status == 200 else 'waiting')
+except urllib.error.HTTPError as error:
+    print('ready' if error.code == 401 else 'waiting')
+except Exception:
+    print('waiting')
+"""
+        try:
+            return self.run(["exec", "-T", "web-admin", "python", "-c", program]).strip() == "ready"
+        except ConfigError as error:
+            if error.code in ("compose_failed", "remote_command_failed"):
+                return False
+            raise
 
     def call(self, action, payload):
         # A private one-off helper sees the host's real files, even while Web is stopped.
@@ -146,15 +204,27 @@ class Compose:
         return result
 
     def environment(self, snapshot):
-        if not self.remote:
-            from quickquip.config_sync.compose_environment import resolve
+        try:
+            description = candidate(
+                self.description, snapshot["files"], PurePosixPath if self.remote else Path
+            )
+            if not self.remote:
+                from quickquip.config_sync.compose_environment import resolve
 
-            return resolve(self.description, snapshot["files"])["environment"]
-        script = Path(__file__).with_name("compose_environment.py").read_text(encoding="utf-8")
-        raw = self.runner(
-            ["python3", "-c", script],
-            {},
-            str(self.root),
-            {"description": self.description, "files": snapshot["files"]},
-        )
-        return json.loads(raw)["environment"]
+                result = resolve(description, snapshot["files"])
+            else:
+                script = (
+                    Path(__file__).with_name("compose_environment.py").read_text(encoding="utf-8")
+                )
+                raw = self.runner(
+                    ["python3", "-c", script],
+                    {},
+                    str(self.root),
+                    {"description": description, "files": snapshot["files"]},
+                )
+                result = json.loads(raw)
+            if "error" in result:
+                raise ValueError("Candidate validation failed")
+            return result["environment"]
+        except (ValueError, KeyError, OSError, subprocess.SubprocessError):
+            raise ConfigError("invalid_compose", "Candidate Compose validation failed") from None

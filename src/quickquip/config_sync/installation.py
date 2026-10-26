@@ -60,7 +60,7 @@ class Installation:
                 )
             yield record
 
-    def prepare(self, operation, expected, target, *, publish, prefer=None):
+    def prepare(self, operation, expected, target, *, publish, prefer=None, retain_draft=True):
         identifier(operation)
         with maintenance_owner(operation), configuration_write(self.root / "data"):
             existing = self.state.read(self._name(operation))
@@ -69,6 +69,8 @@ class Installation:
                     raise ConfigError(
                         "operation_conflict", "Prepared operation has different input"
                     )
+                if existing["phase"] in ("prepared", "staged"):
+                    self._marker(existing, allow_start=True)
                 return self.summary(existing)
             current = capture.read(self.layout, "published" if publish else "draft")
             if current != expected:
@@ -77,7 +79,7 @@ class Installation:
                 raise ConfigError("operation_conflict", "Finish the pending configuration apply")
             target = validate(target)
             draft = target["document"]
-            if publish:
+            if publish and retain_draft:
                 conflicts = []
                 draft = reconcile(
                     current["published"],
@@ -101,6 +103,7 @@ class Installation:
                 "target": target,
                 "draft": draft,
                 "publish": publish,
+                "retain_draft": retain_draft,
                 "application": str(self.layout.application),
             }
             self.save(record)
@@ -114,6 +117,8 @@ class Installation:
     def install(self, operation, *, hot=False, environment=None):
         with self.owned(operation) as record:
             if record["phase"] in ("installed", "confirmed"):
+                if record["phase"] == "installed":
+                    self._marker(record, allow_start=True)
                 return self.summary(record)
             if record["phase"] not in ("prepared", "staged", "writing"):
                 raise ConfigError("operation_conflict", "Operation is being recovered")
@@ -177,7 +182,24 @@ class Installation:
                 )
             actual = capture.read(self.layout, "published" if record["publish"] else "draft")
             if not same(actual["snapshot"], record["target"]) or actual["draft"] != record["draft"]:
-                raise ConfigError("revision_conflict", "Installed configuration changed")
+                changed = [
+                    key
+                    for key in ("document", "scopes", "text_modes")
+                    if not same(actual["snapshot"][key], record["target"][key])
+                ]
+                changed += [
+                    name
+                    for name in actual["snapshot"]["files"].keys()
+                    | record["target"]["files"].keys()
+                    if actual["snapshot"]["files"].get(name) != record["target"]["files"].get(name)
+                ]
+                if actual["draft"] != record["draft"]:
+                    changed.append("draft")
+                raise ConfigError(
+                    "revision_conflict",
+                    "Installed configuration changed",
+                    details={"fields": sorted(changed)},
+                )
             return self.summary(record)
 
     def confirm(self, operation):
@@ -192,6 +214,8 @@ class Installation:
     def restore(self, operation, *, environment=None):
         with self.owned(operation) as record:
             if record["phase"] in ("restored", "recovered"):
+                if record["phase"] == "restored":
+                    self._marker(record, allow_start=True)
                 return self.summary(record)
             if record["phase"] == "confirmed":
                 raise ConfigError(
@@ -218,23 +242,25 @@ class Installation:
                         "WHERE request_id=? AND status IN ('queued','running')",
                         ("qqsync-" + operation,),
                     )
-                restored = service.prepare_deployment(
-                    before["published"],
-                    current["revision"],
-                    draft=before["draft"],
-                    note="qqsync recovery",
-                )
+                if "recovery_revision" not in record:
+                    restored = service.prepare_deployment(
+                        before["published"],
+                        current["revision"],
+                        draft=before["draft"],
+                        note="qqsync recovery",
+                    )
+                    record["recovery_revision"] = restored["revision"]
+                    self.save(record)
                 with service.store.connect(write=True) as connection:
                     write_settings(connection, before["snapshot"])
                 if record["publish"]:
                     service.publish_offline(
-                        restored["revision"],
+                        record["recovery_revision"],
                         "qqsync-recovery-" + operation,
                         stopped,
                         environment=environment,
                     )
                 record["phase"] = "restored"
-                record["recovery_revision"] = restored["revision"]
                 self.save(record)
                 self._marker(record, allow_start=True)
             return self.summary(record)

@@ -100,3 +100,59 @@ def test_independent_draft_conflict_is_reported_before_any_file_write(receiver):
     assert error.value.code == "draft_conflict"
     assert read(install.layout, "published") == before
     assert not (install.root / "data/config-sync/maintenance.json").exists()
+
+
+@pytest.mark.parametrize("phase", ["installed", "restored"])
+def test_retry_finishes_start_fence_after_completion_receipt(receiver, monkeypatch, phase):
+    install, _ = receiver
+    before = read(install.layout, "published")
+    target = deepcopy(before["snapshot"])
+    target["document"]["settings"]["runtime"]["history_limit"] = 19
+    operation = uuid.uuid4().hex
+    install.prepare(operation, before, target, publish=True)
+    marker = install._marker
+
+    def interrupt(record, **kwargs):
+        if record["phase"] == phase:
+            raise OSError("lost start-fence acknowledgement")
+        marker(record, **kwargs)
+
+    monkeypatch.setattr(install, "_marker", interrupt)
+    if phase == "restored":
+        install.install(operation)
+    method = install.install if phase == "installed" else install.restore
+    with pytest.raises(OSError):
+        method(operation)
+    monkeypatch.setattr(install, "_marker", marker)
+    method(operation)
+    with service_guard(install.root, "bot"):
+        pass
+
+
+def test_recovery_reuses_committed_revision_with_an_independent_draft(receiver, monkeypatch):
+    install, service = receiver
+    draft = service.read()["document"]
+    draft["settings"]["runtime"]["memory_limit"] = 17
+    service.replace(draft, 1)
+    before = read(install.layout, "published")
+    target = deepcopy(before["snapshot"])
+    target["document"]["settings"]["runtime"]["history_limit"] = 19
+    operation = uuid.uuid4().hex
+    install.prepare(operation, before, target, publish=True)
+    install.install(operation)
+    save = install.save
+
+    def interrupt(record):
+        if record["phase"] == "restored":
+            raise OSError("lost recovery acknowledgement")
+        save(record)
+
+    monkeypatch.setattr(install, "save", interrupt)
+    with pytest.raises(OSError):
+        install.restore(operation)
+    revision = service.read("published")["revision"]
+    monkeypatch.setattr(install, "save", save)
+    install.restore(operation)
+    install.recovered(operation)
+    assert service.read("published")["revision"] == revision
+    assert service.read()["document"] == before["draft"]

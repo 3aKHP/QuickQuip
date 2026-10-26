@@ -123,3 +123,28 @@ def test_missing_modes_allow_reading_but_pack_requires_explicit_real_environment
         workspace.pack()
     assert error.value.code == "deployment_mode_required"
     assert tree(root) == before
+
+
+@pytest.mark.parametrize("target_history", [10, 30])
+def test_local_staging_edits_existing_draft_without_false_conflict(tmp_path, target_history):
+    import tomlkit
+
+    root = tmp_path / "local"
+    service = project(root, "local")
+    original = service.read()["document"]
+    original["settings"]["runtime"]["history_limit"] = 20
+    service.replace(original, 1)
+    workspace = Workspace(root=root)
+    workspace.unpack()
+    runtime = workspace.storage.directory / "db/llm/settings/runtime.toml"
+    contents = tomlkit.parse(runtime.read_text())
+    contents["history_limit"] = target_history
+    runtime.write_text(tomlkit.dumps(contents))
+    workspace.pack()
+    assert Session(root).run("push")["phase"] == "confirmed"
+    for source in ("draft", "published"):
+        assert (
+            service.read(source)["document"]["settings"]["runtime"]["history_limit"]
+            == target_history
+        )
+    assert not (root / ".config-staging").exists()

@@ -78,6 +78,7 @@ def _restore_local(session, local, record):
             local.call("inspect", operation)
         except ConfigError as error:
             if error.code == "operation_missing":
+                session._save(record, "recovered")
                 return
             raise
         local.controller.pause(record["original"])
