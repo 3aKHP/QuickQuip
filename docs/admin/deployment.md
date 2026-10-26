@@ -1,6 +1,6 @@
-# QuickQuip 云端部署指南
+# QuickQuip 云端 Docker 部署指南
 
-本文面向 Linux 服务器部署者，介绍自动发布与手动安装、首次登录及日常维护。LLM 配置与升级见[配置管理](llm-configuration.md)，外部工具接入见[MCP 接入指南](mcp-servers.md)。
+本文面向 Linux 服务器上的 Docker Compose 部署，介绍自动发布与手动安装、首次登录及日常维护。部署位置与运行方式的定义，以及本地、源码安装入口见[安装与部署方式](installation.md)。LLM 配置与升级见[配置管理](llm-configuration.md)，外部工具接入见[MCP 接入指南](mcp-servers.md)。
 
 ## 前提条件
 

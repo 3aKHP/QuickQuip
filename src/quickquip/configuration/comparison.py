@@ -4,9 +4,9 @@ from copy import deepcopy
 import difflib
 import re
 
-from quickquip.config_workspace import text
-from quickquip.config_workspace.inventory import body, entry
-from quickquip.config_workspace.merge import MISSING, differences, reconcile, same
+from quickquip.configuration import text
+from quickquip.configuration.inventory import body, entry
+from quickquip.configuration.merge import MISSING, differences, reconcile, same
 
 _SECRET = re.compile(r"password|secret|token|api.?key|authorization|cookie", re.I)
 _CREDENTIAL_URL = re.compile(r"[a-z][a-z0-9+.-]*://[^\s/@:]+:[^\s/@]+@", re.I)

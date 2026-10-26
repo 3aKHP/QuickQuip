@@ -9,11 +9,13 @@ import tempfile
 from quickquip.common.config_writes import configuration_write, maintenance_owner
 from quickquip.configuration import activity
 from quickquip.configuration.errors import ConfigError
-from quickquip.config_workspace import content, database, planning, transactions
-from quickquip.config_workspace.inventory import entry, safe_path
+from quickquip.configuration import snapshot as content, images as database, comparison as planning
+from quickquip.config_workspace import transactions
+from quickquip.configuration.inventory import entry, safe_path
 from quickquip.config_workspace.layout import read_tree, workspace_files
-from quickquip.config_workspace.merge import same
-from quickquip.config_workspace.storage import FORMAT, Storage, read_json
+from quickquip.configuration.merge import same
+from quickquip.config_workspace.storage import FORMAT, Storage
+from quickquip.configuration.files import read_json
 
 
 def validate_location(directory, root):

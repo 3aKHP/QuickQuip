@@ -15,7 +15,7 @@ LLM 配置示例为导出 JSON 中的字段片段；请在 Web Admin“LLM 配�
 | `DRIVER` | NoneBot2 驱动器；正向 WebSocket 连接 OneBot 协议端时需包含 `~websockets` | `~fastapi+~websockets` |
 | `HOST` | 监听地址 | `0.0.0.0` |
 | `PORT` | 监听端口 | `8080` |
-| `QQ_ACCOUNT` | QQ 号（云端部署必填） | — |
+| `QQ_ACCOUNT` | QQ 号（项目 Compose 模板启动 LLBot 时必填） | — |
 | `ONEBOT_WS_URLS` | OneBot V11 WebSocket 地址列表 | — |
 | `ONEBOT_ACCESS_TOKEN` | OneBot 接入令牌 | — |
 | `TZ` | 容器与进程时区（日志、定时任务展示时间等） | `Asia/Shanghai` |

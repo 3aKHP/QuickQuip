@@ -11,8 +11,8 @@ import yaml
 from yaml.nodes import MappingNode, ScalarNode, SequenceNode
 
 from quickquip.configuration.errors import ConfigError
-from quickquip.config_workspace.codec import render_table
-from quickquip.config_workspace.merge import same
+from quickquip.configuration.toml import render_table
+from quickquip.configuration.merge import same
 
 
 def kind(name):

@@ -4,7 +4,9 @@
 
 ## 职责与布局
 
-`quickquip.config_workspace` 提供 `qqconf unpack|refresh|pack` 及等价 Python 模块入口。它连接本地真实配置与可编辑工作副本；服务器同步不读取工作副本。SQLite schema 4 的可编辑部分映射为 `db/` 下的业务 TOML，其余配置保留真实相对路径和格式。目录成员由 `inventory.py` 与 `layout.py` 发现，无需逐文件登记。
+`quickquip.config_workspace` 提供 `qqconf unpack|refresh|pack` 及等价 Python 模块入口。它连接本地真实配置与可编辑工作副本；服务器同步不读取工作副本。SQLite schema 4 的可编辑部分映射为 `db/` 下的业务 TOML，其余配置保留真实相对路径和格式。受管成员由 `configuration.inventory` 发现，工作副本布局由 `config_workspace.layout` 管理，无需逐文件登记。
+
+配置逻辑快照、字段合并、原格式文本处理和持久文件安装由 `quickquip.configuration` 提供。工作副本的值编码、文件布局、编辑基线及恢复事务由 `quickquip.config_workspace` 独立拥有。
 
 `.qqconf/state.json` 的格式版本为 2，保存来源根、共同基线及最近候选目标。工作副本绑定来源绝对路径。供应商、风格和作用域以正文 ID 为身份；文件名可读，碰撞时追加数字。供应商顺序文件可选，新成员自动追加；模型和别名保留文档顺序。
 

@@ -1,5 +1,7 @@
 # QuickQuip Production Template
 
+These drivers publish Docker Compose services to a remote Linux host over SSH. Containers built from source or using source bind mounts follow the same Docker runtime. See [installation and deployment modes](../docs/admin/installation.md) for the local/remote and source/Docker definitions and installation routes.
+
 Copy this directory to the ignored `prod/` directory, then configure your SSH alias, compose topology and the project-root `.env`.
 
 ```bash
