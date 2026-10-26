@@ -133,7 +133,7 @@ def test_offline_preflight_uses_the_same_environment_priority_as_native_startup(
     deployment, monkeypatch
 ):
     root, service = deployment
-    (root / ".env").write_text("SYNTHETIC_KEY=file-value\n", encoding="utf-8")
+    (root / ".env").write_text("# 配置\nSYNTHETIC_KEY=file-value\n", encoding="utf-8")
     monkeypatch.setenv("SYNTHETIC_KEY", "")
     document = service.read()["document"]
     document["providers"] = [{

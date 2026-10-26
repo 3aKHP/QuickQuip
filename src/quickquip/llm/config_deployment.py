@@ -71,7 +71,7 @@ def _environment(service):
     # Match load_root_env_file(override=False) in the process being restarted.
     values = {
         key: value for key, value in DotEnv(
-            service.config_dir.parent / ".env", override=False
+            service.config_dir.parent / ".env", override=False, encoding="utf-8"
         ).dict().items()
         if value is not None
     }
