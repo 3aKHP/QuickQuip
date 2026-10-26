@@ -22,6 +22,8 @@ Copy-Item prod.example/docker-compose.yml prod/docker-compose.yml
 
 已有 `prod/` 保留自己的配置。更新项目代码会更新通用程序，部署时自动上传所需服务器程序。
 
+已有 Compose 中的 `dockerfile: prod/Dockerfile` 可继续由部署脚本使用；部署时会从仓库中的生产 Dockerfile 生成发行目录内的兼容构建文件。手动在项目根目录构建时，将该字段更新为 `docker/Dockerfile.prod`。
+
 ## 目录职责
 
 | 路径 | 内容 |

@@ -107,6 +107,8 @@ Successful operations remove private staging and rollback copies, retaining `.de
 
 ## Migration and Recovery
 
+Production builds use the tracked `docker/Dockerfile.prod`. Existing Compose files may retain `build.dockerfile: prod/Dockerfile`: deployment creates that compatibility build file inside each candidate release from the tracked source, including when configuration is pulled from the server. The private deployment-root `prod/` keeps its configuration. New Compose configurations use `docker/Dockerfile.prod` directly.
+
 `--migrate` snapshots the server's existing application files and pins actual running images of `llbot`, `quickquip` and `web-admin` as a baseline, then deploys the local candidate. Flat files remain in place so existing bind mounts stay valid during preparation. Custom services or unsupported external bind mounts require an explicit migration design; the script stops before activation. Baselines are not automatically collected.
 
 Automatic recovery restores pre-operation shared files, links and containers, then verifies health. Manual rollback selects an existing release and its local images, retains the current root `.env`, runtime data and the shared `skills/` catalog (applying the same non-destructive merge from the rollback target's `skills/` when its compose consumes the shared catalog), and verifies health. Historical releases whose compose mounts a release-local `skills/` keep using that frozen copy when rolled back. Missing rollback images are never pulled or rebuilt. Do not prune retained release tags manually.
@@ -160,6 +162,6 @@ Local editing uses [qqconf](../../docs/admin/config-workspace.md). With cloud de
 
 ## Private deployment hook
 
-A deployment-specific integration can live in `prod/hooks/deployment.sh`. The client uploads it as a private shared asset when present. After successful activation or rollback, the worker calls it as `bash deployment.sh <action> <version> <release>` under the deployment user, with a 30-second limit. Hook failure is logged after the release outcome has been established.
+A deployment-specific integration can live in `prod/hooks/deployment.sh`. The client uploads it as a private shared asset when present. After successful activation or rollback, the worker calls it as `bash deployment.sh <action> <version> <release>` under the deployment user. After 30 seconds it requests termination, then forcibly stops the hook after a further 5 seconds if needed. Hook failure is logged after the release outcome has been established.
 
 Bash `--message` / `-m` and PowerShell `-Message` carry an optional UTF-8 note in the base64-encoded `DEPLOY_NOTE_B64` environment variable. The hook may decode it for its own audit integration. This private program is maintained by the deployer; qqconf/qqsync do not synchronize its body.

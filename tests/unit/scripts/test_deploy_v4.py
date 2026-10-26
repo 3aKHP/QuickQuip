@@ -89,8 +89,20 @@ if args[0] == "compose":
                                       services_stopped=True)))
         else:
             print(json.dumps(migrate(root, services_stopped=True)))
-    elif "build" in args and os.environ.get("FAIL_BUILD") == "1":
-        sys.exit(1)
+    elif "build" in args:
+        import yaml
+        directory = root / "releases" / release
+        config = yaml.safe_load((directory / "prod/docker-compose.yml").read_text())
+        build = config.get("services", {}).get("quickquip", {}).get("build")
+        if build and not (directory / build["dockerfile"]).is_file():
+            sys.exit("Build Dockerfile missing")
+        if os.environ.get("FAIL_BUILD") == "1":
+            sys.exit(1)
+    elif "stage" in args and os.environ.get("STAGED_COMPOSE"):
+        target = args[args.index("--release") + 1] if "--release" in args else release
+        (root / "releases" / target / "prod/docker-compose.yml").write_text(
+            os.environ["STAGED_COMPOSE"]
+        )
     elif "run" in args and os.environ.get("FAIL_CONFIG_INIT") == "1":
         sys.exit(1)
     elif "up" in args:
@@ -165,6 +177,55 @@ def test_private_hook_runs_after_activation_without_changing_release_result(depl
     assert (root / "current").readlink() == Path("releases") / NEW
     assert (root / ".env").read_text() == "ONEBOT_ACCESS_TOKEN=new\n"
     assert not inbox.exists()
+
+
+def test_private_hook_ignoring_termination_cannot_hold_deployment_lock(deployment):
+    root, inbox, env = deployment
+    hook = inbox / "shared/prod/hooks/deployment.sh"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("trap '' TERM\nwhile :; do sleep 1; done\n")
+    # Scale the real timeout arguments down; preserve signal/grace semantics.
+    timeout = Path(env["PATH"].split(os.pathsep)[0]) / "timeout"
+    timeout.write_text(
+        f'#!{sys.executable}\nimport os,sys\n'
+        'args = ["--kill-after=0.1" if arg == "--kill-after=5" else '
+        '"0.1" if arg == "30" else arg for arg in sys.argv[1:]]\n'
+        f'os.execv({shutil.which("timeout")!r}, ["timeout", *args])\n'
+    )
+    timeout.chmod(0o700)
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "private deployment hook failed" in result.stdout
+    assert (root / "current").readlink() == Path("releases") / NEW
+    assert not inbox.exists()
+    # A separate process must be able to acquire the released deployment lock.
+    acquired = subprocess.run(["flock", "-n", str(root / ".deploy/lock"), "true"])
+    assert acquired.returncode == 0
+
+
+@pytest.mark.parametrize("direction", ["off", "push", "pull"])
+def test_legacy_compose_builds_with_tracked_dockerfile(deployment, direction):
+    root, inbox = _sync_candidate(deployment)
+    dockerfile = inbox / "tree/docker/Dockerfile.prod"
+    dockerfile.parent.mkdir()
+    dockerfile.write_text("FROM synthetic-current-source\n")
+    legacy = "services:\n  quickquip:\n    build:\n      dockerfile: prod/Dockerfile\n"
+    compose = inbox / "tree/prod/docker-compose.yml"
+    compose.write_text(legacy if direction != "pull" else legacy.replace(
+        "prod/Dockerfile", "docker/Dockerfile.prod"
+    ))
+    options = {"CONFIG_SYNC": direction}
+    if direction != "off":
+        options |= {"SYNC_OPERATION": "a" * 32, "CONFIG_SYNC_PROTOCOL": "2"}
+    if direction == "pull":
+        # The remote stage replaces even an already updated local Compose.
+        options["STAGED_COMPOSE"] = legacy
+    result = run_deploy(deployment, **options)
+    assert result.returncode == 0, result.stdout + result.stderr
+    release = root / "releases" / NEW
+    assert (release / "prod/docker-compose.yml").read_text() == legacy
+    assert (release / "prod/Dockerfile").read_text() == "FROM synthetic-current-source\n"
+    assert not (root / "prod/Dockerfile").exists()
 
 
 @pytest.mark.parametrize("failure", ["build", "up"])

@@ -35,7 +35,7 @@ fail() { step "FAILED: $*" >&2; exit 1; }
 deployment_hook() {
     local hook="$Root/prod/hooks/deployment.sh"
     [ -f "$hook" ] || return 0
-    timeout 30 bash "$hook" "$1" "$2" "$3" || step "private deployment hook failed; release result retained"
+    timeout --kill-after=5 30 bash "$hook" "$1" "$2" "$3" || step "private deployment hook failed; release result retained"
 }
 Python=""
 for candidate in python3.13 python3.12 python3.11 python3; do
@@ -561,6 +561,11 @@ if [ -n "$SyncOperation" ] && [ "$ConfigSyncProtocol" = 2 ]; then
     sync_rpc "$Prev" stage --operation "$SyncOperation" --release "$Id" || fail "configuration stage failed"
 fi
 export QUICKQUIP_ENV_FILE="$Incoming/shared/.env"
+# Existing Compose files can keep their original build.dockerfile setting.
+# Generate this release artifact from the tracked source, including after pull.
+if [ -f "$Release/docker/Dockerfile.prod" ]; then
+    cp --remove-destination -- "$Release/docker/Dockerfile.prod" "$Release/prod/Dockerfile"
+fi
 compose "$Id" config --quiet
 # Resolved values stay within the private transaction and never enter the release.
 compose "$Id" config --format json > "$Incoming/candidate-compose.json"
