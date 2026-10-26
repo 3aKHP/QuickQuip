@@ -59,6 +59,7 @@ def resolve(description, files):
         return {
             "environment": services["quickquip"].get("environment", {}),
             "services": list(services),
+            "project": json.loads(result.stdout)["name"],
         }
 
 

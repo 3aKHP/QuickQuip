@@ -31,7 +31,9 @@ def test_added_and_removed_override_participates_in_candidate_and_restart(tmp_pa
         return subprocess.CompletedProcess(
             command,
             0,
-            json.dumps({"services": {"quickquip": {"environment": {}}, "web-admin": {}}}),
+            json.dumps(
+                {"name": "project", "services": {"quickquip": {"environment": {}}, "web-admin": {}}}
+            ),
             "",
         )
 
@@ -97,3 +99,20 @@ def test_invalid_compose_is_a_domain_error_before_service_mutation(tmp_path, mon
     with pytest.raises(ConfigError) as error:
         controller.environment({"files": files})
     assert error.value.code == "invalid_compose"
+
+
+def test_recovery_helper_uses_recorded_image_without_loading_live_compose(tmp_path):
+    controller = project(tmp_path)
+    (tmp_path / "docker-compose.yml").unlink()
+    controller.bind({"helper_image": "sha256:recorded", "project": "original"})
+    calls = []
+
+    def docker(command, environment, cwd, payload):
+        calls.append(command)
+        return json.dumps({"phase": "writing"})
+
+    controller.runner = docker
+    assert controller.call("inspect", {"operation": "synthetic"}) == {"phase": "writing"}
+    assert calls[0][:3] == ["docker", "run", "--rm"]
+    assert "sha256:recorded" in calls[0]
+    assert "compose" not in calls[0]

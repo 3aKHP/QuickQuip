@@ -70,6 +70,16 @@ class Installation:
                         "operation_conflict", "Prepared operation has different input"
                     )
                 if existing["phase"] in ("prepared", "staged"):
+                    marker = self.state.read("maintenance.json")
+                    if (
+                        marker is None
+                        and capture.read(self.layout, "published" if publish else "draft")
+                        != expected
+                    ):
+                        raise ConfigError(
+                            "revision_conflict",
+                            "Configuration changed before maintenance ownership",
+                        )
                     self._marker(existing, allow_start=True)
                 return self.summary(existing)
             current = capture.read(self.layout, "published" if publish else "draft")
@@ -106,8 +116,8 @@ class Installation:
                 "retain_draft": retain_draft,
                 "application": str(self.layout.application),
             }
-            self.save(record)
             self._marker(record, allow_start=True)
+            self.save(record)
             return self.summary(record)
 
     @staticmethod

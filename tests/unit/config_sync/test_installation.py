@@ -156,3 +156,23 @@ def test_recovery_reuses_committed_revision_with_an_independent_draft(receiver, 
     install.recovered(operation)
     assert service.read("published")["revision"] == revision
     assert service.read()["document"] == before["draft"]
+
+
+def test_preparation_establishes_ownership_before_receipt_can_be_interrupted(receiver, monkeypatch):
+    install, service = receiver
+    before = read(install.layout, "published")
+    target = deepcopy(before["snapshot"])
+    target["document"]["settings"]["runtime"]["history_limit"] = 19
+    operation = uuid.uuid4().hex
+    save = install.save
+    monkeypatch.setattr(install, "save", lambda _: (_ for _ in ()).throw(OSError("crash")))
+    with pytest.raises(OSError):
+        install.prepare(operation, before, target, publish=True)
+    with pytest.raises(ConfigError) as error:
+        service.update_group_override("123456789", history_limit=33)
+    assert error.value.code == "configuration_busy"
+    monkeypatch.setattr(install, "save", save)
+    install.prepare(operation, before, target, publish=True)
+    install.install(operation)
+    install.verify(operation)
+    install.confirm(operation)

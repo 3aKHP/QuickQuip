@@ -13,9 +13,10 @@ import pytest
 import tomlkit
 
 from quickquip.config_sync.compose import Compose
-from quickquip.config_sync.peers import Remote
+from quickquip.config_sync.peers import Local, Remote
 from quickquip.config_sync.session import Session
 from quickquip.config_workspace.service import Workspace
+from quickquip.configuration.errors import ConfigError
 from quickquip.llm.config_service import ConfigService
 
 pytestmark = pytest.mark.skipif(
@@ -37,13 +38,14 @@ def test_compose_sync_reloads_credentials_and_preserves_service_states(
     (remote / ".env").write_text(
         f"QUICKQUIP_DEPLOY_LOCATION={location}\nQUICKQUIP_DEPLOY_RUNTIME=docker\n"
         f"SMOKE_PORT={port}\nWEB_ADMIN_PASSWORD=first-synthetic\n"
-        "WEB_ADMIN_HOST=0.0.0.0\nWEB_ADMIN_PORT=5104\nTIEBA_ENABLED=false\n",
+        "WEB_ADMIN_HOST=0.0.0.0\nWEB_ADMIN_PORT=5104\nTIEBA_ENABLED=false\nOLD_REQUIRED=synthetic\n",
         encoding="utf-8",
     )
     (remote / "docker-compose.yml").write_text(
         f"name: {name}\nservices:\n"
         "  quickquip:\n    image: quickquip-qqsync-smoke\n"
         "    env_file: .env\n    environment:\n      QUICKQUIP_MANAGED_CONTAINER: '1'\n"
+        "      CHECK_OLD: '${OLD_REQUIRED:?}'\n"
         "    volumes:\n      - ./data:/app/data\n      - ./config:/app/config\n"
         "  web-admin:\n    image: quickquip-qqsync-smoke\n"
         "    command: [python, web_api.py]\n"
@@ -114,9 +116,61 @@ def test_compose_sync_reloads_credentials_and_preserves_service_states(
         workspace.unpack()
         environment = workspace.storage.directory / ".env"
         environment.write_text(
-            environment.read_text().replace("first-synthetic", "second-synthetic")
+            environment.read_text()
+            .replace("first-synthetic", "second-synthetic")
+            .replace("OLD_REQUIRED=synthetic\n", "")
+        )
+        compose_file = workspace.storage.directory / "docker-compose.yml"
+        compose_file.write_text(
+            compose_file.read_text().replace("      CHECK_OLD: '${OLD_REQUIRED:?}'\n", "")
         )
         workspace.pack()
+        if location == "local" and not bot_running:
+            call = Local.call
+
+            def interrupt_install(peer, action, body=None):
+                if action != "install":
+                    return call(peer, action, body)
+                monkeypatch.setattr(Local, "call", call)
+                program = """import json, os, sys
+from quickquip.config_sync.installation import Installation
+from quickquip.configuration.files import install
+body = json.load(sys.stdin)
+receiver = Installation('/qqsync-host')
+def partial_write(before, after):
+    install(receiver.root, {'.env': before['.env']}, {'.env': after['.env']})
+    os._exit(71)
+receiver.layout.install = partial_write
+receiver.install(body['operation'], environment=body['environment'])
+"""
+                image = session.state.read("qqsync/client.json")["original"]["helper_image"]
+                result = subprocess.run(
+                    [
+                        "docker",
+                        "run",
+                        "--rm",
+                        "-i",
+                        "--entrypoint",
+                        "python",
+                        "-v",
+                        str(remote) + ":/qqsync-host",
+                        image,
+                        "-c",
+                        program,
+                    ],
+                    input=json.dumps(body),
+                    text=True,
+                    capture_output=True,
+                    timeout=60,
+                )
+                assert result.returncode == 71, result.stderr
+                raise ConfigError("transport_error", "Interrupted after environment write")
+
+            monkeypatch.setattr(Local, "call", interrupt_install)
+            with pytest.raises(ConfigError, match="Interrupted after environment write"):
+                session.run("push")
+            with pytest.raises(ConfigError, match="Compose operation failed"):
+                controller.run(["config", "--quiet"])
         assert session.run("push")["phase"] == "confirmed"
         assert login("first-synthetic") == 401
         assert login("second-synthetic") == 200

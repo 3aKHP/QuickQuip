@@ -221,6 +221,8 @@ class Session:
         mode = Deployment(**record["route"])
         local, remote = self._peers(mode)
         receiver = remote if mode.location == "cloud" and record["direction"] == "push" else local
+        if receiver.runtime == "docker":
+            receiver.controller.bind(record["original"], record.get("target_project"))
         operation = {"operation": record["id"]}
         if record["phase"] == "recovering":
             return self._recover(record, receiver)
@@ -244,6 +246,8 @@ class Session:
                     if receiver.runtime == "docker"
                     else None
                 )
+                if receiver.runtime == "docker":
+                    record["target_project"] = receiver.controller.target_project
                 if not record["hot"]:
                     receiver.controller.pause(record["original"])
                 self._save(record, "installing")

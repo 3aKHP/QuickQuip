@@ -45,6 +45,7 @@ def prepare(session, direction):
             "prefer": None,
             "remote_before": before,
             "remote_target": target,
+            "remote_original": remote.controller.inspect(),
         }
         if direction == "pull":
             record["original"] = local.controller.inspect()
@@ -97,6 +98,8 @@ def finish(session, record=None, *, timeout=240):
         return session._continue(record)
     mode = Deployment(**record["route"])
     local, remote = session._peers(mode)
+    if remote.runtime == "docker":
+        remote.controller.bind(record["remote_original"])
     operation = {"operation": record["id"]}
     deadline = time.monotonic() + timeout
     while True:

@@ -20,8 +20,24 @@ class Compose:
         self.root, self.application = path(info["root"]), path(info["application"])
         self.file = path(info["compose"]) if info["compose"] else None
         self.overrides = info["overrides"]
-        if self.file is None:
-            raise ConfigError("compose_missing", "No real Compose file exists in this project")
+        self.helper_image = None
+        self.target_project = None
+
+    def bind(self, original, target_project=None):
+        self.helper_image = original.get("helper_image")
+        self.target_project = target_project
+
+    def image(self, definition=None):
+        if self.helper_image is None:
+            definition = definition or json.loads(self.run(["config", "--format", "json"]))
+            image = definition["services"]["web-admin"]["image"]
+            self.helper_image = self.runner(
+                ["docker", "image", "inspect", image, "--format", "{{.Id}}"],
+                {},
+                str(self.root),
+                None,
+            ).strip()
+        return self.helper_image
 
     def run(self, arguments, *, payload=None):
         self.refresh()
@@ -87,12 +103,12 @@ class Compose:
             "web": services.get("web-admin", {"running": False}),
             "services": services,
             "project": definition["name"],
+            "helper_image": self.image(definition),
         }
 
     def pause(self, original):
-        current = self.inspect()
         ids = []
-        for project in {original["project"], current["project"]}:
+        for project in {original["project"], self.target_project or original["project"]}:
             raw = self.runner(
                 [
                     "docker",
@@ -172,25 +188,27 @@ except Exception:
                 "-e",
                 f"QUICKQUIP_SYNC_GID={self.description['gid']}",
             ]
-        raw = self.run(
+        raw = self.runner(
             [
+                "docker",
                 "run",
                 "--rm",
-                "--no-deps",
-                "-T",
+                "-i",
                 "--entrypoint",
                 "python",
                 "-v",
                 str(self.root) + ":/qqsync-host",
                 *ownership,
-                "web-admin",
+                self.image(),
                 "-m",
                 "quickquip.config_sync.worker",
                 action,
                 "--root",
                 "/qqsync-host",
             ],
-            payload=payload,
+            {},
+            str(self.root),
+            payload,
         )
         try:
             result = json.loads(raw)
@@ -225,6 +243,7 @@ except Exception:
                 result = json.loads(raw)
             if "error" in result:
                 raise ValueError("Candidate validation failed")
+            self.target_project = result["project"]
             return result["environment"]
         except (ValueError, KeyError, OSError, subprocess.SubprocessError):
             raise ConfigError("invalid_compose", "Candidate Compose validation failed") from None
