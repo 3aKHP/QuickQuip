@@ -228,6 +228,44 @@ def test_legacy_compose_builds_with_tracked_dockerfile(deployment, direction):
     assert not (root / "prod/Dockerfile").exists()
 
 
+@pytest.mark.parametrize("existing", [False, True])
+def test_bootstrap_keeps_search_configuration_for_first_pull(deployment, tmp_path, existing):
+    root, inbox, _ = deployment
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    manifest = TEMPLATE / "deploy-manifest.txt"
+    for name in manifest.read_text().splitlines():
+        path = checkout / name
+        if (PROJECT / name).is_dir():
+            path.mkdir(parents=True, exist_ok=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("synthetic release file\n")
+    relative = Path("docker/searxng/settings.yml")
+    default = "general:\n  instance_name: synthetic-default\n"
+    (checkout / relative).parent.mkdir(parents=True, exist_ok=True)
+    (checkout / relative).write_text(default)
+    (checkout / "prod/docker-compose.yml").write_text("services: {}\n")
+    marker = checkout / "src/quickquip/config_sync/rpc.py"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("# bootstrap configuration preservation marker\n")
+    production = "general:\n  instance_name: synthetic-production\n"
+    if existing:
+        previous = root / "releases" / OLD / relative
+        previous.parent.mkdir(parents=True, exist_ok=True)
+        previous.write_text(production)
+    subprocess.run(
+        ["tar", "-czf", str(inbox / "release.tar.gz"), "-T", str(manifest)],
+        cwd=checkout, check=True, capture_output=True,
+    )
+    shutil.rmtree(inbox / "tree")
+    result = run_deploy(deployment, CONFIG_SYNC="off")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "releases" / NEW / relative).read_text() == (
+        production if existing else default
+    )
+
+
 @pytest.mark.parametrize("failure", ["build", "up"])
 def test_failure_restores_original_files_and_links(deployment, failure):
     root, inbox, _ = deployment
