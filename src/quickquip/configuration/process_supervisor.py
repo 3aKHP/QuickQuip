@@ -136,14 +136,13 @@ class Supervisor:
     def run(self):
         lease = Lease(control_path(self.root, self.role, "supervisor.lock"), create=True)
         try:
-            lease.acquire()
+            lease.acquire(timeout=1)
         except OSError as exc:
             raise ConfigError(
                 "service_running", "Service supervisor already exists", self.role
             ) from exc
         try:
-            if held(directory(self.root) / f"{self.role}.lock"):
-                raise ConfigError("service_running", "Service is already running", self.role)
+            # The child takes the service lease; a status probe can hold it momentarily.
             self._start()
             while True:
                 if self._control():

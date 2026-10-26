@@ -4,11 +4,12 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 import time
 
 import pytest
 
-from quickquip.configuration.activity import stopped_service
+from quickquip.configuration.activity import stopped_service, Lease
 from quickquip.configuration.process_control import request, status
 
 
@@ -45,6 +46,7 @@ def run():
             pass
         finally:
             record("stopped")
+record("invoked")
 raise SystemExit(managed_entrypoint(root, role, run))
 ''', encoding="utf-8")
     processes, logs = [], []
@@ -72,7 +74,15 @@ raise SystemExit(managed_entrypoint(root, role, run))
                 and events.exists()
                 and f"started:{state['record']['child_pid']}" in events.read_text()
             )
-        wait_for(started)
+        try:
+            wait_for(started)
+        except AssertionError:
+            pytest.fail(
+                f"Service startup failed (exit={process.poll()}): "
+                + (tmp_path / f"{role}-{len(processes) - 1}.log").read_text(
+                    encoding="utf-8", errors="replace"
+                )
+            )
         return process
 
     yield tmp_path, start
@@ -145,3 +155,25 @@ def test_windowless_web_process_uses_cooperative_shutdown(native_services):
     request(root, "web", "resume")
     wait_for(lambda: status(root, "web")["record"]["state"] == "running")
     assert status(root, "web")["record"]["child_pid"] != child
+
+
+@pytest.mark.parametrize("lock_name", ["web.lock", "web.supervisor.lock"])
+def test_service_start_waits_for_a_concurrent_status_probe(native_services, lock_name):
+    root, start = native_services
+    lease = Lease(root / "data/qqconf/services" / lock_name, create=True).acquire()
+
+    def finish_observation():
+        try:
+            wait_for(lambda: (root / "web.events").exists())
+            time.sleep(0.1)
+        finally:
+            lease.close()
+
+    observer = threading.Thread(target=finish_observation)
+    observer.start()
+    try:
+        process = start("web")
+        assert process.poll() is None
+        assert status(root, "web")["running"]
+    finally:
+        observer.join(timeout=20)
