@@ -49,7 +49,6 @@ $ScriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $ProjectRoot = Split-Path -Parent (Split-Path -Parent $ScriptDir)
 $SshArgs = @('-o', 'StrictHostKeyChecking=accept-new', '-o', 'BatchMode=yes', '-o', 'ConnectTimeout=15', '-o', 'ServerAliveInterval=15', '-o', 'ServerAliveCountMax=3')
 $Id = [DateTime]::UtcNow.ToString('yyyyMMdd-HHmmss') + '-' + [Guid]::NewGuid().ToString('N').Substring(0, 12)
-$Incoming = "$RemoteDir/.deploy/incoming/$Id"
 $Temp = Join-Path ([System.IO.Path]::GetTempPath()) "quickquip-$Id"
 Push-Location $ProjectRoot
 try {
@@ -61,6 +60,7 @@ try {
     $defaults = "$connection".Split(' ')
     if (-not $HostAlias) { $HostAlias = $defaults[0] }
     if (-not $RemoteDir) { $RemoteDir = $defaults[1] }
+    $Incoming = "$RemoteDir/.deploy/incoming/$Id"
     if ($RemoteDir -cnotmatch '^/[a-zA-Z0-9_./-]+$' -or $RemoteDir -eq '/' -or $RemoteDir.Contains('/../')) { throw "Invalid absolute deployment root" }
     if ($HostAlias -cnotmatch '^[a-zA-Z0-9_][a-zA-Z0-9_.@-]*$') { throw "Invalid SSH alias" }
     if (Test-Path -PathType Container 'prod/prod.example') { throw 'Nested prod/prod.example; initialize prod again' }
