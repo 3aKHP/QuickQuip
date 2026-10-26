@@ -29,11 +29,20 @@ def _open_control(path):
 def write_control(path, value):
     Path(path).parent.mkdir(parents=True, exist_ok=True)
     with FileLock(str(path) + ".io.lock", timeout=5):
-        write_json(path, value)
+        deadline = time.monotonic() + 1
+        while True:
+            try:
+                write_json(path, value)
+                return
+            except PermissionError as exc:
+                # Windows can briefly deny replacement while a metadata reader closes.
+                if getattr(exc, "winerror", None) not in (5, 32) or time.monotonic() >= deadline:
+                    raise
+                time.sleep(0.01)
 
 
 def read_control(path):
-    if not Path(path).exists():
+    if not Path(path).parent.exists():
         return None
     try:
         with _open_control(path) as stream:
