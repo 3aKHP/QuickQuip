@@ -6,7 +6,7 @@
 
 前端设计与操作流程见[前端交付契约](llm-configuration-frontend.md)，其中说明中文字段含义、参数继承控件、保存与应用、冲突处理及设计验收场景。
 
-概念含义见[配置术语](../glossary.md#config-draft)，草稿、快照与运行状态分离的选择依据见[ADR-0001](adr/0001-config-snapshot-publication.md)。
+概念含义见[配置术语](../glossary.md#config-draft)，草稿、快照、发布与运行状态的选择依据见[ADR-0023](adr/0023-online-and-offline-configuration-publication.md)。
 
 配置交换格式为 JSON，`format_version` 当前为 `2`。顶层字段为 `providers`、`style_profiles`、`pricing`、`routes` 与 `settings`。渠道身份为公开 `id`，模型身份为 wire 名称；引用使用 `{provider_id, model}`，支持包含 `/` 的模型名称。认证信息保存 `.env` 变量名称或 `${VARIABLE}` 引用。导出、字段错误及审计日志保留引用，运行时展开值不进入接口。
 
@@ -35,6 +35,8 @@ format 2 的价格必须指定已存在的 `provider_id`。导入、读取历史
 配置同步维护期间，草稿、应用和引用变更返回 `409 configuration_busy`；等待同步确认或恢复后重试。
 
 所有草稿有效修改增加修订号。相同内容保存保持原修订号。版本冲突返回 `409 revision_conflict`；调用方重新取得草稿并处理冲突后提交。渠道或模型参数的 `null` 表示继承，`false`、合法零值、空字符串及空对象表示显式值。`extra_body` 覆盖整个对象。
+
+草稿与部署快照共用递增编号空间；部署可以保留独立草稿，所以草稿编号可能小于已发布编号。新编辑从已分配的最大编号之后继续，调用方以接口返回的修订号提交。
 
 `/llm-effort` 兼容入口读取草稿修订；`PUT /llm-effort/{id}` 需要 `{expected_draft_revision, effort}`，保存后返回 `effect: saved_draft`。旧 `/config/llm` 入口返回 `410 llm_configuration_migrated`。
 
@@ -88,6 +90,10 @@ schema 4 将配置与运行存储分离。`config_revisions` 保留修订保存�
 `GET /status` 返回数据库 schema、草稿及发布版本与各自的 `draft_version`/`published_version`，以及 bot 的 `boot_id`、`loaded_revision`、`loaded_version`、应用版本、心跳时间、观察时间及组件状态。bot 心跳超过 20 秒时 `stale: true`；尚未回报时 `bot: null`。MCP 的连接及工具发现状态属于组件状态，配置版本接纳和远端组件就绪分别回报。
 
 活动任务从 `/operations` 查询，`/status` 提供配置与 Bot 状态。返回的时间为 Unix 秒。有效参数的 `configured` 通常为 `{provider,model}`，`context_window` 的 configured 为整数或 null；有效值仅解析配置层级，不含具体调用或会话覆盖。
+
+## 部署服务入口
+
+Python 部署调用方通过 `ConfigService.prepare_deployment` 固定目标快照，并可同时保留独立的编辑草稿。`publish_offline` 要求仍有效的 Bot 停止证明，校验完整运行前提后更新发布指针，结果包含 `published_revision` 与 `loaded: false`。同一请求重试返回原结果，独立未完成应用报告冲突。停止证明由生命周期锁产生，Web 应用接口继续使用上面的 Bot 任务流程。
 
 `GET /environment?source=draft` 返回配置引用的变量名、bot 观察到的已配置布尔值及 `available/stale` 状态。bot 尚未观察到变量时 `configured: null`。接口不返回变量内容。
 

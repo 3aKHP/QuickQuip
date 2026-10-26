@@ -149,6 +149,15 @@ def dumps(value) -> str:
     )
 
 
+def next_revision(connection):
+    """Publication snapshots and the editable draft share one revision namespace."""
+    return connection.execute(
+        "SELECT MAX((SELECT draft_revision FROM config_meta),"
+        "(SELECT COALESCE(MAX(revision),0) FROM config_revisions),"
+        "(SELECT COALESCE(MAX(revision),0) FROM config_snapshots))+1"
+    ).fetchone()[0]
+
+
 class ConfigStore:
     def __init__(self, path: Path | str):
         self.path = Path(path)

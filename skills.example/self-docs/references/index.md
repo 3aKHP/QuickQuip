@@ -88,7 +88,7 @@
 
 ## 架构决策记录（含历史）
 
-- `docs/dev/adr/0001-config-snapshot-publication.md` → `references/docs-dev-adr-0001-config-snapshot-publication.md` — ADR-0001：通过不可变快照发布配置 ｜ 状态：Accepted ｜ 关键词：.env
+- `docs/dev/adr/0001-config-snapshot-publication.md` → `references/docs-dev-adr-0001-config-snapshot-publication.md` — ADR-0001：通过不可变快照发布配置 ｜ 状态：Superseded ｜ 替代记录：[0023-online-and-offline-configuration-publication.md](docs-dev-adr-0023-online-and-offline-configuration-publication.md) ｜ 关键词：.env
 - `docs/dev/adr/0002-business-session-identity.md` → `references/docs-dev-adr-0002-business-session-identity.md` — ADR-0002：由业务维护 Session 身份 ｜ 状态：Accepted
 - `docs/dev/adr/0003-epoch-history-freezing.md` → `references/docs-dev-adr-0003-epoch-history-freezing.md` — ADR-0003：在纪元内冻结历史表达 ｜ 状态：Accepted
 - `docs/dev/adr/0004-agent-execution-replay-delivery.md` → `references/docs-dev-adr-0004-agent-execution-replay-delivery.md` — ADR-0004：分离执行记录、历史投影与消息交付 ｜ 状态：Accepted
@@ -110,6 +110,7 @@
 - `docs/dev/adr/0020-editable-configuration-workspaces.md` → `references/docs-dev-adr-0020-editable-configuration-workspaces.md` — ADR-0020：以持久 TOML 工作副本编辑配置包 ｜ 状态：Superseded ｜ 替代记录：[0022-local-configuration-workspace-cli.md](docs-dev-adr-0022-local-configuration-workspace-cli.md)
 - `docs/dev/adr/0021-configuration-runtime-storage-separation.md` → `references/docs-dev-adr-0021-configuration-runtime-storage-separation.md` — ADR-0021：先分离配置与运行数据，再重构本地配置工具 ｜ 状态：Accepted ｜ 关键词：.env、data/llm.db、group_settings、data/niuniu.db、niuniu_group_text、data/llm_config.db、config_operations、bot_runtime、enabled、config/managed/config.db
 - `docs/dev/adr/0022-local-configuration-workspace-cli.md` → `references/docs-dev-adr-0022-local-configuration-workspace-cli.md` — ADR-0022：以 qqconf 统一编辑本地持久化配置 ｜ 状态：Accepted ｜ 关键词：.env、config/、data/、qqconf、unpack、refresh、pack、.config-workspace/、db/、.config-staging/
+- `docs/dev/adr/0023-online-and-offline-configuration-publication.md` → `references/docs-dev-adr-0023-online-and-offline-configuration-publication.md` — ADR-0023：通过不可变快照完成在线与停服发布 ｜ 状态：Accepted ｜ 关键词：.env
 - `docs/dev/adr/README.md` → `references/docs-dev-adr-readme.md` — 架构决策记录 ｜ 关键词：NNNN-short-title.md、Proposed、Accepted、Rejected、Superseded、status、superseded_by
 - `docs/dev/adr/template.md` → `references/docs-dev-adr-template.md` — ADR 模板 ｜ 关键词：NNNN-short-title.md
 

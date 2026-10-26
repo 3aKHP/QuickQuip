@@ -51,6 +51,49 @@ class Lease:
             self.stream = None
 
 
+class StoppedService:
+    """Evidence that the caller currently excludes this project's service startup."""
+
+    def __init__(self, root, role, lease):
+        self.root, self.role, self.lease = Path(root).resolve(), role, lease
+
+    def verify(self, root, role):
+        if (
+            self.root != Path(root).resolve()
+            or self.role != role
+            or self.lease.path.resolve() != (directory(root) / f"{role}.lock").resolve()
+            or self.lease.stream is None
+            or self.lease.stream.closed
+        ):
+            raise ConfigError("services_running", "A stopped service lease is required")
+
+
+@contextmanager
+def stopped_service(root, role):
+    """Acquire a real lifetime lock; configuration values cannot assert stopped state."""
+    if role not in ("bot", "web"):
+        raise ValueError("Unknown application service")
+    lease = Lease(directory(root) / f"{role}.lock", create=True)
+    try:
+        lease.acquire()
+    except OSError as exc:
+        raise ConfigError("services_running", "Stop the application service first", role) from exc
+    try:
+        record = directory(root) / f"{role}.json"
+        if record.exists():
+            try:
+                metadata = json.loads(record.read_text(encoding="utf-8"))
+            except (OSError, ValueError):
+                raise ConfigError("services_unknown", "Service ownership record is unreadable")
+            if not isinstance(metadata, dict) or metadata.get("system") != os.name:
+                raise ConfigError(
+                    "services_unknown", "Acquire the service lease in its own operating system"
+                )
+        yield StoppedService(root, role, lease)
+    finally:
+        lease.close()
+
+
 def directory(root):
     return Path(root) / "data/qqconf/services"
 

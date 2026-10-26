@@ -43,3 +43,9 @@ jobs:
         run: >-
           python -m pytest tests/unit/config_workspace
           --basetemp "${{ runner.temp }}/pytest-config-workspace"
+      - name: Verify native service control and offline publication
+        run: >-
+          python -m pytest tests/unit/configuration/test_process_control.py
+          tests/unit/llm/test_config_deployment.py
+          tests/integration/test_native_web_lifecycle.py
+          --basetemp "${{ runner.temp }}/pytest-config-activation"
