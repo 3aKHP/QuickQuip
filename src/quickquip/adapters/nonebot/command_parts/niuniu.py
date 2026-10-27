@@ -365,6 +365,7 @@ def register_niuniu_commands(on_command, Message, MessageSegment) -> None:
             await nn_records.finish("你还没有任何牛牛战绩哦~")
         action_labels = {
             "register": "📝 注册",
+            "reset_length": "🔄 数值重置",
             "unsubscribe": "❌ 注销",
             "gluing": "💦 打胶",
             "fencing": "⚔️ 击剑（主动）",

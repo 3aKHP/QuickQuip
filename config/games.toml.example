@@ -87,46 +87,31 @@ glue_zen_max = 4.0
 glue_frenzy_min = 3.0
 glue_frenzy_max = 10.0
 
-# ── 击剑事件参数 ────────────────────────────────────────────────────────
-# 暴击倍率
+# ── 击剑奖励与事件参数 ──────────────────────────────────────────────────
+# g = √(|a|×|b|)，基础奖励 R = base + scale × ln(1 + g/length_scale)
+# 运势乘数 F = 0.5 + 0.5 × log₂(1 + √luck)，两条曲线均无上界
+# 胜者奖励 T = R × F × U(0.8, 1.2) × 事件倍率（保留两位小数）
+fence_reward_base = 0.8
+fence_reward_scale = 1.5
+fence_reward_length_scale = 30.0
+# 败者承担胜者奖励的比例；平局双方无变化。机器人胜负各半、盈亏对称。
+fence_loss_ratio = 0.5
+# 暴击、擦伤、支配、重斩、吞噬的奖励倍率
 fence_critical_multiplier = 1.8
-# 擦边倍率
 fence_glancing_multiplier = 0.4
-# 牛头人支配倍率（腰斩未触发时使用）
-fence_dominate_multiplier = 3.0
-# 牛头人腰斩触发概率（0-1）。触发后对方长度减半（正）或翻倍（负）
+fence_dominate_multiplier = 2.0
+fence_heavy_multiplier = 3.0
+fence_devour_multiplier = 2.5
+# 支配事件中重斩的触发概率
 fence_dominate_sever_chance = 0.4
-# 触发支配的最低长度
+# 牛头人与魅魔的角色门槛
 fence_dominate_threshold = 50.0
-# 魅魔吞噬窃取比例（窃取 min(|a|,|b|) × 此值）
-fence_devour_steal_ratio = 0.3
-# 触发魅魔吞噬的最低 abs 长度（深度）
 fence_devour_threshold = 50.0
-# 平局双方损失范围 (cm)
-fence_draw_min = 0.5
-fence_draw_max = 2.0
-
-# ── 击剑赌注参数（零和转移量） ──────────────────────────────────────────
-# stake = 基数 × U(base_min, base_max) × balance × 事件倍率 × mf
-# 基数模式："geo" 为双方长度绝对值的几何均值，"min" 为较短方绝对值
-fence_stake_mode = "geo"
-# 基数百分比下限/上限
-fence_stake_base_min = 0.10
-fence_stake_base_max = 0.15
-# balance 下限：balance = max(此值, 短方/长方)，失衡对局的补偿系数
-fence_stake_balance_floor = 0.5
-# 运势乘数上限：mf = min(luck^luck_power, 此值)，仅约束极端运势日
-fence_stake_mf_cap = 30.0
 
 # ── 无牛牛目标击剑参数 ──────────────────────────────────────────────────
 # 挥空自伤范围 (cm)
 fence_self_hurt_min = 0.5
 fence_self_hurt_max = 2.5
-
-# ── 机器人击剑参数 ──────────────────────────────────────────────────────
-# 机器人幻影牛牛长度范围 (cm)
-fence_bot_phantom_min = 5.0
-fence_bot_phantom_max = 80.0
 
 # ── 每日运势 ────────────────────────────────────────────────────────────
 # lg(运势) ~ N(0, σ)，σ=1 → 中位数=1，±1σ=[0.1, 10]，无硬上下限
@@ -136,7 +121,7 @@ fence_bot_phantom_max = 80.0
 luck_sigma = 1.0
 # 击剑运势对数标准差
 fence_luck_sigma = 1.0
-# 运势幂压缩指数（luck^0.75：1**α==1 故中位运势行为不变，仅温和化极端运势的实际影响）
+# 打胶运势幂压缩指数（luck^0.75：1**α==1 故中位运势行为不变，仅温和化极端运势的实际影响）
 luck_power = 0.75
 
 # ── 牛牛 RPM 限流 ────────────────────────────────────────────────────────

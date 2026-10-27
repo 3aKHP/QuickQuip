@@ -15,6 +15,10 @@ from quickquip.games.niuniu.text import NiuNiuText, default_text, load_niuniu_te
 logger = logging.getLogger(__name__)
 
 
+class FencingConflictError(RuntimeError):
+    """A player changed before a duel could commit."""
+
+
 def _roll_lognormal(sigma: float) -> float:
     """Roll a log10-symmetric luck value: lg(x) ~ N(0, σ).
 
@@ -356,6 +360,25 @@ class NiuNiuStore:
                 "UPDATE niuniu_users SET length = ?, updated_at = ? WHERE uid = ?",
                 (round(new_length, 2), now, uid),
             )
+
+    def commit_fencing(self, updates: list[tuple[str, float, float, str]]) -> None:
+        """Commit player lengths and corresponding duel records in one transaction."""
+        if self._unavailable:
+            raise RuntimeError("牛牛大作战 数据库不可用")
+        now = _utc_now()
+        with self._connect() as conn:
+            for uid, origin, new, action in updates:
+                cursor = conn.execute(
+                    "UPDATE niuniu_users SET length=?, updated_at=? WHERE uid=? AND length=?",
+                    (round(new, 2), now, uid, origin),
+                )
+                if cursor.rowcount != 1:
+                    raise FencingConflictError("牛牛数值已变化，请重试")
+                conn.execute(
+                    "INSERT INTO niuniu_records "
+                    "(uid, action, origin_length, new_length, created_at) VALUES (?, ?, ?, ?, ?)",
+                    (uid, action, round(origin, 2), round(new, 2), now),
+                )
 
     def count(self) -> int:
         if self._unavailable:

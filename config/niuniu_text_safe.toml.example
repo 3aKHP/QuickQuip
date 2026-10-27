@@ -132,22 +132,22 @@ lose_neg = [
     "👹 对方牛头人威压！你的牛牛被压得更凹了...",
 ]
 sever_pos = [
-    "👹 牛头人腰斩！！你重创了对方！{loss} cm 灰飞烟灭！你吸收 {gain} cm！",
+    "👹 牛头人重斩！！你重创了对方！{loss} cm 灰飞烟灭！你吸收 {gain} cm！",
     "⚔️ 牛头人处刑！对方损失 {loss} cm，你获得 {gain} cm！",
     "🪓 牛头人断头台！对方牛牛被击落 {loss} cm，你增长了 {gain} cm！",
 ]
 sever_neg = [
-    "👹 牛头人支配！你击穿了对方的防线！深度从 {old_oppo} 翻倍至 {new_oppo} cm！你吸收 {gain} cm！",
+    "👹 牛头人支配！你击穿了对方的防线！对方深度变为 {new_oppo} cm！你吸收 {gain} cm！",
     "深渊之力！牛头人的一击让对方的凹度暴增至 {new_oppo} cm！你获得 {gain} cm！",
 ]
 severed_pos = [
-    "👹 对方牛头人腰斩！！你的牛牛被击落 {loss} cm！当前 {my_len} cm",
+    "👹 对方牛头人重斩！！你的牛牛被击落 {loss} cm！当前 {my_len} cm",
     "⚔️ 对方牛头人处刑！你的牛牛损失 {loss} cm！",
     "🪓 对方牛头人断头台降临！你被击落 {loss} cm...",
 ]
 severed_neg = [
     "👹 对方牛头人支配！你的凹度从 {old_my} 暴增至 {new_my} cm！",
-    "深渊之力！对方牛头人的一击让你的凹度加倍到 {new_my} cm...",
+    "深渊之力！对方牛头人的一击让你的凹度变为 {new_my} cm...",
 ]
 
 [[fence.events]]

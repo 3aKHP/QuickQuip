@@ -53,19 +53,19 @@
 | `[niuniu]` | `decay_rate_normal` | 0.005 | 长度在 -50 至 50 时：正侧按此率缩短，负侧绝对值按此率的 0.8 倍增加 |
 | `[niuniu]` | `luck_sigma` | 1.0 | 打胶运势对数标准差（lg(x) ~ N(0, σ)） |
 | `[niuniu]` | `fence_luck_sigma` | 1.0 | 击剑运势对数标准差（同上分布） |
-| `[niuniu]` | `luck_power` | 0.75 | 运势幂压缩指数（luck^0.75：中位运势行为不变，仅温和化极端运势的实际影响） |
+| `[niuniu]` | `luck_power` | 0.75 | 打胶运势幂压缩指数（luck^0.75：中位运势行为不变，仅温和化极端运势的实际影响） |
 | `[niuniu]` | `glue_neg_shrink_depth` | 1.0 | 打胶凹侧 sublinear 加深强度（越大凹侧萎缩越深，1.0 为线性基准） |
 | `[niuniu]` | `fence_critical_multiplier` | 1.8 | 击剑暴击倍率 |
-| `[niuniu]` | `fence_dominate_multiplier` | 3.0 | 击剑牛头人支配倍率 |
-| `[niuniu]` | `fence_dominate_sever_chance` | 0.4 | 牛头人腰斩触发概率 |
+| `[niuniu]` | `fence_dominate_multiplier` | 2.0 | 击剑牛头人支配倍率 |
+| `[niuniu]` | `fence_dominate_sever_chance` | 0.4 | 牛头人重斩触发概率 |
 | `[niuniu]` | `fence_dominate_threshold` | 50.0 | 牛头人角色阈值（length ≥ N） |
-| `[niuniu]` | `fence_devour_steal_ratio` | 0.3 | 魅魔吞噬窃取比例 |
+| `[niuniu]` | `fence_devour_multiplier` | 2.5 | 魅魔吞噬奖励倍率 |
+| `[niuniu]` | `fence_heavy_multiplier` | 3.0 | 牛头人重斩奖励倍率 |
 | `[niuniu]` | `fence_devour_threshold` | 50.0 | 魅魔角色阈值（length ≤ -N） |
-| `[niuniu]` | `fence_stake_mode` | "geo" | 击剑赌注基数模式（geo=双方长度几何均值，min=较短方） |
-| `[niuniu]` | `fence_stake_base_min` | 0.10 | 赌注基数百分比下限 |
-| `[niuniu]` | `fence_stake_base_max` | 0.15 | 赌注基数百分比上限 |
-| `[niuniu]` | `fence_stake_balance_floor` | 0.5 | 失衡对局补偿下限（短方/长方） |
-| `[niuniu]` | `fence_stake_mf_cap` | 30.0 | 运势乘数上限（极端运势日的单剑波动护栏） |
+| `[niuniu]` | `fence_reward_base` | 0.8 | 对数奖励的基础厘米数 |
+| `[niuniu]` | `fence_reward_scale` | 1.5 | 对数奖励增长强度，须大于 0 |
+| `[niuniu]` | `fence_reward_length_scale` | 30.0 | 体量尺度，须大于 0 |
+| `[niuniu]` | `fence_loss_ratio` | 0.5 | 败者承担胜者奖励的比例，范围 0～1；机器人盈亏对称 |
 | `[niuniu]` | `glue_rpm_limit` | 30 | 打胶每分钟每群请求上限 |
 | `[niuniu]` | `fence_rpm_limit` | 20 | 击剑每分钟每群请求上限 |
 | `[niuniu]` | `rpm_window_seconds` | 60 | RPM 滑动窗口大小（秒） |
@@ -81,6 +81,12 @@ config/games.toml 解析失败 → load_error 记录错误，全部回退默认�
 ```
 
 任何未在 TOML 中显式设置的字段保留默认值，无需全量填写。
+
+### 击剑奖励与配置升级
+
+双方体量 `g = √(|A|×|B|)`，基础奖励为 `fence_reward_base + fence_reward_scale × ln(1 + g/fence_reward_length_scale)`。每日运势乘数为 `0.5 + 0.5 × log₂(1 + √luck)`，最终奖励再乘 0.8～1.2 的随机浮动与事件倍率，保留两位小数。两条曲线与总长度均无上界，平局双方无损。打胶使用独立的原有运势公式。
+
+升级配置时移除 `fence_stake_*`、`fence_devour_steal_ratio`、`fence_draw_min/max` 和 `fence_bot_phantom_min/max`。这些旧项会被忽略并产生日志提示。新奖励参数未填写时使用默认值；`luck_power` 继续控制打胶。
 
 ### 牛牛文案系统
 
@@ -102,7 +108,7 @@ QuickQuip 内置两套牛牛文案预设，通过 TOML 文件驱动，支持按�
 | 文件 | 存储内容 | 引擎 |
 |------|---------|------|
 | `data/game_economy.db` | 金币账户、签到记录 | SQLite |
-| `data/niuniu.db` | 牛牛用户数据、操作记录、群文案模式覆盖 | SQLite |
+| `data/niuniu.db` | 牛牛用户数据、操作记录；群文案选择保存于共享配置库 | SQLite |
 | `data/game_scores.json` | 数字炸弹猜中次数排行 | JSON |
 
 ---
@@ -127,3 +133,21 @@ QuickQuip 内置两套牛牛文案预设，通过 TOML 文件驱动，支持按�
 2. 操作记录在 `niuniu_records` 表，可用于排查异常长度变化
 3. 动作冷却存储在内存中，重启机器人后清空冷却状态
 4. 文案模式切换通过 `/牛牛文案 <模式名>` 命令或 Web Admin 牛牛面板操作，数据存储在 `niuniu_group_text` 表
+
+
+### 离线生成牛牛重置库
+
+需要 Python 3.11 或更新版本。先停止 Bot 与 Web 对牛牛数据库的访问，完成 WAL checkpoint 并切换为 `journal_mode=DELETE`，关闭所有连接后，将完整生产库拉到本地 `data/niuniu-backup.db` 保存。其余业务数据库不参与这次操作。
+
+在项目根目录预览并生成候选库：
+
+```bash
+python scripts/maintenance/reset_niuniu_lengths.py --source data/niuniu-backup.db --output data/niuniu-reset.db
+python scripts/maintenance/reset_niuniu_lengths.py --source data/niuniu-backup.db --output data/niuniu-reset.db --apply
+```
+
+预览输出人数、记录数量与源文件校验和。实际执行创建新文件，将全体长度设为 10 cm，并为每人追加“数值重置”流水。账号、注册时间、运势和日期、历史流水均保留，源备份保持不变。源与目标必须不同，目标文件已存在时拒绝覆盖。
+
+检查输出的玩家数、追加流水数、源文件与候选文件 SHA-256 后，将候选上传到生产数据库同一目录的临时文件。保持 Bot/Web 停止，核对文件权限与校验和，使用同一文件系统内的 `os.replace` 原子替换主库，再部署并启动新代码。应用连接会重新启用 WAL。
+
+全员 10 cm 应在启动前检查，启动后按重置流水与后续真实对战记录验收。发生失败时再次停止 Bot/Web、处理并关闭 WAL 连接，以保留的本地备份按相同方式替换牛牛库，并按部署流程恢复对应版本。

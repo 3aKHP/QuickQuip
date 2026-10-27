@@ -9,13 +9,13 @@ from quickquip.games.niuniu.cooldown import fence_cd, fenced_cd
 from quickquip.games.niuniu.dynamics import (
     _apply_decay,
     fence_resolve_bot,
-    fence_resolve_zerohsum,
+    fence_resolve_pvp,
 )
 from quickquip.games.niuniu.dynamics import (  # noqa: F401 (re-exported for tests)
     _fence_win_prob,
     _fence_winner_is_role,
 )
-from quickquip.games.niuniu.store import NiuNiuStore
+from quickquip.games.niuniu.store import FencingConflictError, NiuNiuStore
 
 
 def _commit_fence_result(
@@ -33,11 +33,11 @@ def _commit_fence_result(
     oppo_action: str = "fenced",
 ) -> None:
     """Persist both players' new lengths, records, and cooldowns."""
-    store.update_length(my_uid, my_new)
-    store._add_record(my_uid, action, my_old, my_new)
+    updates = [(my_uid, my_old, my_new, action)]
     if not oppo_is_bot:
-        store.update_length(oppo_uid, oppo_new)
-        store._add_record(oppo_uid, oppo_action, oppo_old, oppo_new)
+        updates.append((oppo_uid, oppo_old, oppo_new, oppo_action))
+    store.commit_fencing(updates)
+    if not oppo_is_bot:
         fenced_cd.set(oppo_uid, cfg.fenced_protection)
     fence_cd.set(my_uid, cfg.fence_cooldown)
 
@@ -85,23 +85,12 @@ def fencing(
         return "你还没有牛牛呢！请先发送 /注册牛牛"
 
     text = store.get_text(group_id)
-    oppo_len = store.get_length(oppo_uid)
-
-    # Target has no niuniu — bot gets a phantom, others trigger events
-    if oppo_len is None:
-        if oppo_is_bot:
-            oppo_len = round(
-                random.uniform(
-                    store.config.fence_bot_phantom_min,
-                    store.config.fence_bot_phantom_max,
-                ),
-                2,
-            )
-        else:
-            return _fence_no_target(store, my_uid, my_len, oppo_uid, group_id)
+    oppo_len = None if oppo_is_bot else store.get_length(oppo_uid)
+    if oppo_len is None and not oppo_is_bot:
+        return _fence_no_target(store, my_uid, my_len, oppo_uid, group_id)
 
     origin_my = my_len
-    origin_oppo = oppo_len
+    origin_oppo = oppo_len if oppo_len is not None else 0.0
     cfg = store.config
     my_luck = store.get_fence_luck(my_uid)
 
@@ -110,23 +99,23 @@ def fencing(
             fence_cd.set(my_uid, cfg.fence_cooldown)
             return "深渊魅魔形态下无法与机器人击剑……"
         out = fence_resolve_bot(
-            my_len, my_luck, text,
-            luck_power=cfg.luck_power, mf_cap=cfg.fence_stake_mf_cap,
+            my_len, my_luck, text, cfg,
         )
     else:
-        out = fence_resolve_zerohsum(
+        out = fence_resolve_pvp(
             my_len,
             oppo_len,
             my_luck,
             lambda: store.get_fence_luck(oppo_uid),
             text,
             cfg,
-            oppo_is_bot=False,
-            luck_power=cfg.luck_power,
         )
 
-    _commit_fence_result(
-        store, my_uid, origin_my, out.my_new, oppo_uid, origin_oppo, out.oppo_new,
-        oppo_is_bot, cfg, action=out.action, oppo_action=out.oppo_action,
-    )
+    try:
+        _commit_fence_result(
+            store, my_uid, origin_my, out.my_new, oppo_uid, origin_oppo, out.oppo_new,
+            oppo_is_bot, cfg, action=out.action, oppo_action=out.oppo_action,
+        )
+    except FencingConflictError as exc:
+        return str(exc)
     return out.msg

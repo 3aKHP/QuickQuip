@@ -37,6 +37,7 @@ scripts/maintenance/*
 !scripts/maintenance/backfill_chat_archive.py
 !scripts/maintenance/backfill_record_identities.py
 !scripts/maintenance/sync_preset_skills.py
+!scripts/maintenance/reset_niuniu_lengths.py
 README.md
 CHANGELOG.md
 ROADMAP.md
