@@ -23,7 +23,7 @@ src/quickquip/games/
     ├── events.py         ← 事件定义 + 消息模板 + get_comment()
     ├── gluing.py         ← 编排层（打胶消息 / CD / 写库，数值委托 dynamics）
     ├── fencing.py        ← 编排层（击剑消息 / CD / 写库，数值委托 dynamics）
-    ├── dynamics.py       ← 数值算法纯函数 glue_resolve / fence_resolve / fence_resolve_zerohsum / fence_resolve_bot
+    ├── dynamics.py       ← 数值算法纯函数 glue_resolve / fence_resolve_pvp / fence_resolve_bot
     └── text.py           ← NiuNiuText 数据类、TOML 加载器、内置文案预设
 ```
 

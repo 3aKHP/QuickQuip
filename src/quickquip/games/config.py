@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field, fields
+import logging
+import math
 from pathlib import Path
 import tomllib
 from typing import Any
@@ -117,43 +119,54 @@ class NiuNiuConfig:
     # Fencing event tuning
     fence_critical_multiplier: float = 1.8
     fence_glancing_multiplier: float = 0.4
-    fence_dominate_multiplier: float = 3.0
+    fence_dominate_multiplier: float = 2.0
+    fence_heavy_multiplier: float = 3.0
     fence_dominate_sever_chance: float = 0.4
     fence_dominate_threshold: float = 50.0
-    fence_devour_steal_ratio: float = 0.3
+    fence_devour_multiplier: float = 2.5
     fence_devour_threshold: float = 50.0
-    fence_draw_min: float = 0.5
-    fence_draw_max: float = 2.0
-
-    # Zero-sum fencing stake tuning
-    # stake = base × U(base_min, base_max) × balance × multiplier × mf
-    # base_mode: "geo" 用几何均值 √(|my|·|oppo|)，"min" 用较短方
-    # mf = min(luck^luck_power, mf_cap)，护栏仅约束极端运势日
-    fence_stake_base_min: float = 0.10
-    fence_stake_base_max: float = 0.15
-    fence_stake_balance_floor: float = 0.5
-    fence_stake_mode: str = "geo"
-    fence_stake_mf_cap: float = 30.0
+    # Logarithmic PvP rewards; the loser pays a fraction of the winner reward.
+    fence_reward_base: float = 0.8
+    fence_reward_scale: float = 1.5
+    fence_reward_length_scale: float = 30.0
+    fence_loss_ratio: float = 0.5
 
     # No-niuniu target tuning
     fence_self_hurt_min: float = 0.5
     fence_self_hurt_max: float = 2.5
 
-    # Bot fencing tuning
-    fence_bot_phantom_min: float = 5.0
-    fence_bot_phantom_max: float = 80.0
-
     # Daily luck tuning — log10-symmetric: lg(x) ~ N(0, σ)
-    # σ=1 → ±1σ = [0.1, 10] (one order of magnitude), ±2σ = [0.01, 100] (clamp bounds)
+    # σ=1 → ±1σ = [0.1, 10] (one order of magnitude), ±2σ = [0.01, 100] (typical interval)
     luck_sigma: float = 1.0
 
     # Daily fence luck tuning — same distribution, separate daily roll
     fence_luck_sigma: float = 1.0
 
+    def __post_init__(self) -> None:
+        for name in ("fence_reward_base", "fence_reward_scale", "fence_reward_length_scale",
+                     "fence_loss_ratio", "fence_critical_multiplier", "fence_glancing_multiplier",
+                     "fence_dominate_multiplier", "fence_heavy_multiplier",
+                     "fence_devour_multiplier"):
+            value = getattr(self, name)
+            if not math.isfinite(value) or value < 0:
+                raise ValueError(f"{name} must be finite and nonnegative")
+        if self.fence_reward_scale == 0 or self.fence_reward_length_scale == 0:
+            raise ValueError("Fencing reward scales must be positive")
+        if self.fence_loss_ratio > 1:
+            raise ValueError("fence_loss_ratio must be between 0 and 1")
+
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> NiuNiuConfig:
         if not data:
             return cls()
+        obsolete = {key for key in data if key.startswith("fence_stake_")} | (
+            set(data) & {"fence_devour_steal_ratio", "fence_draw_min", "fence_draw_max",
+                         "fence_bot_phantom_min", "fence_bot_phantom_max"}
+        )
+        if obsolete:
+            logging.getLogger(__name__).warning(
+                "Ignored obsolete niuniu configuration keys: %s", ", ".join(sorted(obsolete))
+            )
         valid = {f.name for f in fields(cls)}
         return cls(**{k: v for k, v in data.items() if k in valid and v is not None})
 
@@ -193,11 +206,14 @@ def load_games_config(path: str | Path) -> GameConfig:
     except (OSError, tomllib.TOMLDecodeError) as exc:
         return GameConfig(load_error=f"无法解析 {config_path}：{exc}", source_path=config_path)
 
-    return GameConfig(
-        economy=EconomyConfig.from_dict(data.get("economy")),
-        number_bomb=NumberBombConfig.from_dict(data.get("number_bomb")),
-        blackjack=BlackjackConfig.from_dict(data.get("blackjack")),
-        russian_roulette=RussianRouletteConfig.from_dict(data.get("russian_roulette")),
-        niuniu=NiuNiuConfig.from_dict(data.get("niuniu")),
-        source_path=config_path,
-    )
+    try:
+        return GameConfig(
+            economy=EconomyConfig.from_dict(data.get("economy")),
+            number_bomb=NumberBombConfig.from_dict(data.get("number_bomb")),
+            blackjack=BlackjackConfig.from_dict(data.get("blackjack")),
+            russian_roulette=RussianRouletteConfig.from_dict(data.get("russian_roulette")),
+            niuniu=NiuNiuConfig.from_dict(data.get("niuniu")),
+            source_path=config_path,
+        )
+    except (ValueError, TypeError) as exc:
+        return GameConfig(load_error=f"无法解析 {config_path}：{exc}", source_path=config_path)

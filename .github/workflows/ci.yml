@@ -64,13 +64,15 @@ jobs:
           $package = Join-Path $env:RUNNER_TEMP 'maintenance-package'
           New-Item -ItemType Directory -Force "$package/scripts/maintenance" | Out-Null
           Copy-Item -Recurse src/quickquip, skills.example $package
-          Copy-Item scripts/maintenance/backfill_chat_archive.py, scripts/maintenance/backfill_record_identities.py, scripts/maintenance/sync_preset_skills.py "$package/scripts/maintenance/"
+          Copy-Item scripts/maintenance/backfill_chat_archive.py, scripts/maintenance/backfill_record_identities.py, scripts/maintenance/sync_preset_skills.py, scripts/maintenance/reset_niuniu_lengths.py "$package/scripts/maintenance/"
           Push-Location $package
           try {
             python scripts/maintenance/sync_preset_skills.py --apply
             if ($LASTEXITCODE -ne 0) { throw 'Packaged Skill sync failed' }
             python scripts/maintenance/sync_preset_skills.py --check
             if ($LASTEXITCODE -ne 0) { throw 'Packaged Skill contents differ' }
+            python scripts/maintenance/reset_niuniu_lengths.py --help
+            if ($LASTEXITCODE -ne 0) { throw 'Packaged niuniu reset helper failed' }
             python scripts/maintenance/backfill_record_identities.py --help
             if ($LASTEXITCODE -ne 0) { throw 'Packaged identities helper failed' }
             python scripts/maintenance/backfill_chat_archive.py --dry-run
@@ -103,6 +105,14 @@ jobs:
             --build-arg PLAYWRIGHT_BASE_IMAGE=python:3.12-slim \
             --build-arg PIP_INDEX_URL=https://pypi.org/simple \
             --build-arg PIP_TRUSTED_HOST=pypi.org .
+      - name: Verify release image maintenance tools
+        run: |
+          docker build -f Dockerfile -t quickquip-release-maintenance-smoke \
+            --build-arg PLAYWRIGHT_BASE_IMAGE=python:3.12-slim \
+            --build-arg PIP_INDEX_URL=https://pypi.org/simple \
+            --build-arg PIP_TRUSTED_HOST=pypi.org .
+          docker run --rm quickquip-release-maintenance-smoke python scripts/maintenance/reset_niuniu_lengths.py --help
+          docker run --rm quickquip-qqsync-smoke python scripts/maintenance/reset_niuniu_lengths.py --help
       - name: Verify real Compose synchronization
         env:
           QUICKQUIP_DOCKER_SMOKE: "1"

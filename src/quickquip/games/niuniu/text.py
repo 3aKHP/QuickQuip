@@ -427,23 +427,23 @@ def _default_fence_events() -> list[dict[str, Any]]:
             ],
             "lose_neg": ["👹 对方牛头人威压！你的牛牛被压得更凹了..."],
             "sever_pos": [
-                "👹 牛头人腰斩！！你一刀斩断了对方的牛牛！{loss} cm 灰飞烟灭！你吸收 {gain} cm！",
-                "⚔️ 牛头人处刑！拦腰斩断！对方损失 {loss} cm，你获得 {gain} cm！",
+                "👹 牛头人重斩！！你一刀斩断了对方的牛牛！{loss} cm 灰飞烟灭！你吸收 {gain} cm！",
+                "⚔️ 牛头人处刑！重创！对方损失 {loss} cm，你获得 {gain} cm！",
                 "🪓 牛头人断头台！对方牛牛被斩落 {loss} cm，你增长了 {gain} cm！",
             ],
             "sever_neg": [
         "👹 牛头人支配！你击穿了对方的防线！"
-        "深度从 {old_oppo} 翻倍至 {new_oppo} cm！你吸收 {gain} cm！",
+        "对方深度变为 {new_oppo} cm！你吸收 {gain} cm！",
                 "深渊之力！牛头人的一击让对方的凹度暴增至 {new_oppo} cm！你获得 {gain} cm！",
             ],
             "severed_pos": [
-                "👹 对方牛头人腰斩！！你的牛牛被斩落 {loss} cm！当前 {my_len} cm",
-                "⚔️ 对方牛头人处刑！你的牛牛被拦腰斩断，损失 {loss} cm！",
+                "👹 对方牛头人重斩！！你的牛牛被斩落 {loss} cm！当前 {my_len} cm",
+                "⚔️ 对方牛头人处刑！你的牛牛被重创，损失 {loss} cm！",
                 "🪓 对方牛头人断头台降临！你被斩落 {loss} cm...",
             ],
             "severed_neg": [
                 "👹 对方牛头人支配！你的凹度从 {old_my} 暴增至 {new_my} cm！",
-                "深渊之力！对方牛头人的一击让你的凹度加倍到 {new_my} cm...",
+                "深渊之力！对方牛头人的一击让你的凹度变为 {new_my} cm...",
             ],
         },
         {
@@ -471,9 +471,9 @@ def _default_fence_events() -> list[dict[str, Any]]:
         {
             "name": "draw", "weight": 5,
             "msg": [
-                "🤝 双方牛牛旗鼓相当！两败俱伤，各损失 {loss} cm！当前 {my_len} cm",
-                "互不相让，双双重伤！你的牛牛损失了 {loss} cm...",
-                "势均力敌！双方牛牛都受到了 {loss} cm 的损伤！",
+                "🤝 双方牛牛旗鼓相当！平局收剑，双方无损！当前 {my_len} cm",
+                "互不相让，平局收剑！双方长度保持不变。",
+                "势均力敌！双方无损结束了这次击剑。",
             ],
         },
     ]
@@ -493,8 +493,8 @@ def _default_fence_bot() -> dict[str, list[str]]:
             "🤖 你被机器人的钢铁牛牛击溃了！损失 {loss} cm...",
         ],
         "draw": [
-            "🤖 你和机器人势均力敌！双方各损失 {loss} cm！当前 {my_len} cm",
-            "🤖 机器人和你打成了平手！两败俱伤，你损失了 {loss} cm...",
+            "🤖 你和机器人势均力敌！双方无损收剑！当前 {my_len} cm",
+            "🤖 机器人和你打成了平手！双方长度保持不变。",
         ],
     }
 
@@ -547,7 +547,7 @@ def _default_luck_fence() -> list[dict[str, Any]]:
         {"min": 0.5, "max": 0.8, "text": "运势中规中矩，可战可不战~"},
         {"min": 0.8, "max": 1.2, "text": "运势良好，可放手一战！"},
         {"min": 1.2, "max": 3.0, "text": "运势高涨！今日击剑胜率提升，出手更稳！"},
-        {"min": 3.0, "max": 999.0, "text": "运势如神！今日剑势极重，输赢都是大场面！！"},
+        {"min": 3.0, "max": 999.0, "text": "运势如神！今日剑势强劲，获胜奖励更加丰厚！！"},
     ]
 
 
@@ -602,6 +602,7 @@ def _default_commands() -> dict[str, Any]:
         "records.empty": "你还没有任何牛牛战绩哦~",
         "records.header": "📋 我的牛牛战绩：",
         "records.label.register": "📝 注册",
+        "records.label.reset_length": "🔄 数值重置",
         "records.label.unsubscribe": "❌ 注销",
         "records.label.gluing": "💦 打胶",
         "records.label.fencing": "⚔️ 击剑（主动）",
