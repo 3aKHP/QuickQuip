@@ -92,6 +92,17 @@ def _fence_reward(a: float, b: float, luck: float, multiplier: float,
                  * random.uniform(0.8, 1.2) * multiplier, 2)
 
 
+class FencingPrecisionError(ValueError):
+    """A stored length cannot represent the intended change to 0.01 cm."""
+
+
+def _fence_new_length(length: float, delta: float) -> float:
+    new_length = round(length + delta, 2)
+    if not math.isfinite(new_length) or round(new_length - length, 2) != delta:
+        raise FencingPrecisionError("牛牛数值超出本次结算所需精度，请管理员离线重置后重试")
+    return new_length
+
+
 # ── gluing step (pure) ──────────────────────────────────────────────────────
 
 
@@ -328,11 +339,11 @@ def fence_resolve_pvp(
     stake = _fence_reward(my_len, oppo_len, reward_luck, multiplier, cfg)
     loss_val = round(stake * cfg.fence_loss_ratio, 2)
     if i_win:
-        my_len = round(my_len + stake, 2)
-        oppo_len = round(oppo_len - loss_val, 2)
+        my_len = _fence_new_length(my_len, stake)
+        oppo_len = _fence_new_length(oppo_len, -loss_val)
     else:
-        my_len = round(my_len - loss_val, 2)
-        oppo_len = round(oppo_len + stake, 2)
+        my_len = _fence_new_length(my_len, -loss_val)
+        oppo_len = _fence_new_length(oppo_len, stake)
 
     # ── per-event message selection ──────────
     if msg_branch == "succubus":
@@ -390,9 +401,9 @@ def fence_resolve_bot(
     """Bot duels have equal win/loss probability and symmetric logarithmic stakes."""
     stake = _fence_reward(my_len, my_len, my_luck, 1.0, cfg)
     if random.random() < 0.5:
-        my_len = round(my_len + stake, 2)
+        my_len = _fence_new_length(my_len, stake)
         msg = random.choice(text.fence_bot["win"]).format(gain=stake, my_len=my_len)
     else:
-        my_len = round(my_len - stake, 2)
+        my_len = _fence_new_length(my_len, -stake)
         msg = random.choice(text.fence_bot["lose"]).format(loss=stake, my_len=my_len)
     return FenceOutcome(my_new=my_len, oppo_new=0.0, msg=msg)

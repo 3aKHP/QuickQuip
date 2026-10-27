@@ -88,6 +88,8 @@ config/games.toml 解析失败 → load_error 记录错误，全部回退默认�
 
 升级配置时移除 `fence_stake_*`、`fence_devour_steal_ratio`、`fence_draw_min/max` 和 `fence_bot_phantom_min/max`。这些旧项会被忽略并产生日志提示。新奖励参数未填写时使用默认值；`luck_power` 继续控制打胶。
 
+长度以 SQLite 浮点数保存。若历史长度过大，导致本次奖励无法精确到 0.01 cm，击剑会提示管理员离线重置；本局双方长度、流水与冷却保持原状。按[离线重置流程](#离线生成牛牛重置库)生成候选库后再继续游戏。
+
 ### 牛牛文案系统
 
 QuickQuip 内置两套牛牛文案预设，通过 TOML 文件驱动，支持按群切换：

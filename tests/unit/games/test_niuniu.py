@@ -667,6 +667,33 @@ class TestFenceRewards:
         assert store.get_length(uid_b) == b
         assert store.get_records(uid_a) == records
 
+    @pytest.mark.parametrize("a,b,roll,is_bot", [
+        (1e20, 1e20, 0., False),  # Both deltas would disappear.
+        (1e16, 10., 0., False),  # Attacker delta would be quantized.
+        (10., 1e16, 0., False),  # Defender precision must prevent either write.
+        (1e20, 10., 0., True),
+        (1e20, 10., .999, True),
+    ])
+    def test_unrepresentable_reward_keeps_lengths_records_and_cooldowns(
+        self, store, uid_a, uid_b, monkeypatch, a, b, roll, is_bot,
+    ):
+        store.update_length(uid_a, a)
+        store.update_length(uid_b, b)
+        store.set_fence_luck(uid_a, 1.)
+        _patch_fence_event(monkeypatch, "normal")
+        _patch_uniform(monkeypatch, 1.)
+        _patch_random(monkeypatch, roll)
+        records_a, records_b = store.get_records(uid_a), store.get_records(uid_b)
+
+        result = fencing(store, uid_a, uid_b, oppo_is_bot=is_bot, group_id="test")
+
+        assert "精度" in result and "重置" in result
+        assert store.get_length(uid_a) == a
+        assert store.get_length(uid_b) == b
+        assert store.get_records(uid_a) == records_a
+        assert store.get_records(uid_b) == records_b
+        assert fence_cd.check(uid_a) == fenced_cd.check(uid_b) == 0
+
     def test_obsolete_options_warn_and_cannot_restore_old_formula(self, caplog):
         cfg = NiuNiuConfig.from_dict({"fence_stake_mf_cap": .01,
                                       "fence_devour_steal_ratio": 100})

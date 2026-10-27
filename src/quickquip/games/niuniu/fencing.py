@@ -7,6 +7,7 @@ import random
 from quickquip.games.config import NiuNiuConfig
 from quickquip.games.niuniu.cooldown import fence_cd, fenced_cd
 from quickquip.games.niuniu.dynamics import (
+    FencingPrecisionError,
     _apply_decay,
     fence_resolve_bot,
     fence_resolve_pvp,
@@ -94,28 +95,28 @@ def fencing(
     cfg = store.config
     my_luck = store.get_fence_luck(my_uid)
 
-    if oppo_is_bot:
-        if my_len < 0:
-            fence_cd.set(my_uid, cfg.fence_cooldown)
-            return "深渊魅魔形态下无法与机器人击剑……"
-        out = fence_resolve_bot(
-            my_len, my_luck, text, cfg,
-        )
-    else:
-        out = fence_resolve_pvp(
-            my_len,
-            oppo_len,
-            my_luck,
-            lambda: store.get_fence_luck(oppo_uid),
-            text,
-            cfg,
-        )
-
     try:
+        if oppo_is_bot:
+            if my_len < 0:
+                fence_cd.set(my_uid, cfg.fence_cooldown)
+                return "深渊魅魔形态下无法与机器人击剑……"
+            out = fence_resolve_bot(
+                my_len, my_luck, text, cfg,
+            )
+        else:
+            out = fence_resolve_pvp(
+                my_len,
+                oppo_len,
+                my_luck,
+                lambda: store.get_fence_luck(oppo_uid),
+                text,
+                cfg,
+            )
+
         _commit_fence_result(
             store, my_uid, origin_my, out.my_new, oppo_uid, origin_oppo, out.oppo_new,
             oppo_is_bot, cfg, action=out.action, oppo_action=out.oppo_action,
         )
-    except FencingConflictError as exc:
+    except (FencingConflictError, FencingPrecisionError) as exc:
         return str(exc)
     return out.msg
