@@ -105,6 +105,14 @@ jobs:
             --build-arg PLAYWRIGHT_BASE_IMAGE=python:3.12-slim \
             --build-arg PIP_INDEX_URL=https://pypi.org/simple \
             --build-arg PIP_TRUSTED_HOST=pypi.org .
+      - name: Verify release image maintenance tools
+        run: |
+          docker build -f Dockerfile -t quickquip-release-maintenance-smoke \
+            --build-arg PLAYWRIGHT_BASE_IMAGE=python:3.12-slim \
+            --build-arg PIP_INDEX_URL=https://pypi.org/simple \
+            --build-arg PIP_TRUSTED_HOST=pypi.org .
+          docker run --rm quickquip-release-maintenance-smoke python scripts/maintenance/reset_niuniu_lengths.py --help
+          docker run --rm quickquip-qqsync-smoke python scripts/maintenance/reset_niuniu_lengths.py --help
       - name: Verify real Compose synchronization
         env:
           QUICKQUIP_DOCKER_SMOKE: "1"
