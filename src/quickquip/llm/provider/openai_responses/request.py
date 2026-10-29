@@ -100,6 +100,8 @@ def build_responses_payload(
                 "name": spec.name,
                 "description": spec.description,
                 "parameters": spec.input_schema,
+                # 保留工具的可选参数，避免上游自动转为严格模式。
+                "strict": False,
             }
             for spec in request.tools
         ]
