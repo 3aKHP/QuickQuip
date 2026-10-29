@@ -44,29 +44,30 @@
 
 ## 管理文档（部署与运维）
 
-- `docs/admin/client-fingerprints.md` → `references/docs-admin-client-fingerprints.md` — 请求指纹 Profile ｜ 关键词：client_fingerprint、default、quickquip、opencode2、codex、claude-code、system、gemini-cli、legacy-gemini、legacy-claude
-- `docs/admin/config-sync.md` → `references/docs-admin-config-sync.md` — 用 qqsync 同步和部署配置 ｜ 关键词：qqsync、refresh、push、pull、.env、QUICKQUIP_DEPLOY_LOCATION、local、cloud、QUICKQUIP_DEPLOY_RUNTIME、source
-- `docs/admin/config-workspace.md` → `references/docs-admin-config-workspace.md` — 用 qqconf 编辑本地配置 ｜ 关键词：qqconf、config/managed/config.db、python -m quickquip.config_workspace、--root /path/to/QuickQuip、--workspace /path/to/workspace、unpack、refresh、pack、--json、.config-workspace/
-- `docs/admin/configuration.md` → `references/docs-admin-configuration.md` — QuickQuip 配置参考 ｜ 关键词：.env、DRIVER、~websockets、~fastapi+~websockets、HOST、0.0.0.0、PORT、8080、QQ_ACCOUNT、ONEBOT_WS_URLS
-- `docs/admin/deployment.md` → `references/docs-admin-deployment.md` — QuickQuip 云端 Docker 部署指南 ｜ 关键词：prod.example/、prod/、scripts/deploy/、scripts/ops/、.env、QQ_ACCOUNT、ONEBOT_ACCESS_TOKEN、DRIVER、~fastapi+~websockets、WEB_ADMIN_PASSWORD
-- `docs/admin/game-config.md` → `references/docs-admin-game-config.md` — 游戏系统管理 ｜ 关键词：/game list、/game stop、/rules、/disable <rule_name>、/enable <rule_name>、config/games.toml、config/games.toml.example、[economy]、sign_base_gold、sign_streak_bonus
+- `docs/admin/client-fingerprints.md` → `references/docs-admin-client-fingerprints.md` — 请求指纹 Profile ｜ 关键词：client_fingerprint、default、opencode2、codex、claude-code、gemini-cli、quickquip、system、legacy-gemini、?key=
+- `docs/admin/config-sync.md` → `references/docs-admin-config-sync.md` — 用 qqsync 同步和部署配置 ｜ 关键词：qqsync、qqsync refresh、qqsync push、qqsync pull、qqconf、.env、qqconf unpack、qqconf pack、QUICKQUIP_DEPLOY_LOCATION、local
+- `docs/admin/config-workspace.md` → `references/docs-admin-config-workspace.md` — 用 qqconf 编辑本地配置 ｜ 关键词：config/managed/config.db、.env、qqconf、.config-workspace/、unpack、refresh、pack、python -m quickquip.config_workspace、--root /path/to/QuickQuip、--workspace /path/to/workspace
+- `docs/admin/configuration.md` → `references/docs-admin-configuration.md` — QuickQuip 配置参考 ｜ 关键词：.env、config/managed/config.db、qqconf pack、local、cloud、qqsync push、generation.toml、awakening.toml、chat_rules.toml、DRIVER
+- `docs/admin/deployment.md` → `references/docs-admin-deployment.md` — QuickQuip 云端 Docker 部署指南 ｜ 关键词：deploy-v4、local、cloud、source、docker、prod.example/、prod/、scripts/deploy/、scripts/ops/、.env
+- `docs/admin/game-config.md` → `references/docs-admin-game-config.md` — 游戏系统管理 ｜ 关键词：config/games.toml、/game list、/game stop、/rules、/disable <rule_name>、/enable <rule_name>、config/games.toml.example、[economy]、sign_base_gold、10
 - `docs/admin/global-admins.md` → `references/docs-admin-global-admins.md` — 全局管理员 ｜ 关键词：config/admins.toml、config/admins.toml.example、ADMIN_TRACE、registry_loaded、global_admin_unlock、SUPERUSERS
 - `docs/admin/installation.md` → `references/docs-admin-installation.md` — 安装与部署方式 ｜ 关键词：.env、start.bat、ONEBOT_WS_URLS、3001、ONEBOT_ACCESS_TOKEN、http://127.0.0.1:5104/ops/、WEB_ADMIN_PASSWORD、deploy-v4、Copy-Item .env.example .env、QQ_ACCOUNT
-- `docs/admin/llm-configuration.md` → `references/docs-admin-llm-configuration.md` — LLM 配置数据库操作 ｜ 关键词：config/managed/config.db、config/llm.json.example、/ops/api/llm-configuration/metadata、config/personas.example/、config/personas/、quickquip-default、.env、OPENAI_API_KEY=你的密钥、my-provider、OPENAI_API_KEY
+- `docs/admin/llm-configuration.md` → `references/docs-admin-llm-configuration.md` — LLM 配置数据库操作指南 ｜ 关键词：config/managed/config.db、config/llm.json.example、/ops/api/llm-configuration/metadata、config/personas.example/、config/personas/、quickquip-default、.env、up -d、my-provider、OPENAI_API_KEY
 - `docs/admin/mcp-servers.md` → `references/docs-admin-mcp-servers.md` — MCP Server 接入指南 ｜ 关键词：py、echo_server.py、Uvicorn running on http://127.0.0.1:8017、http://127.0.0.1:8017/mcp、legacy、2025-03-26、127.0.0.1、host.docker.internal、echo_lab、http
 - `docs/admin/migration-napcat-to-llbot.md` → `references/docs-admin-migration-napcat-to-llbot.md` — NapCat → LLBot 迁移指南 ｜ 关键词：mlikiowa/napcat-docker、initialencounter/llonebot:v7.12.14-7.3.2-45758、docker-compose.example.yml、docker-compose.yml、.env、entrypoint、/bin/sh -c、user@server、http://127.0.0.1:3080、ws-reverse
 - `docs/admin/onebot-adapters.md` → `references/docs-admin-onebot-adapters.md` — OneBot 适配器状态与选择 ｜ 关键词：.env、ONEBOT_WS_URLS、DRIVER、~websockets、~fastapi、ws://<bot 地址>:8080/onebot/v11/ws、ONEBOT_ACCESS_TOKEN、message.group、sender.card、nickname
-- `docs/admin/record-identities.md` → `references/docs-admin-record-identities.md` — 记录身份迁移与验收 ｜ 关键词：requirements.txt、--database、memories、quotes、offline_messages、all、data/llm.db、data/quotes.db、data/offline_messages.db、--path
+- `docs/admin/record-identities.md` → `references/docs-admin-record-identities.md` — 记录身份迁移与验收 ｜ 关键词：requirements.txt、--preview-limit 0、--apply、--database、memories、quotes、offline_messages、all、data/llm.db、data/quotes.db
 - `docs/admin/sensitive-filter.md` → `references/docs-admin-sensitive-filter.md` — 敏感词过滤部署与维护 ｜ 关键词：config/sensitive_words.toml、words、block、soft、/llm reload、/llm health verbose、sensitive_filter、GET /ops/api/sensitive-filter/status、[内容已屏蔽]、/draw
-- `docs/admin/skills.md` → `references/docs-admin-skills.md` — Skill 系统（skills/） ｜ 关键词：skills/、SKILL.md、references/、scripts/、skills.example/、skills、self-docs、skills/self-docs/SKILL.md、cp -r current/skills.example/self-docs skills/、start.bat
-- `docs/admin/storage-migration.md` → `references/docs-admin-storage-migration.md` — 将配置与运行数据分开存储 ｜ 关键词：data/llm_config.db、.env、config/、data/、llm_about/、skills/、config/managed/、QUICKQUIP_MANAGED_CONTAINER=1、QUICKQUIP_DEPLOY_LOCATION=local|cloud、QUICKQUIP_DEPLOY_RUNTIME=source|docker
+- `docs/admin/skills.md` → `references/docs-admin-skills.md` — Skill 系统（`skills/`） ｜ 关键词：skills/、description、SKILL.md、references/、scripts/、.py、.sh、self-docs、host-healthcheck、settings.skills.catalog_dir
+- `docs/admin/storage-migration.md` → `references/docs-admin-storage-migration.md` — 将配置与运行数据分开存储（存储迁移指南） ｜ 关键词：data/llm_config.db、migration_required、init、start.bat、config/managed/config.db、data/config_runtime.db、config/managed/scheduled_messages.json、data/pending_scheduled_messages.json、data/、data/llm.db
 - `docs/admin/tool-discovery.md` → `references/docs-admin-tool-discovery.md` — LLM 工具发现配置 ｜ 关键词：tool_search、settings.tools、enabled、enabled_mode = "replace"、discovery_mode、off、on、auto、discovery_min_tools、discovery_search_limit
-- `docs/admin/web-admin.md` → `references/docs-admin-web-admin.md` — Web Admin 管理后台 ｜ 关键词：/ops/、.env、WEB_ADMIN_PASSWORD、start.bat、http://127.0.0.1:5104/ops/、auth_basic、GET /ops/api/auth/me、Set-Cookie、/ops/api/*、data/web_admin_sessions.db
+- `docs/admin/web-admin.md` → `references/docs-admin-web-admin.md` — Web Admin 管理后台 ｜ 关键词：/ops/、.env、WEB_ADMIN_PASSWORD、start.bat、http://127.0.0.1:5104/ops/、ssh -N -L 5104:127.0.0.1:5104 user@server、web-admin、up -d、/ops/#/stats、awakening_*
 
 ## 开发文档
 
 - `docs/dev/architecture.md` → `references/docs-dev-architecture.md` — QuickQuip 项目架构与结构 ｜ 关键词：README.md、style.md、pip install -e .、python bot.py、.env、prod/、src/quickquip/、chat、common、llm
 - `docs/dev/branching.md` → `references/docs-dev-branching.md` — QuickQuip 开发工作流与发布流程 ｜ 关键词：dev、main、style.md、testing.md、documenting.md、architecture.md、versioning.md、feat、fix、refactor
+- `docs/dev/client-fingerprints.md` → `references/docs-dev-client-fingerprints.md` — 请求指纹与协议转换实现 ｜ 关键词：src/quickquip/llm/client_fingerprints/、defaults/、data/client_identity.json、data/、quickquip、X-Stainless-*、claude-code、opencode2、codex、gemini-cli
 - `docs/dev/config-workspace.md` → `references/docs-dev-config-workspace.md` — qqconf 本地配置工作副本契约 ｜ 关键词：quickquip.config_workspace、qqconf unpack|refresh|pack、db/、configuration.inventory、config_workspace.layout、quickquip.configuration、.qqconf/state.json、None、__quickquip_value__、null
 - `docs/dev/configuration-storage.md` → `references/docs-dev-configuration-storage.md` — 配置与运行存储 ｜ 关键词：config/managed/config.db、scope_settings、niuniu_group_text、config/managed/scheduled_messages.json、data/config_runtime.db、data/llm.db、agent_scopes.private_chat_active、data/niuniu.db、data/pending_scheduled_messages.json、ConfigService
 - `docs/dev/documenting.md` → `references/docs-dev-documenting.md` — QuickQuip 公开文档规范 ｜ 关键词：docs/、README.md、docs/glossary.md、docs/user/、docs/admin/、docs/dev/、docs/dev/adr/、CHANGELOG.md、ROADMAP.md、../index.md
@@ -85,6 +86,7 @@
 - `docs/dev/testing.md` → `references/docs-dev-testing.md` — QuickQuip 测试纪律 ｜ 关键词：style.md、CONTRIBUTING.md、branching.md、in、len(MCP_FAILURE_KINDS) == 8、isinstance(result, str)、sleep、try、assert False、except Exception
 - `docs/dev/tool-discovery.md` → `references/docs-dev-tool-discovery.md` — LLM 工具发现实现说明 ｜ 关键词：tool_search、tool_list、LLMRequest.tools、src/quickquip/llm/tools.py、ToolManifestEntry、src/quickquip/llm/tool_registry.py、src/quickquip/llm/service_parts/tools.py、src/quickquip/llm/tool_discovery.py、loaded_names、src/quickquip/llm/tool_loop.py
 - `docs/dev/versioning.md` → `references/docs-dev-versioning.md` — QuickQuip 版本号约定 ｜ 关键词：Major.Minor.Patch、branching.md、pyproject.toml、version、frontend/package.json、1.15.1-dev.0、1.15.1-dev.1、1.15.1-rc.1、1.15.1、1.16.0-dev.0
+- `docs/dev/web-admin.md` → `references/docs-dev-web-admin.md` — Web Admin 会话与执行机制 ｜ 关键词：auth_basic、429、/ops/、GET /ops/api/auth/me、WEB_ADMIN_PASSWORD、POST /ops/api/auth/login、Set-Cookie、/ops/api/*、POST /ops/api/auth/logout、data/web_admin_sessions.db
 
 ## 架构决策记录（含历史）
 

@@ -72,6 +72,8 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [docs/dev/configuration-storage.md](dev/configuration-storage.md) | 配置、发布执行、作用域与定时任务的存储归属和事务 |
 | [docs/dev/config-workspace.md](dev/config-workspace.md) | qqconf 工作副本格式、值编码、合并与事务契约 |
 | [docs/dev/llm-configuration-frontend.md](dev/llm-configuration-frontend.md) | LLM 配置前端交付——页面任务、保存与应用、字段继承、接口接线和设计验收 |
+| [请求指纹实现](dev/client-fingerprints.md) | 各协议模板的请求身份、Header 与 Body 转换规则 |
+| [Web Admin 实现](dev/web-admin.md) | 后台会话、动作队列与存储机制 |
 | [docs/dev/llm-module.md](dev/llm-module.md) | LLM 模块详解——触发规则、上下文边界、人格注入设计、配置说明、群内命令、部署注意事项 |
 | [docs/dev/mcp-integration.md](dev/mcp-integration.md) | MCP 集成约定——transport 选择、协议协商、部署职责与工具结果处理 |
 | [docs/dev/regex-tutorial.md](dev/regex-tutorial.md) | 正则表达式教程——运行第一个练习、上线一条回复规则，再学习基础语法到进阶特性 |

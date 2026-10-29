@@ -118,7 +118,7 @@ Python 部署调用方通过 `ConfigService.prepare_deployment` 固定目标快�
 
 ## 请求指纹配置
 
-Provider 的固定字段 `client_fingerprint` 缺省为 `default`，由渠道选择；模型参数覆盖该字段会被拒绝。default 的 Chat、Responses、Anthropic、Gemini 分别引用 OpenCode 2、Codex、Claude Code、Gemini CLI 的协议策略；引用与显式选择适用同一动态字段覆盖保护。metadata 的 `client_fingerprints` 数组提供 `id`、`label` 和支持的 `protocols`；Web 按协议提供选择。`settings.runtime.client_cluster` 是可选全局字符串，沿用草稿、保存和应用流程。四个 `x-quickquip-*` 专有头由自有 Profile 管理，附加头冲突返回 `profile_owned_header`。Profile 文件与安装身份契约见[请求指纹 Profile](../admin/client-fingerprints.md)。配置存储升级流程见[存储迁移](../admin/storage-migration.md)。
+Provider 的固定字段 `client_fingerprint` 缺省为 `default`，由渠道选择；模型参数覆盖该字段会被拒绝。default 的 Chat、Responses、Anthropic、Gemini 分别引用 OpenCode 2、Codex、Claude Code、Gemini CLI 的协议策略；引用与显式选择适用同一动态字段覆盖保护。metadata 的 `client_fingerprints` 数组提供 `id`、`label` 和支持的 `protocols`；Web 按协议提供选择。`settings.runtime.client_cluster` 是可选全局字符串，沿用草稿、保存和应用流程。四个 `x-quickquip-*` 专有头由自有 Profile 管理，附加头冲突返回 `profile_owned_header`。Profile 文件编辑见[管理员指南](../admin/client-fingerprints.md)，请求转换与安装身份实现见[开发参考](client-fingerprints.md)。配置存储升级流程见[存储迁移](../admin/storage-migration.md)。
 
 `settings.runtime.claude_code_device_id` 是可选全局 64hex 字符串，写入时规范为小写；空值表示持久随机设备身份。它保存在权威配置 JSON、config_settings 文档及不可变发布快照中，不增加关系索引列。Claude Code 自动 Body 策略拒绝覆盖 `system`、`messages`、`tools` 和受管 `metadata.user_id`，返回 `profile_owned_body`；非法 `metadata` 类型返回 `invalid_field`。
 
