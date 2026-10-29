@@ -268,6 +268,8 @@ class TurnRequestAssembler:
     turn_envelope: str = ""
     messages: list["LLMConversationMessage"] = field(default_factory=list)
 
+    replay_budget: int | None = None
+
     def assemble(self) -> LLMRequest:
         """首轮和预算重建复用已消费的补丁，按最新历史重新去重。"""
         self.history, self.participants, self.scene_patch, self.projected_segments = (
@@ -286,6 +288,7 @@ class TurnRequestAssembler:
                 epoch_key=self.epoch_key,
                 epoch_params=self.epoch_params,
                 provider=self.provider,
+                replay_budget=self.replay_budget,
             )
         )
         mention_profiles = self.collect_mention_profiles(

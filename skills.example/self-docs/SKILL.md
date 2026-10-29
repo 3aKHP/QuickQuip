@@ -17,7 +17,7 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 6. `references/index.md` 是全部页面的标题与关键词总表；路由表和检索都不确定时读它挑页。
 7. 区分成文的当前行为与建议。不要编造命令、配置键、默认值、文件位置或版本状态。
 8. 不要声称查看过该群的实际配置、数据或运行日志，除非对话中已经给出这些事实。
-9. 来源冲突时以公开权威为准：用户语义以 `docs-user-*` 页面为准，配置形态以 `references/docs-admin-configuration.md` 为准，实现约定以 `docs-dev-*` 页面为准。
+9. 概念名称先查术语表；当前用法、配置形态和实现约定分别查用户、管理员和开发契约。设计理由查 ADR，并读取其状态、替代关系和落地核对；`Accepted` 表示方案获接受，实现情况结合当前契约与关联变更判断。`Proposed`、`Rejected` 和 `Superseded` 按提案或历史材料解释。
 10. 引用答案来源的公开文档路径（每篇 reference 头部的 `Generated from` 标记即源路径，如 `docs/user/group-commands.md`）；不要暴露宿主机的绝对路径。
 11. 文档没覆盖的问题，如实说明文档缺失，建议就近的排查面（群管理员、部署日志、`/skill list`）；不要凭训练记忆补洞。
 12. 不要因为是文档 Skill 就执行脚本、修改配置，或把文档指引当作对用户的授权承诺。
@@ -34,6 +34,9 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 | 行为准则、项目价值观（彩蛋 RFC） | `references/root-code_of_conduct.md` |
 | AI 协作约定、协作者说明 | `references/root-claude.md` |
 | 公开文档总导航 | `references/docs-index.md` |
+| 项目术语、概念含义、英文名称与别名 | `references/docs-glossary.md` |
+| 架构决策、设计理由、方案取舍与决策状态 | `references/docs-dev-adr-readme.md` |
+| ADR 编写模板 | `references/docs-dev-adr-template.md` |
 | 群聊命令（触发 AI、语录、留言、管理员命令等） | `references/docs-user-group-commands.md` |
 | 群内游戏玩法（金币经济等） | `references/docs-user-group-games.md` |
 | AI 工具发现（用户视角） | `references/docs-user-llm-tool-discovery.md` |
@@ -75,5 +78,8 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 | 提 Issue（备忘/Memo 模板） | `references/github-issue_template-memo.md` |
 | 提 PR 怎么写（通用模板、变更分级） | `references/github-pull_request_template.md` |
 | 发布 PR 模板（dev → main） | `references/github-pull_request_template-release.md` |
-| 生产运维脚本、部署事务细节 | `references/prod.example-readme.md` |
+| 生产配置模板 | `references/prod.example-readme.md` |
+| 生产运维脚本、部署事务细节 | `references/scripts-deploy-readme.md` |
+| 巡检、登录与指标采集 | `references/scripts-ops-readme.md` |
+| 数据与资产维护 | `references/scripts-maintenance-readme.md` |
 | 全部页面索引（标题 + 关键词） | `references/index.md` |

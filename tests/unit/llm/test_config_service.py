@@ -113,7 +113,7 @@ def test_apply_idempotency_conflict_and_cancel(service):
 def test_expired_lease_is_reclaimed_and_old_owner_fenced(service):
     service.apply(1, "lease")
     first = service.tasks.claim("old")
-    with service.store.connect(write=True) as conn:
+    with service.execution.connect(write=True) as conn:
         conn.execute("UPDATE config_operations SET lease_until=?", (time.time() - 1,))
     second = service.tasks.claim("new")
     assert second["id"] == first["id"]
@@ -206,7 +206,7 @@ def test_interrupted_probe_is_failed_without_replay(service):
     submitted = service.probe("draft", "p", "m", "once")
     claim = service.tasks.claim("old")
     assert claim["id"] == submitted["id"]
-    with service.store.connect(write=True) as conn:
+    with service.execution.connect(write=True) as conn:
         conn.execute("UPDATE config_operations SET lease_until=?", (time.time() - 1,))
     assert service.tasks.claim("new") is None
     result = service.tasks.get(submitted["id"])
@@ -233,26 +233,23 @@ def test_relational_projection_failure_rolls_back_all_draft_changes(service, mon
         assert conn.execute("SELECT alias FROM model_aliases").fetchone()[0] == "short"
 
 
-def test_group_overrides_validate_published_only_and_block_deletion(service, tmp_path):
-    from quickquip.llm.store import LLMStore
-
-    store = LLMStore(tmp_path / "history.db")
+def test_group_overrides_validate_published_only_and_block_deletion(service):
     configured_provider(service)
     with pytest.raises(ConfigError) as exc:
-        service.update_group_override(store, "10001", provider_id="p", model="m")
+        service.update_group_override("10001", provider_id="p", model="m")
     assert exc.value.code == "dependency_conflict"
     submitted = service.apply(2, "publish")
     claim = service.tasks.claim("bot")
     assert claim["id"] == submitted["id"]
     service.publish(claim["id"], claim["claim_token"])
     service.tasks.finish(claim["id"], claim["claim_token"])
-    service.update_group_override(store, "10001", provider_id="p", model="short")
-    assert store.get_group_settings("10001").model == "short"
+    service.update_group_override("10001", provider_id="p", model="short")
+    assert service.scope_settings.get_group_settings("10001").model == "short"
     draft = service.read()["document"]
     draft["providers"][0]["models"][0]["enabled"] = False
     with pytest.raises(ConfigError):
-        service.validate_group_overrides(draft, store)
-    assert store.get_group_settings("10001").provider_id == "p"
+        service.validate_group_overrides(draft)
+    assert service.scope_settings.get_group_settings("10001").provider_id == "p"
 
 
 def test_same_request_id_cannot_retarget_apply(service):
@@ -277,7 +274,7 @@ async def test_provider_only_override_protects_inherited_default_on_apply_and_wr
     initial = service.apply(2, "publish-enabled-default")
     await worker.tick()
     assert service.tasks.get(initial["id"])["status"] == "succeeded"
-    service.update_group_override(runtime.store, "10001", provider_id="p", model=None)
+    service.update_group_override("10001", provider_id="p", model=None)
 
     draft = service.read()
     draft["document"]["providers"][0]["models"][0]["enabled"] = False
@@ -290,15 +287,15 @@ async def test_provider_only_override_protects_inherited_default_on_apply_and_wr
     assert service.status()["published_revision"] == runtime.config.revision == 2
     assert runtime.config.providers["p"].model_enabled["m"]
 
-    service.update_group_override(runtime.store, "10001", provider_id=None, model=None)
+    service.update_group_override("10001", provider_id=None, model=None)
     operation = service.apply(saved["revision"], "disable-without-override")
     await worker.tick()
     assert service.tasks.get(operation["id"])["status"] == "succeeded"
     with pytest.raises(ConfigError) as caught:
-        service.update_group_override(runtime.store, "10001", provider_id="p", model=None)
+        service.update_group_override("10001", provider_id="p", model=None)
     assert caught.value.code == "dependency_conflict"
     assert caught.value.details["model"] == "m"
-    assert runtime.store.get_group_settings("10001").provider_id is None
+    assert runtime.scope_settings.get_group_settings("10001").provider_id is None
     await runtime.shutdown()
 
 
@@ -342,7 +339,9 @@ def test_incomplete_schema_rejected_before_initialization_or_restore(
     object_name,
 ):
     source = service.backup(tmp_path / "tampered.db")
-    with sqlite3.connect(source) as conn:
+    runtime_mutation = object_name in ("config_operations", "one_pending_apply")
+    mutation_path = source.with_name(source.name + ".runtime.db") if runtime_mutation else source
+    with sqlite3.connect(mutation_path) as conn:
         conn.executescript(mutation)
     before = service.read()
     candidate = ConfigService(source)
@@ -457,54 +456,12 @@ def test_unchanged_save_only_relabels_current_draft(service):
     assert service.status()["published_version"]["note"] == "只改备注"
 
 
-def test_schema_2_upgrade_backfills_versions_and_lifts_draft_pricing(tmp_path):
-    from dataclasses import asdict
-
-    from quickquip.llm import config_store
-    from quickquip.llm.config import PricingRates
-    from quickquip.llm.config_document import validate_document
-
-    path = tmp_path / "llm_config.db"
-    doc = empty_document()
-    doc["providers"] = [{
-        "id": "p", "protocol": "openai", "base_url": "https://example.test/v1",
-        "api_key_env": "QQ_TEST_KEY", "default_model": "m", "models": [{"model": "m"}],
-    }]
-    doc = validate_document(doc)
-    rates = asdict(PricingRates(input_per_mtok=1.0))
-    doc["format_version"] = 1
-    doc["pricing"] = [{"provider_id": None, "model": "p/m", **rates}]
-    stored = config_store.dumps(doc)
-    with sqlite3.connect(path) as conn:
-        conn.executescript(config_store._SCHEMA + config_store.declared_schema())
-        conn.execute("INSERT INTO config_meta VALUES(1,2,3,3,?)", (stored,))
-        conn.execute("INSERT INTO config_snapshots VALUES(1,?,100)", (stored,))
-        conn.execute("INSERT INTO config_snapshots VALUES(3,?,300)", (stored,))
-        config_store.project_document(conn, doc)
-    service = ConfigService(path)
+def test_old_schema_requires_offline_layout_migration(service):
+    with sqlite3.connect(service.path) as connection:
+        connection.execute("UPDATE config_meta SET schema_version=3")
     with pytest.raises(ConfigError) as caught:
-        service.initialize()
-    assert caught.value.code == "services_running"
-
-    service.initialize(services_stopped=True)
-    status = service.status()
-    assert status["schema_version"] == 3
-    assert status["published_version"] == {"saved_at": 300.0, "note": ""}
-    draft = service.read()
-    assert draft["revision"] == 3
-    assert draft["document"]["format_version"] == 2
-    assert draft["document"]["pricing"] == [{"provider_id": "p", "model": "m", **rates}]
-    # Immutable snapshots keep their bytes but read back in the current format.
-    assert service.read("published")["document"] == draft["document"]
-    assert service.diff()["changes"] == []
-    with service.store.connect() as conn:
-        snapshot = conn.execute("SELECT document FROM config_snapshots WHERE revision=3")
-        assert snapshot.fetchone()[0] == stored
-        report = conn.execute("SELECT report FROM config_migrations WHERE source='schema-3'")
-        assert '"kind":"converted"' in report.fetchone()[0]
-        projected = conn.execute("SELECT document FROM pricing_rules").fetchone()[0]
-        assert '"provider_id":"p"' in projected
-    assert service.history()["snapshots"][0]["saved_at"] == 300.0
+        service.initialize(services_stopped=True)
+    assert caught.value.code == "unsupported_schema"
 
 
 def test_import_preview_reports_format_1_pricing_upgrade(service):

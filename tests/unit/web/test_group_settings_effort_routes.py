@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import sqlite3
 
 import pytest
 
@@ -63,7 +62,12 @@ def test_put_reasoning_effort_routes_to_store_and_validates(monkeypatch, tmp_pat
         def update_group_settings(self, group_id, **fields):
             calls.append((group_id, fields))
 
-    monkeypatch.setattr(routes, "_store", lambda: FakeStore())
+    repository = routes.get_config_service().scope_settings
+    original_update = repository.update_group_settings
+    def update(group_id, **fields):
+        calls.append((group_id, fields))
+        return original_update(group_id, **fields)
+    monkeypatch.setattr(repository, "update_group_settings", update)
     monkeypatch.setattr(routes, "_DB", tmp_path / "llm.db")
     monkeypatch.setattr(
         routes.audit_logger,
@@ -103,40 +107,12 @@ def test_put_reasoning_effort_routes_to_store_and_validates(monkeypatch, tmp_pat
 
 def test_list_group_settings_projects_reasoning_effort(monkeypatch, tmp_path):
     """列表 SELECT/投影包含 reasoning_effort：预置行的取值原样出现在条目里。"""
-    db_path = tmp_path / "llm.db"
-    conn = sqlite3.connect(db_path)
-    conn.executescript(
-        """
-        CREATE TABLE group_settings (
-            group_id TEXT PRIMARY KEY,
-            enabled INTEGER,
-            memory_enabled INTEGER,
-            auto_memory_enabled INTEGER,
-            agent_delivery_enabled INTEGER,
-            agent_delivery_intermediate_enabled INTEGER,
-            agent_delivery_final_enabled INTEGER,
-            provider_id TEXT,
-            model TEXT,
-            persona_id TEXT,
-            trigger_prefix TEXT,
-            allow_prefix INTEGER,
-            allow_at INTEGER,
-            history_limit INTEGER,
-            reasoning_effort TEXT,
-            updated_at TEXT NOT NULL
-        );
-        INSERT INTO group_settings (group_id, reasoning_effort, updated_at)
-        VALUES ('10001', 'xhigh', '2026-10-03T00:00:00+00:00');
-        INSERT INTO group_settings (group_id, reasoning_effort, updated_at)
-        VALUES ('10002', NULL, '2026-10-03T00:00:00+00:00');
-        """
-    )
-    conn.commit()
-    conn.close()
+    repository = routes.get_config_service().scope_settings
+    repository.update_group_settings("10001", reasoning_effort="xhigh")
+    repository.update_group_settings("10002", reasoning_effort=None)
 
     import quickquip.app.message_pipeline as message_pipeline
 
-    monkeypatch.setattr(routes, "_DB", db_path)
     monkeypatch.setattr(
         message_pipeline, "stats_tracker", type("T", (), {"to_dict": staticmethod(lambda: {})})()
     )

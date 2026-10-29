@@ -13,7 +13,7 @@
       <UiSkeleton v-if="loading" variant="table" :rows="8" />
       <div v-else-if="error" class="err">{{ error }}</div>
       <template v-else-if="items.length > 0">
-        <div class="table-scroll"><table class="audit-table"><thead><tr><th>时间<UiInfoTip text="记录时间为 UTC（ISO 8601 原始格式），比北京时间慢 8 小时。" /></th><th>操作者<UiInfoTip text="发起该次变更的 Web 后台访问来源 IP（经反向代理时取 X-Forwarded-For 首跳），不是 QQ 号或登录账号。" /></th><th>操作</th><th>目标类型<UiInfoTip text="被操作对象的类别标识，常见取值：rule=聊天规则、group=群管理、memory=记忆、persona=人格、config=配置文件、llm_about=LLM 身份与词库、group_setting=群设置；其余类型见对应功能模块。" /></th><th>目标 ID</th></tr></thead><tbody><template v-for="entry in items" :key="entry.id"><tr class="ar" @click="tg(entry.id)"><td class="col-t">{{ entry.timestamp }}</td><td class="mono">{{ entry.operator }}</td><td><UiTag size="sm" :variant="av(entry.action)">{{ entry.action }}</UiTag></td><td><UiTag size="sm" :variant="tv(entry.target_type)">{{ entry.target_type }}</UiTag></td><td class="mono col-tid">{{ entry.target_id }}</td></tr><tr v-if="exp.has(entry.id)"><td colspan="5"><div class="sum-panels"><div v-if="entry.summary_before" class="sp sp-before"><span class="sl">变更前</span><pre class="json">{{ pj(entry.summary_before) }}</pre></div><div v-if="entry.summary_after" class="sp sp-after"><span class="sl">变更后</span><pre class="json">{{ pj(entry.summary_after) }}</pre></div><div v-if="!entry.summary_before && !entry.summary_after" class="no-sum">无摘要</div></div></td></tr></template></tbody></table></div>
+        <div class="table-scroll"><table class="audit-table"><thead><tr><th>时间<UiInfoTip text="记录时间为 UTC（ISO 8601 原始格式），比北京时间慢 8 小时。" /></th><th>操作者<UiInfoTip text="发起该次变更的 Web 后台访问来源 IP（经反向代理时取 X-Forwarded-For 首跳），不是 QQ 号或登录账号。" /></th><th>操作</th><th>目标类型<UiInfoTip text="被操作对象的类别标识，常见取值：rule=聊天规则、group=群管理、memory=记忆、persona=人格、config=配置文件、llm_about=LLM 身份与词库、group_setting=群设置；其余类型见对应功能模块。" /></th><th>目标 ID</th></tr></thead><tbody><template v-for="entry in items" :key="entry.id"><tr class="ar" @click="tg(entry.id)"><td class="col-t" data-label="时间">{{ entry.timestamp }}</td><td class="mono" data-label="操作者">{{ entry.operator }}</td><td data-label="操作"><UiTag size="sm" :variant="av(entry.action)">{{ entry.action }}</UiTag></td><td data-label="目标类型"><UiTag size="sm" :variant="tv(entry.target_type)">{{ entry.target_type }}</UiTag></td><td class="mono col-tid" data-label="目标 ID">{{ entry.target_id }}</td></tr><tr v-if="exp.has(entry.id)"><td colspan="5"><div class="sum-panels"><div v-if="entry.summary_before" class="sp sp-before"><span class="sl">变更前</span><pre class="json">{{ pj(entry.summary_before) }}</pre></div><div v-if="entry.summary_after" class="sp sp-after"><span class="sl">变更后</span><pre class="json">{{ pj(entry.summary_after) }}</pre></div><div v-if="!entry.summary_before && !entry.summary_after" class="no-sum">无摘要</div></div></td></tr></template></tbody></table></div>
         <div class="pager"><UiButton size="sm" variant="ghost" icon="ChevronLeft" :disabled="page <= 1" @click="go(page - 1)" /><span class="mono page-info">{{ page }} / {{ totalPages }} ({{ total }} 条)</span><UiButton size="sm" variant="ghost" icon="ChevronRight" :disabled="page >= totalPages" @click="go(page + 1)" /></div>
       </template>
       <UiEmpty v-else icon="ShieldCheck" title="暂无审计记录" />
@@ -73,4 +73,36 @@ onMounted(() => load())
 .err { color: var(--qq-danger); font-size: var(--qq-text-sm); }
 .pager { display: flex; align-items: center; justify-content: center; gap: var(--qq-gap-sm); padding-top: var(--qq-gap-sm); border-top: 1px solid var(--qq-border); margin-top: var(--qq-gap-sm); }
 .page-info { font-size: var(--qq-text-xs); color: var(--qq-text-muted); }
+
+/* 移动端降级为卡片行：723px 表格塞进 324px 容器时操作徽标会在首屏被裁成两截，
+   卡片化后每字段独占一行（标签取自 td 的 data-label），不再有横向裁切 */
+@media (max-width: 767px) {
+  .audit-view .table-scroll { overflow-x: visible; }
+  .audit-table, .audit-table tbody { display: block; width: 100%; }
+  .audit-table thead { display: none; }
+  .audit-table tbody tr.ar {
+    display: block;
+    padding: var(--qq-gap-sm) 0;
+    border-top: 1px solid var(--qq-border);
+  }
+  .audit-table tbody tr.ar:first-child { border-top: 0; }
+  .audit-table tbody tr.ar td {
+    display: flex;
+    align-items: center;
+    gap: var(--qq-gap-sm);
+    padding: 2px 0;
+    border-bottom: 0;
+    background: transparent;
+  }
+  .audit-table tbody tr.ar td[data-label]::before {
+    content: attr(data-label);
+    flex: 0 0 56px;
+    color: var(--qq-text-muted);
+    font-size: var(--qq-text-xs);
+  }
+  .audit-table tbody tr.ar td.col-t,
+  .audit-table tbody tr.ar td.col-tid { white-space: normal; word-break: break-all; max-width: none; }
+  .audit-table tbody tr:not(.ar) { display: block; }
+  .audit-table tbody tr:not(.ar) td { display: block; padding: 0 0 var(--qq-gap-sm); border-bottom: 0; background: transparent; }
+}
 </style>

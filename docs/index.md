@@ -8,6 +8,12 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 
 本文档目录帮你按角色快速找到需要的信息。
 
+## 共同参考
+
+| 文件 | 说明 |
+|------|------|
+| [glossary.md](glossary.md) | 项目术语表——部署、配置、会话、执行、历史与扩展能力的统一名称和定义 |
+
 ---
 
 ## 用户手册（群友阅读）
@@ -26,7 +32,11 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | 文件 | 说明 |
 |------|------|
 | [admin/onebot-adapters.md](admin/onebot-adapters.md) | OneBot 适配器状态与选择——协议边界、各适配器部署 profile、准入状态与迁移前验证清单 |
-| [admin/deployment.md](admin/deployment.md) | 云端部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
+| [admin/installation.md](admin/installation.md) | 安装与部署方式——本地／云端、源码／Docker 两个维度的定义、前提与四种组合的教程入口 |
+| [admin/deployment.md](admin/deployment.md) | 云端 Docker 部署指南——服务器选型、Docker Compose 编排、OneBot 协议端登录、贴吧登录态、Web Admin 反代、日常维护与排障 |
+| [admin/storage-migration.md](admin/storage-migration.md) | 配置与运行存储停服迁移、生产升级及回退 |
+| [admin/config-sync.md](admin/config-sync.md) | qqsync 的本地生效、单向推送回流、字段冲突与恢复 |
+| [admin/config-workspace.md](admin/config-workspace.md) | qqconf 的展开、编辑、只读预览、打包与恢复 |
 | [admin/llm-configuration.md](admin/llm-configuration.md) | LLM 数据库配置管理——迁移、草稿保存与应用、JSON 交换、备份恢复及 1.16.1 回退 |
 | [admin/client-fingerprints.md](admin/client-fingerprints.md) | 请求指纹 Profile——品牌 UA、安装与纪元身份及模板配置 |
 | [admin/configuration.md](admin/configuration.md) | 完整配置参考——`.env` 环境变量、LLM 配置数据库、`generation.toml`、`awakening.toml`、`chat_rules.toml`、`games.toml`、`sensitive_words.toml`、`personas/` 所有可配项 |
@@ -48,12 +58,17 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [docs/dev/documenting.md](dev/documenting.md) | 全仓公开文档规范——读者与职责、事实与证据、文风、操作示例、维护与审查 |
 | [docs/dev/style.md](dev/style.md) | 代码规范与架构原则——职责边界、禁止的上帝结构、输入/状态/测试契约 |
 | [docs/dev/testing.md](dev/testing.md) | 测试纪律——保护目标、准入、断言、反模式与删留依据 |
+| [发行物跨版本验收](../tests/release/README.md) | 实际 Windows 包、Docker 镜像与合成旧数据的迁移、回退和启动验证 |
 | [docs/dev/branching.md](dev/branching.md) | 开发工作流与发布流程——六级变更分级、评审（含 KHPilot Bot Review 机制与双轨交叉核对）、验证、release 与 hotfix |
 | [docs/dev/versioning.md](dev/versioning.md) | 版本号约定——三段式版本、主题更新系列、dev 批次与发布候选规则 |
 | [docs/dev/architecture.md](dev/architecture.md) | 项目架构与结构——三层架构、依赖方向、组合根、目录用途与数据边界 |
+| [dev/adr/README.md](dev/adr/README.md) | 架构决策索引——重要选择的背景、理由、状态、替代关系与编写模板 |
+| [../frontend/README.md](../frontend/README.md) | Web Admin 前端模块入口——技术栈、目录约定、开发命令、测试双栈与部署形态 |
 | [docs/dev/record-identities.md](dev/record-identities.md) | 记录正文与成员身份契约——正文片段结构、身份分层缓存与消费口径 |
 | [docs/dev/game-framework.md](dev/game-framework.md) | 游戏框架开发指南——BaseGame 接口、economy API、Session 模式 vs RPG 模式、扩展新游戏步骤 |
 | [docs/dev/llm-configuration-api.md](dev/llm-configuration-api.md) | LLM 配置 API——修订冲突、任务状态、参数 metadata 与前端接口契约 |
+| [docs/dev/configuration-storage.md](dev/configuration-storage.md) | 配置、发布执行、作用域与定时任务的存储归属和事务 |
+| [docs/dev/config-workspace.md](dev/config-workspace.md) | qqconf 工作副本格式、值编码、合并与事务契约 |
 | [docs/dev/llm-configuration-frontend.md](dev/llm-configuration-frontend.md) | LLM 配置前端交付——页面任务、保存与应用、字段继承、接口接线和设计验收 |
 | [docs/dev/llm-module.md](dev/llm-module.md) | LLM 模块详解——触发规则、上下文边界、人格注入设计、配置说明、群内命令、部署注意事项 |
 | [docs/dev/mcp-integration.md](dev/mcp-integration.md) | MCP 集成约定——transport 选择、协议协商、部署职责与工具结果处理 |

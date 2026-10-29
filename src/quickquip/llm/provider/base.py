@@ -105,7 +105,7 @@ def _trace_model(url: str, payload: dict[str, Any]) -> str:
     model = payload.get("model")
     if model:
         return str(model)
-    match = re.search(r"/models/([^/:?]+):", url)
+    match = re.search(r"/models/([^:?]+):(?:streamGenerateContent|generateContent)", url)
     return match.group(1) if match else ""
 
 

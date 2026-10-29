@@ -11,7 +11,7 @@ from __future__ import annotations
 # 含该子串的其他牌（完美打击、究极防御等）互不干扰。新增歧义词在此追加即可。
 EXCLUDED_NAMES: frozenset[str] = frozenset({"打击", "防御"})
 
-# 上游词表快照 SHA（仅供溯源；刷新见 scripts/refresh_sts_lexicon.py）
+# 上游词表快照 SHA（仅供溯源；刷新见 scripts/maintenance/refresh_sts_lexicon.py）
 LEXICON_SOURCE_SHA = "14e05c09dc38"
 
 # ── 公式「xxx了」 ──────────────────────────────────────

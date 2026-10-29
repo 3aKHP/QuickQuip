@@ -8,7 +8,7 @@ import re
 import time
 
 from fastapi import APIRouter, HTTPException, Query, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.responses import FileResponse, Response, StreamingResponse
 
 from quickquip.common.paths import LOGS_DIR
 from quickquip.llm.provider import trace_store
@@ -17,6 +17,7 @@ router = APIRouter()
 
 _LOGS_DIR = LOGS_DIR
 _LOG_FILE_RE = re.compile(r"^quickquip_\d{4}-\d{2}-\d{2}\.log$")
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _STREAM_POLL_SECONDS = 1.0
 _STREAM_HEARTBEAT_SECONDS = 20.0
 _MAX_TAIL_LINES = 500
@@ -225,10 +226,50 @@ def list_trace_calls(
 
 
 @router.get("/logs/trace/calls/{call_id}")
-def get_trace_call(call_id: str):
-    """Load the complete HTTP text payload for one selected Trace call."""
+def get_trace_call(call_id: str, restore: bool = False):
+    """Load one Trace call, optionally splicing media blobs back in.
 
-    entry = trace_store.get_call(call_id)
+    默认返回含 ``[qq:blob sha256=... bytes=...]`` 占位符的文本（文本量小，
+    前端不必渲染数 MB JSON）；``restore=true`` 时按 manifest 回拼并校验，
+    返回字节级原始报文，重放验收场景直接可用。
+
+    ``restore`` 刻意用普通默认值而不是 ``Query(default=False)``：后者在
+    FastAPI 之外被直接调用时拿到的是 Query 对象（真值），会把默认路径走成
+    restore 分支。普通 ``bool`` 默认值 FastAPI 同样按查询参数解析。
+    """
+
+    if not restore:
+        entry = trace_store.get_call(call_id)
+        if entry is None:
+            raise HTTPException(status_code=404, detail="trace call not found")
+        return entry
+    try:
+        entry = trace_store.restore_call(call_id)
+    except ValueError as error:
+        raise HTTPException(
+            status_code=409, detail=f"trace restore failed: {error}"
+        ) from error
     if entry is None:
         raise HTTPException(status_code=404, detail="trace call not found")
     return entry
+
+
+@router.get("/logs/trace/blobs/{sha256}")
+def get_trace_blob(sha256: str):
+    """Download one content-addressed media blob by its sha256 digest."""
+
+    if not _SHA256_RE.fullmatch(sha256):
+        raise HTTPException(status_code=422, detail="invalid blob digest")
+    result = trace_store.download_blob(sha256)
+    if result is None:
+        raise HTTPException(status_code=404, detail="blob not found")
+    data, _ = result
+    return Response(
+        content=data,
+        media_type="application/octet-stream",
+        headers={
+            "Content-Disposition": f'attachment; filename="{sha256}.bin"',
+            "X-Content-Type-Options": "nosniff",
+            "Content-Security-Policy": "default-src 'none'; sandbox",
+        },
+    )

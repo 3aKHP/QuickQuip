@@ -41,7 +41,7 @@
         </div>
         <div class="add-group-row">
           <input v-model="newGroupId" placeholder="群号" style="width:160px" @keyup.enter="doAddGroupMode" />
-          <select v-model="newGroupMode"><option v-for="m in textModes" :key="m" :value="m">{{ m }}</option></select>
+          <select v-model="newGroupMode"><option value="" disabled>选择模式</option><option v-for="m in textModes" :key="m" :value="m">{{ m }}</option></select>
           <UiButton icon="Plus" :loading="addModeLoading" @click="doAddGroupMode">设置</UiButton>
         </div>
         <div v-if="textModeGroups.length" class="table-scroll" style="margin-top:var(--qq-gap-md)"><table><thead><tr><th>群号</th><th class="num">当前模式</th><th class="num">切换</th></tr></thead><tbody><tr v-for="g in textModeGroups" :key="g.group_id"><td class="mono">{{ g.group_id }}</td><td class="num"><UiTag size="sm" :variant="g.text_mode === textDefault ? 'warn' : 'info'">{{ g.text_mode }}</UiTag></td><td class="num"><select :value="g.text_mode" @change="doSwitchMode(g.group_id, ($event.target as HTMLSelectElement).value)"><option v-for="m in textModes" :key="m" :value="m">{{ m }}</option></select></td></tr></tbody></table></div>
@@ -82,9 +82,9 @@ const rankTabs = [
 const rankLabel = computed(() => RANK_LABELS[rankType.value] || rankType.value)
 const rankColLabel = computed(() => RANK_COL_LABELS[rankType.value] || '长度 (cm)')
 
-const AL: Record<string, string> = { register: '注册', unsubscribe: '注销', gluing: '打胶', fencing: '击剑', fenced: '被击', fencing_draw: '平局', fencing_self_hurt: '自伤', admin_adjust: '修正' }
+const AL: Record<string, string> = { register: '注册', reset_length: '数值重置', unsubscribe: '注销', gluing: '打胶', fencing: '击剑', fenced: '被击', fencing_draw: '平局', fencing_self_hurt: '自伤', admin_adjust: '修正' }
 function al(a: string) { return AL[a] || a }
-function tv(a: string): 'info' | 'success' | 'warn' | 'danger' { return ({ fencing: 'success', fenced: 'danger', gluing: 'info', fencing_draw: 'warn', fencing_self_hurt: 'danger', admin_adjust: 'warn' } as any)[a] || '' }
+function tv(a: string): 'info' | 'success' | 'warn' | 'danger' { return ({ fencing: 'success', fenced: 'danger', gluing: 'info', fencing_draw: 'warn', fencing_self_hurt: 'danger', admin_adjust: 'warn', reset_length: 'info' } as any)[a] || '' }
 
 onMounted(() => { loadRankings(); loadTextModes() })
 async function loadRankings() { rankLoading.value = true; try { const data = await getRankings(rankType.value); rankings.value = data.rankings || []; totalUsers.value = data.total_users || 0 } catch (e: any) { loadError.value = e.message || String(e) } finally { rankLoading.value = false } }

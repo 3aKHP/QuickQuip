@@ -2,6 +2,8 @@
 
 本文面向 LLM 运行时维护者，说明消息触发、Session 与上下文、请求组装、人格和工具的契约。配置与部署操作见[管理员文档](../admin/llm-configuration.md)，实现排障见本页第 11 节。
 
+核心概念见[项目术语表](../glossary.md#session)，会话身份、纪元冻结和执行交付的选择依据见[架构决策索引](adr/README.md)。
+
 ## 1. 模块定位
 
 QuickQuip 的 LLM 模块为规则机器人提供对话扩展。管理员按群或私聊选择渠道、模型和人格，并控制触发、记忆与工具。默认入口为配置前缀、艾特机器人和 `/search`；群聊唤醒按第 3 节的开关与条件启用。
@@ -9,6 +11,14 @@ QuickQuip 的 LLM 模块为规则机器人提供对话扩展。管理员按群�
 模块支持图片理解、语音转写、项目搜索后端、Gemini 原生搜索和工具调用。MCP 服务作为外部工具来源接入同一注册表，契约见[MCP 集成说明](mcp-integration.md)。
 
 LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每次 HTTP 尝试写入 `data/llm_trace.db`。请求正文取自实际交给 HTTP 客户端的 UTF-8 JSON 序列化文本；普通响应保留 JSON 解析前的服务端文本；流式响应完整消费 SSE 后，由协议客户端重建 OpenAI Chat Completion、Claude Message、Gemini GenerateContent 或 OpenAI Responses 完整响应对象，同时保留 SSE 传输原文供管理员按需核对。索引、正文和单调递增的状态事件分开存储，Web Admin 先读取轻量调用元数据，管理员选择记录后再加载完整 Header 与正文。`run_tool_call_loop` 为一轮完整交互分配 Agent Loop ID，重试、故障切换和工具结果回送产生的 HTTP 调用按组内序号排列。
+
+启用 `LLM_TRACE_MEDIA_MIN_BYTES` 后，Trace 会在入库前抽取达到门槛的内联 base64 载荷。识别范围为完整 JSON、SSE 的完整单行 JSON data 记录及其中最多四层嵌套 JSON 字符串；data URI 须通过严格 base64 校验，裸编码还须处于明确的媒体字段，例如 `b64_json`、`partial_image_b64`、带媒体类型的 `data` 或图片生成结果。普通正文、未达门槛、畸形及不支持的编码形态按原文保存。
+
+载荷原文按 SHA-256 存入 `data/trace_blobs/`，正文替换为 `[qq:blob sha256=<hex> bytes=<n>]`。完全相同的载荷文本跨请求、重组响应和原始 SSE 共用一个文件；data URI 前缀参与哈希。每个正文的替换位置和哈希保存在同一条记录的 `media_truncation` 清单中，原始字节计数保持原义。请求发送路径使用原始载荷。
+
+每份 blob 目录由一份 Trace 数据库拥有。Bot 和 Web 通过该数据库的 `BEGIN IMMEDIATE` 写事务协调载荷创建／复用、引用提交，以及 GC 引用扫描到文件删除的整个区间。每日留存清理后删除无引用且超过一天的文件；文件年龄用于保留失败写入的恢复窗口，并发安全由事务保证。清单无效时跳过该次文件清理。显式清空会删除记录并清理无引用文件，下载入口同时检查记录引用。
+
+管理员详情接口默认返回含占位符的正文，`restore=true` 按清单恢复并核验全文与载荷哈希；文件缺失或校验失败返回 409。blob 下载继承管理员鉴权，统一返回 `application/octet-stream` 附件，并设置 `nosniff` 与限制性 CSP。抽取开关关闭后仍能恢复已抽取记录。配置、备份及升级操作见[管理员配置](../admin/configuration.md#trace-媒体存储)。
 
 ### 1.1 执行记录的请求边界
 
@@ -89,13 +99,13 @@ Responses 对已消费事件的必要字段、流式正文与工具参数的一�
 持久化文件：
 
 - `data/llm.db`
-  - 群级 LLM 设置
+  - 会话运行状态
   - 短期 LLM 会话记录
   - 长期记忆
 
 配置文件：
 
-- `data/llm_config.db`
+- `config/managed/config.db`
   - 真实运行配置，本地私有
 - `config/llm.json.example`
   - 可导入配置数据库的 JSON 交换模板
@@ -198,16 +208,19 @@ HTTP 追踪在列表、详情及 SSE 事件中返回可空的 `session_id`。已
 
 LLM 自身的问答往返会写入 SQLite，用于多轮延续。读取窗口由**会话纪元**（session epoch）管理：
 
-- 每个键（`群 × provider × model`）维护一个只追加的读取锚点：每次触发读取 `id >= 锚点` 的全部历史，窗口随对话增长，锚点保持稳定以支持跨轮前缀缓存
-- 锚点只在三种时机前移：**冷场**（距该键上次 LLM 请求超过 T 秒且窗口超过 H_cold，缩回 L_cold）、**触顶**（窗口超过 cap，缩回 L_hot）或**容量降级**（请求预算超限时由服务层调用 `force_advance_to_hot` 缩回 L_hot 并重建请求重试一次）；默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），全部可在 `settings.runtime` 与渠道／模型 `parameters` 的 `epoch_*` 键调整（见[配置参考](../admin/configuration.md)）
-- 窗口使用 `token_estimate.py` 估算 token；1024 行硬上限同时控制消息数组长度
-- 锚点只落在 user/assistant 对边界，且保留最少 4 行，为超长消息保留基本对话配对
-- 存储裁剪以该群所有纪元键的最老锚点为准；锚点缺失（进程重启后）时只按 2048 行硬上限兜底（`MAX_STORED_CONVERSATION_MESSAGES`，群聊/私聊同值），不按窗口重估删行
-- 锚点状态保存在进程内存中：进程重启后，首个请求按距最新消息约 8k token 的范围懒初始化锚点
-- `/llm context_limit <n>` 将群聊或私聊会话设为保留最新 n 行的滚动窗，上限 1024 行；`/llm context_limit reset` 恢复纪元管理。读取上限由会话覆盖与纪元规则决定；旧 `history_limit` 全局默认和 `history_max_messages_per_group` 保留解析，运行时忽略这两个旧值
+- 每个键（`scope × provider × model`）维护读取锚点、纪元 UUID 和历史表达快照。历史首次进入窗口时确定文本或协议投影；同一纪元后续追加新片段，复用已确定的表达。发送前使用请求副本，重试中的协议降级保持快照不变。
+- **冷场**按该键最近一次 provider 调用开始或结束时间计算空闲：超过 T 秒且可见窗口超过 H_cold 时缩回 L_cold；工具续轮、失败和取消后的结束时间同样刷新活动记录。**触顶**在窗口超过 cap 时缩回 L_hot。默认 T=300s、L_cold=4k、H_cold=5k、L_hot=32k、cap=64k（token 估算），可在渠道／模型 `parameters` 覆盖（见[配置参考](../admin/configuration.md)）。冷场阈值是应用的缩窗策略。
+- 窗口按 `token_estimate.py` 估算 token，行数裁剪目标为 1024。裁剪以完整 Loop 为边界，旧记录按 user/assistant 配对；token 目标有最近两个完整单元的软下限。最新单个 Loop 超过行数目标时完整保留，由回放预算与请求预算控制发送体积。
+- 历史工具投影另受整个历史的回放预算约束。追加后超限时开启新纪元，按 `L_hot / cap` 比例选择完整历史后缀；两个单元的软下限服从回放预算。最新单个 Loop 仍超限时，使用既有精简阶梯确定表达并冻结。请求总预算超限时先缩到热水位；锚点无法前移时收紧回放预算或缩短普通历史，重组重试一次。
+- 撤回、删除、敏感清洗结果或 Loop 修订变化会使相关快照失效；协议归属及投影预算变化也会重建。重建可保留原锚点，纪元 UUID 随之更新。事件分别记录 `history`、`profile`、`budget`，便于区分内容变化与容量变化。
+- 会话消息存储裁剪以所有纪元键的最老锚点为准；无锚点时按 2048 行兜底。Agent 记录达到数量或字节上限时，先以 `retention` 原因推进该会话全部受影响纪元，再删除旧完整 Loop；按时间清理仍保护活动窗口。
+- 快照保存在进程内存中，切换模型释放旧模型的历史表达；重启后首个请求按距最新消息约 8k token 的范围初始化。数据库保存的事实用于重建快照。
+- `/llm context_limit <n>` 将群聊或私聊会话设为目标保留最新 n 行的滚动窗（1–1024），按完整 Loop 对齐，最新单个 Loop 可超过目标；实际窗口变化记录 `context_limit` 事件。`reset` 恢复纪元管理。旧 `history_limit` 全局默认和 `history_max_messages_per_group` 保留解析，运行时忽略这两个旧值。
 - `clear_context` 清理消息与 Agent 执行记录，解除 Session 绑定并推进 generation；提交后清理最近消息缓冲、纪元锚点、信封缓存和 Skill 激活登记。私聊 start/end/resume 使用相应事务与缓存清理流程。
 - `/llm use` 换 provider/model 自动开新纪元（键不同）；`/llm persona use` 按冷场水位前移锚点，以适应人格提示变化后的窗口重建
 - 历史消息按落库时冻结的 `canonical_name` 渲染；用户改名后，历史前缀保留当时的名称
+
+冻结对象是允许进入历史的规范表达。触发行保留 `raw_content` 中的引用、转发和图注，并使用落库身份；当轮信封、【现场】补丁和图片本体保持请求级生命周期，跨轮沿用已保存的文字记录。
 
 **近期消息的【现场】补丁**：LLM 请求通过 `recent_message_buffer.py` 的 `list_patch` 取得增量现场消息：
 
@@ -342,9 +355,9 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 
 ## 6. 配置说明
 
-### 6.1 `data/llm_config.db`
+### 6.1 `config/managed/config.db`
 
-配置服务保留草稿、不可变发布快照、修订号、应用任务与 Bot 心跳。Web 和 CLI 共用校验与修订检查，Bot 以租约领取控制任务；保存草稿不会修改运行时，重启加载已发布版本。每个 Agent Loop 和独立报告任务固定配置、价格、工具与资源直到结束。
+配置库保留草稿、不可变历史和修订号，`data/config_runtime.db` 保存任务固定输入、发布指针、应用任务与 Bot 心跳。存储归属见[配置与运行存储](configuration-storage.md)。Web 和 CLI 共用校验与修订检查，Bot 以租约领取控制任务；保存草稿不会修改运行时，重启加载已发布版本。每个 Agent Loop 和独立报告任务固定配置、价格、工具与资源直到结束。
 
 交换格式的主要字段：
 
@@ -379,7 +392,7 @@ Gemini 3 原生工具回合把 `thoughtSignature` 视为不可解释、不可重
 - `catalog`：`skills/` 目录每轮请求扫描，下一轮使用新的目录内容；路径加固把读取与检索限制在 Skill 目录内，内容按 SHA-256 复验，扫描容忍目录被并发修改
 - `state`：按会话维护激活状态登记，激活随上下文生命周期保持一致（`/llm clear_context` 等清理同步生效）
 - `context`：catalog 块与激活标记的文本渲染（模型可见面的唯一出口，纯函数无状态）
-- `preset_drift`：预置 Skill 漂移检测——`skills/` 与 `skills.example/` 同名目录的全文件字节级指纹比对（只读）；分叉名单变化时记 WARNING，`/skill list` 标注分叉条目，结果只进日志与命令回复，不进 catalog 块与系统提示；`skills.example/` 缺失时 fail-open。主机侧同步脚本 `scripts/sync_preset_skills.py` 按文件路径装载同一实现（stdlib，无 venv 依赖）
+- `preset_drift`：预置 Skill 漂移检测——`skills/` 与 `skills.example/` 同名目录的全文件字节级指纹比对（只读）；分叉名单变化时记 WARNING，`/skill list` 标注分叉条目，结果只进日志与命令回复，不进 catalog 块与系统提示；`skills.example/` 缺失时 fail-open。主机侧同步脚本 `scripts/maintenance/sync_preset_skills.py` 按文件路径装载同一实现（stdlib，无 venv 依赖）
 - `tools/`：四枚工具——`activate_skill`（激活）、`read_skill_resource`（读资料，字节上限）、`search_skill_resources`（内容检索，病态正则拒绝）、`run_skill_script`（脚本执行：隔离最小环境、无 shell、环境变量白名单、工作目录固定、超时与输出上限）
 - `service_parts/skills.py`：描述清单注入系统提示（预算 `catalog_max_bytes`，实际取 min(模型上下文窗口 2%, 此值)）与激活接缝；敏感词联动——Skill 描述命中 block 词表时整只剔除该 Skill，激活注入文本预扫命中时本次不登记
 
@@ -522,7 +535,7 @@ LLM 侧的联网搜索有两条互斥路径：
 
 部署要点：
 
-- 初始化／迁移准备共享 `data/llm_config.db`，Bot 启动加载已发布快照，草稿通过独立任务应用
+- 初始化／迁移准备共享 `config/managed/config.db`，Bot 启动加载已发布快照，草稿通过独立任务应用
 - `config/generation.toml` 启用 ASR 时需要配置可用的 `[asr]` provider
 - `llm_about` 应在运行环境中提供
   - 包括全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录

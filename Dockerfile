@@ -66,7 +66,7 @@ COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
 COPY bot.py web_api.py ./
 COPY pyproject.toml ./
 COPY src/ src/
-COPY scripts/backfill_chat_archive.py scripts/backfill_record_identities.py scripts/sync_preset_skills.py scripts/
+COPY scripts/maintenance/backfill_chat_archive.py scripts/maintenance/backfill_record_identities.py scripts/maintenance/sync_preset_skills.py scripts/maintenance/reset_niuniu_lengths.py scripts/maintenance/
 # --no-deps: runtime deps already installed above. requirements.txt (COPY'd
 # earlier, still present) is read by setuptools dynamic deps during metadata
 # generation, so it must remain in the image at this point.

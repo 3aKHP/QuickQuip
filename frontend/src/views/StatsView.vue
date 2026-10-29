@@ -34,7 +34,7 @@
           </div>
         </UiCard>
       </div>
-      <UiEmpty v-if="!Object.keys(data).length" icon="BarChart3" title="暂无数据" />
+      <UiEmpty v-if="!Object.keys(data).length" icon="BarChart3" title="暂无统计数据" description="统计来自 Bot 在线期间接收的群消息；让 Bot 在群内运行并积累发言后，这里会出现各群的消息总量、活跃用户榜与规则触发榜。" />
     </div>
   </div>
 </template>

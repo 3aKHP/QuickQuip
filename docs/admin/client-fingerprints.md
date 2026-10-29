@@ -17,6 +17,8 @@
 
 JSON 的 `client_fingerprint` 放在渠道对象内；模型参数覆盖不接受该字段。它与 OpenAI Responses 的 `responses_profile` 能力设置分别配置。
 
+模板、业务身份与协议能力分工的选择依据见 [ADR-0014](../dev/adr/0014-client-fingerprint-profiles.md)。
+
 首次从旧 TOML 迁移且存在受管 Body／Header 冲突时，初始化会先失败；应按[首次迁移的 Profile 字段冲突](llm-configuration.md#首次迁移的-profile-字段冲突)处理迁移输入，再进入 Web 选择兼容 Profile。配置数据库准备完成后，渠道的 Profile 选择与手工字段调整可在同一草稿中保存并应用。
 
 ## 自有品牌请求头

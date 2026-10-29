@@ -111,7 +111,9 @@ watch(
   { immediate: true },
 )
 
-;(window as any).__qqToggleTheme = toggleTheme
+if (import.meta.env.DEV) {
+  (window as any).__qqToggleTheme = toggleTheme
+}
 
 onMounted(() => {
   loadTheme()
@@ -121,6 +123,9 @@ onMounted(() => {
 
 onBeforeUnmount(() => {
   detachUnauthorizedHandler()
+  if (import.meta.env.DEV) {
+    delete (window as any).__qqToggleTheme
+  }
 })
 </script>
 
@@ -188,15 +193,6 @@ onBeforeUnmount(() => {
 .page-stage {
   position: relative;
   width: 100%;
-}
-
-/* 需要占满 .content 高度的编辑器类视图在根节点加 page-view-fill，
-   只为这些页接通高度链，避免全局拉伸其他视图 */
-.page-stage:has(> .page-view-fill) {
-  display: flex;
-  flex-direction: column;
-  flex-grow: 1;
-  min-height: 0;
 }
 
 .auth-shell {

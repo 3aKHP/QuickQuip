@@ -432,5 +432,5 @@ def test_format_skill_list_marks_preset_drift(tmp_path, monkeypatch, preset_pair
     text = svc.format_skill_list(1001, chat_type="group")
     assert (
         "- self-docs：预置 v1。"
-        "（与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新）" in text
+        "（与当前版本预置不同，可运行 scripts/maintenance/sync_preset_skills.py 更新）" in text
     )

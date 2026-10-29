@@ -1,5 +1,5 @@
 <template>
-  <div class="skills-view page-view-fill">
+  <div class="skills-view">
     <UiPageHeader title="Skill 管理" subtitle="管理 LLM Skill 目录：在线编辑文本资源、安装第三方 Skill、同步仓库预置">
       <template #subtitle>
         <UiInfoTip text="Skill 每次群聊轮次现扫生效，保存文件后无需重启。scripts/ 下的脚本以 bot 进程权限在本机运行，编辑与安装前请确认来源可信。" />
@@ -44,7 +44,7 @@
 
       <div class="detail-col">
         <div v-if="!selectedName" class="hint-panel">
-          <UiEmpty icon="Sparkles" title="从左侧选择一个 Skill 查看与编辑" />
+          <UiEmpty icon="Sparkles" title="选择一个 Skill 查看与编辑" />
         </div>
         <template v-else>
           <UiLoading v-if="loadingDetail" />
@@ -360,17 +360,22 @@ function openSkillFileForRepair() {
 </script>
 
 <style scoped>
-.skills-view { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; }
+.skills-view { display: flex; flex-direction: column; }
 .error { color: var(--qq-danger); font-size: var(--qq-text-sm); }
 .mono { font-family: var(--qq-font-mono); }
 
 .preset-section { margin-bottom: var(--qq-gap-md); }
 
-.split { display: flex; gap: var(--qq-gap-md); flex: 1; min-height: 0; }
+.split { display: flex; gap: var(--qq-gap-md); }
 
+/* 侧栏吸附在页面滚动容器顶部，长列表在吸附面板内自滚，详情列随页面整高铺开 */
 .list-panel {
   width: 280px;
   flex-shrink: 0;
+  align-self: flex-start;
+  position: sticky;
+  top: var(--qq-gap-lg);
+  max-height: calc(100vh - var(--qq-gap-lg) * 2);
   background: var(--qq-surface);
   border-radius: var(--qq-radius-card);
   box-shadow: var(--qq-shadow-card);
@@ -425,9 +430,7 @@ function openSkillFileForRepair() {
   flex-direction: column;
   flex: 1;
   min-width: 0;
-  min-height: 0;
   gap: var(--qq-gap-sm);
-  overflow-y: auto;
 }
 
 .hint-panel {
@@ -523,8 +526,9 @@ function openSkillFileForRepair() {
 }
 
 @media (max-width: 900px) {
+  /* 分栏改为纵向堆叠：列表收为限高切换器，详情随页面级滚动铺开 */
   .split { flex-direction: column; }
-  .list-panel { width: 100%; max-height: 200px; }
+  .list-panel { width: 100%; max-height: 200px; position: static; }
   .meta-key { width: 88px; }
 }
 </style>

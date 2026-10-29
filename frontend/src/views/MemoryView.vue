@@ -15,7 +15,8 @@
     </div>
     <p v-if="error" class="error">{{ error }}</p>
     <UiLoading v-else-if="loading" />
-    <UiEmpty v-else-if="groupId && memories.length === 0" icon="Brain" title="暂无记忆条目" />
+    <UiEmpty v-else-if="!groupId" icon="Users" title="请先选择群组" description="从上方「群组」下拉选择一个群，即可查看、编辑或新增该群的长期记忆。" />
+    <UiEmpty v-else-if="memories.length === 0" icon="Brain" title="暂无记忆条目" description="该群还没有长期记忆：可在下方「新增记忆」手动添加，或由 Bot 在对话中自动抽取（需在 LLM 配置中开启记忆提取）。" />
 
     <TransitionGroup name="list" tag="div" class="mem-list">
       <UiCard v-for="m in memories" :key="m.id" padding="md" shadow="sm">

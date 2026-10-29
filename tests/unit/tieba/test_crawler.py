@@ -83,6 +83,38 @@ class TestExtractUrlsFromContent:
         assert images == []
 
 
+def _thread_data(share_link: str) -> dict:
+    return {
+        "thread": {
+            "id": "123",
+            "title": "标题",
+            "thread_share_link": share_link,
+            "author": {"name_show": "作者"},
+        },
+        "first_floor": {"content": [{"type": 0, "text": "正文"}]},
+    }
+
+
+class TestThreadUrlNormalization:
+    def test_http_and_https_links_kept(self, crawler: TiebaCrawler):
+        for link in ("https://tieba.baidu.com/p/123", "http://tieba.baidu.com/p/123"):
+            thread = crawler.extract_thread_detail_from_data(_thread_data(link), "回退", "测试")
+            assert thread is not None
+            assert thread.thread_url == link
+
+    def test_non_http_scheme_dropped_to_canonical_url(self, crawler: TiebaCrawler):
+        thread = crawler.extract_thread_detail_from_data(
+            _thread_data("javascript:alert(1)"), "回退", "测试"
+        )
+        assert thread is not None
+        assert thread.thread_url == "https://tieba.baidu.com/p/123"
+
+    def test_empty_link_falls_back_to_canonical_url(self, crawler: TiebaCrawler):
+        thread = crawler.extract_thread_detail_from_data(_thread_data("  "), "回退", "测试")
+        assert thread is not None
+        assert thread.thread_url == "https://tieba.baidu.com/p/123"
+
+
 async def test_collect_threads_fails_when_profile_locked(
     crawler: TiebaCrawler, monkeypatch
 ) -> None:

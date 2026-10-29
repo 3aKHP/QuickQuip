@@ -7,7 +7,7 @@
 确认后由部署者自行清理备份。
 
 本模块刻意保持 stdlib 自包含（仅依赖同包 ``preset_drift``）：主机侧同步
-脚本 ``scripts/sync_preset_skills.py`` 按文件路径装载本模块，与 Web Admin
+脚本 ``scripts/maintenance/sync_preset_skills.py`` 按文件路径装载本模块，与 Web Admin
 后端的包内 import 共用同一份实现，在无项目 venv 的部署驱动机上也能运行。
 """
 

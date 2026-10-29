@@ -1,6 +1,6 @@
-# QuickQuip 云端部署指南
+# QuickQuip 云端 Docker 部署指南
 
-本文面向 Linux 服务器部署者，介绍自动发布与手动安装、首次登录及日常维护。LLM 配置与升级见[配置管理](llm-configuration.md)，外部工具接入见[MCP 接入指南](mcp-servers.md)。
+本文面向 Linux 服务器上的 Docker Compose 部署，介绍自动发布与手动安装、首次登录及日常维护。部署位置与运行方式的定义，以及本地、源码安装入口见[安装与部署方式](installation.md)。LLM 配置与升级见[配置管理](llm-configuration.md)，外部工具接入见[MCP 接入指南](mcp-servers.md)。
 
 ## 前提条件
 
@@ -15,7 +15,7 @@
 
 ## 部署步骤
 
-首次手动安装按下方 1–7 步进行，先准备配置并启动服务，再登录后台启用 LLM。选择部署脚本时，先在本地准备第 3 步所列的模板、配置与资产，并按[生产模板的 SSH 设置](../../prod.example/README.md#ssh-connection)配置服务器连接；搜索服务需先在服务器上准备。准备完成后使用本文后面的[自动部署与版本回滚](#自动部署与版本回滚)。
+首次手动安装按下方 1–7 步进行，先准备配置并启动服务，再登录后台启用 LLM。选择部署脚本时，先在本地准备第 3 步所列的模板、配置与资产，并按[部署工具的 SSH 设置](../../scripts/deploy/README.md#ssh-connection)配置服务器连接；搜索服务需先在服务器上准备。准备完成后使用本文后面的[自动部署与版本回滚](#自动部署与版本回滚)。
 
 ### 1. 服务器上安装 Docker
 
@@ -28,7 +28,7 @@ sudo usermod -aG docker $USER
 
 ### 2. 上传项目
 
-这套 Docker 与部署脚本以 `prod.example/` 作为公共模板，以私有 `prod/` 目录作为实际生产运维目录。不要把 `prod/` 中的真实脚本配置、通知密钥或运行态目录提交到公共仓库。
+生产 Compose 和通知配置示例放在 `prod.example/`，真实配置与协议端登录状态放在私有 `prod/`。通用部署程序位于 `scripts/deploy/`，巡检程序位于 `scripts/ops/`，随仓库版本更新。
 
 ```bash
 # 推荐：从本地私有工作目录上传完整项目
@@ -41,7 +41,8 @@ scp -r /path/to/QuickQuip user@server:/path/to/QuickQuip
 cd /path/to/QuickQuip
 cp .env.example .env
 nano .env  # 按下表填写；QUICKQUIP_SEARXNG_BASE_URL 需取消注释
-cp -r prod.example prod  # prod/ 已存在时会嵌套成 prod/prod.example（部署脚本会中止并提示），详见 prod.example/README.md
+mkdir -p prod
+cp prod.example/docker-compose.yml prod/docker-compose.yml
 ```
 
 启动前在根 `.env` 填写：
@@ -73,7 +74,7 @@ LLM 初次使用将 `config/personas.example/` 复制为 `config/personas/`；�
 - 如启用低频唤醒，`config/awakening.toml` 已存在并填入阈值、兴趣话题和按群覆盖
 - 如启用敏感词过滤，`config/sensitive_words.toml` 已存在并填入部署侧词表
 - 如启用 Skill 系统，`skills/` 目录已放置技能包（预置包从 `skills.example/` 复制，Windows 懒人包首启自动完成；目录为空或不存在时 Skill 工具不注册，详见 [skills.md](skills.md)）
-- `prod/` 已由 `prod.example/` 复制而来，并按服务器环境调整 compose、部署脚本或巡检脚本
+- `prod/docker-compose.yml` 已从模板建立，并按服务器环境调整编排
 - 如需 ServerChan 等运维通知，在 `prod/sendkey.env` 中维护；该文件不被 QuickQuip 应用读取
 
 自动部署会把：
@@ -90,11 +91,11 @@ LLM 初次使用将 `config/personas.example/` 复制为 `config/personas/`；�
 
 若存在 `data/tieba/storage_state.json`，部署脚本还会把它单独上传到云端，供贴吧功能复用本地导出的登录态。
 
-根目录 `.env` 是 QuickQuip 应用的唯一涉密凭证来源。`prod/` 只承载部署脚本、compose 编排、巡检脚本和运维通知密钥。
+根目录 `.env` 是 QuickQuip 应用的唯一涉密凭证来源。`prod/` 保存 Compose 编排、运维通知密钥与协议端登录目录。通用程序直接使用 `scripts/` 中的版本。
 
 ### 4. 启动服务
 
-启动前需先构建 Web Admin 前端（`cd frontend && pnpm install --frozen-lockfile && pnpm build`），产物 `frontend/dist` 会被 web-admin 容器只读挂载。手动部署路径需在服务器安装 Node.js + pnpm 后构建；使用 `prod/deploy-v4.sh` / `prod/deploy-v4.ps1` 部署脚本则在本机自动完成。
+启动前需先构建 Web Admin 前端（`cd frontend && pnpm install --frozen-lockfile && pnpm build`），产物 `frontend/dist` 会被 web-admin 容器只读挂载。手动部署路径需在服务器安装 Node.js + pnpm 后构建；使用 `scripts/deploy/deploy-v4.sh` / `scripts/deploy/deploy-v4.ps1` 部署脚本则在本机自动完成。
 
 ```bash
 cd /path/to/QuickQuip/prod
@@ -122,7 +123,7 @@ docker compose --env-file ../.env up -d
 补充说明：
 
 - **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接协议端（`ONEBOT_WS_URLS` 指向适配器的 WS 服务端，当前默认模板为 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在适配器管理界面启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client（连接拓扑详见 [onebot-adapters.md](onebot-adapters.md)）。deploy 脚本在 `prod/llbot-data` 存在时会自动把 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 反向 WS 配置，正反拓扑可并存。
-- Bot 和 Web 共享本机 `data/llm_config.db`。手动安装使用上面的初始化命令准备配置与独立资产；已有部署升级按[迁移步骤](llm-configuration.md#初始化与升级)执行。部署脚本保留生产库，本地配置库和旧 TOML 由各自的配置运维流程管理。Bot 重启读取已发布快照，草稿通过后台单独应用。Bot 每 30 秒检查 `awakening.toml` 的修改时间并重载。
+- Bot 和 Web 共享本机 `config/managed/config.db`。手动安装使用上面的初始化命令准备配置与独立资产；已有部署升级按[存储迁移步骤](storage-migration.md)执行。部署脚本保留生产库，本地配置库和旧 TOML 由各自的配置运维流程管理。Bot 重启读取已发布快照，草稿通过后台单独应用。Bot 每 30 秒检查 `awakening.toml` 的修改时间并重载。
 - 部署脚本在切换发行目录后强制重建应用容器一次，使源码和配置挂载指向本次发行目录
 - 在线调整 LLM 配置通过 Web Admin“LLM 配置”保存草稿并应用，等待任务完成及 Bot 实际版本确认。修改价格等无关字段保持 MCP 连接；MCP 改动的连接状态独立回报。`/llm reload` 重载已发布配置及相关独立资产，并探活当前模型，可能计费。
 
@@ -140,7 +141,7 @@ python -m quickquip.tieba.login
 data/tieba/storage_state.json
 ```
 
-后续执行 `prod/deploy-v4.ps1`（Windows）或 `bash prod/deploy-v4.sh`（Linux）时，该文件会自动单独上传到云端。
+后续执行 `scripts/deploy/deploy-v4.ps1`（Windows）或 `bash scripts/deploy/deploy-v4.sh`（Linux）时，该文件会自动单独上传到云端。
 
 ### 4.2 CJK 字体文件（词云与 SVG 画图）
 
@@ -229,6 +230,9 @@ ssh -N -L 5104:127.0.0.1:5104 user@server
 
 ```env
 WEB_ADMIN_SESSION_TTL_HOURS=168
+WEB_ADMIN_SESSION_MAX_AGE_HOURS=168
+QUICKQUIP_DEPLOY_LOCATION=cloud
+QUICKQUIP_DEPLOY_RUNTIME=docker
 WEB_ADMIN_COOKIE_SECURE=auto
 ```
 
@@ -246,16 +250,16 @@ WEB_ADMIN_COOKIE_SECURE=auto
 | `../web_api.py` | `/app/web_api.py` | 只读 |
 | `../src` | `/app/src` | 只读（hybrid 源码热更新） |
 
-> 注意：`quickquip` 容器的 `config`、`llm_about` 与共享 `skills/` 挂载保持只读（`:ro`），只有 `web-admin` 需要写权限。
+> `quickquip` 容器的文本配置、`llm_about` 与共享 `skills/` 挂载保持只读（`:ro`）；`config/managed/` 由 Bot/Web 共享可写。Web Admin 的配置与 Skill 管理使用对应读写挂载。
 > `config/sensitive_words.toml` 即使位于同一挂载目录，也不会通过 Web Admin 配置编辑器读取或写入。
 
 ## 自动部署与版本回滚
 
-日常部署推荐使用 `prod/deploy-v4.sh`（Bash）或 `prod/deploy-v4.ps1`（PowerShell）。两端共享远端事务执行器，按清单上传应用文件，预检和构建成功后切换版本目录，并验证容器、OneBot 连接与 Web Admin HTTP。完整前提、参数与目录结构见 [生产模板说明](../../prod.example/README.md)。服务器需具备 rsync、flock、Python ≥ 3.11.8 和 Docker Compose ≥ 2.27。
+日常部署推荐使用 `scripts/deploy/deploy-v4.sh`（Bash）或 `scripts/deploy/deploy-v4.ps1`（PowerShell）。两端共享远端事务执行器，按清单上传应用文件，预检和构建成功后切换版本目录，并验证容器、OneBot 连接与 Web Admin HTTP。完整前提、参数与目录结构见[部署工具指南](../../scripts/deploy/README.md)。服务器需具备 rsync、flock、Python ≥ 3.11.8 和 Docker Compose ≥ 2.27。
 
 执行前，`prod/` 已从 `prod.example/` 复制，根 `.env` 和所选功能配置已填写，`quickquip-prod` 已替换为自己的 SSH 连接名称。首次准备见第 3 步；日常命令位于[自动部署操作](#自动部署操作)。
 
-已有平铺部署首次使用 `--migrate`：先保存服务器上的旧代码与运行镜像作为基线，再部署候选版本。新服务器首次尚未扫码时可显式使用 `--skip-health`，之后完成扫码与健康核验。PowerShell 使用同名参数，指定回滚版本时使用 `-Rollback -ReleaseId <id>`；完整接口见 `bash prod/deploy-v4.sh --help`。
+已有平铺部署若仍使用 `data/llm_config.db`，首次升级使用 `--migrate --migrate-storage`，按[存储迁移](storage-migration.md)保存基线、停止 Bot/Web 并迁移。已完成存储迁移的平铺安装使用 `--migrate --config-sync off`。新服务器首次尚未扫码时可显式使用 `--config-sync off --env local --skip-health`，之后完成扫码与健康核验。PowerShell 对应 `-Migrate -MigrateStorage` 或 `-Migrate -ConfigSync off`；指定回滚版本时使用 `-Rollback -ReleaseId <id>`，完整接口见 `bash scripts/deploy/deploy-v4.sh --help`。
 
 每次发布携带一个版本标识：部署的 `pyproject.toml` 版本加上服务器镜像构建完成时刻（如 `1.15.3-dev.2+build.20260909.065235`），出现在事务日志的 `image built` 与 `release complete` 行中，便于将线上 release 目录与代码版本对上号。
 
@@ -265,27 +269,29 @@ WEB_ADMIN_COOKIE_SECURE=auto
 
 回退至 1.16.1 使用首次迁移前的 TOML 及人格／多模态资产备份；升级后新增的配置不会反向转换成 TOML。新库保留供再次升级，回退应同时核对运行代码与迁移前配置资产。升级与回退前还需备份会话库和追踪库；旧代码运行后再次升级的 Session 身份维护步骤见[回退旧版本后再次升级](llm-configuration.md#回退旧版本后再次升级)。
 
-运行态位于部署根目录的 `data/`、`skills/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../prod.example/README.md#manual-compose-access) 导出部署根目录和版本标识。手动平铺安装按上方 1–7 步进行，版本目录部署由脚本管理。
+运行态位于部署根目录的 `data/`、`skills/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../scripts/deploy/README.md#manual-compose-access) 导出部署根目录和版本标识。手动平铺安装按上方 1–7 步进行，版本目录部署由脚本管理。
+
+日常部署默认推送配置，包含根 `.env`。存储迁移及显式 `--config-sync off` 保留服务器配置；仅在关闭同步时使用 `--env local`（PowerShell：`-EnvSource local`）选择本地凭据。首次升级先保留线上配置，再明确初始同步方向，操作见[配置同步](config-sync.md)。
 
 ### 自动部署操作
 
-以下命令在**本地项目根目录**执行。首次准备见第 3 步及[SSH 设置](../../prod.example/README.md#ssh-connection)；`quickquip-prod` 使用自己的连接名称。先单独运行预览，确认上传内容，再执行部署：
+以下命令在**本地项目根目录**执行。首次准备见第 3 步及[SSH 设置](../../scripts/deploy/README.md#ssh-connection)；`quickquip-prod` 使用自己的连接名称。先单独运行预览，确认上传内容，再执行部署：
 
 ```bash
-bash prod/deploy-v4.sh --dry-run
+bash scripts/deploy/deploy-v4.sh --dry-run
 ```
 
 ```bash
-bash prod/deploy-v4.sh --host-alias quickquip-prod
-bash prod/deploy-v4.sh --status --host-alias quickquip-prod
+bash scripts/deploy/deploy-v4.sh --host-alias quickquip-prod
+bash scripts/deploy/deploy-v4.sh --status --host-alias quickquip-prod
 ```
 
-新服务器首次需要扫码时，首次部署使用 `--skip-health`，之后按第 5、7 步登录，并按[生产模板的首次健康检查](../../prod.example/README.md#commands)核验。版本目录服务器执行 Compose 命令前，按[手动访问说明](../../prod.example/README.md#manual-compose-access)设置路径与版本变量；上面的手动安装命令使用平铺目录。
+新服务器首次需要扫码时，首次部署使用 `--config-sync off --env local --skip-health`，之后按第 5、7 步登录，并按[生产模板的首次健康检查](../../scripts/deploy/README.md#commands)核验。版本目录服务器执行 Compose 命令前，按[手动访问说明](../../scripts/deploy/README.md#manual-compose-access)设置路径与版本变量；上面的手动安装命令使用平铺目录。
 
 回滚由需要恢复上一版本的部署单独执行：
 
 ```bash
-bash prod/deploy-v4.sh --rollback --host-alias quickquip-prod
+bash scripts/deploy/deploy-v4.sh --rollback --host-alias quickquip-prod
 ```
 
 ## 代码更新
@@ -314,10 +320,10 @@ bash prod/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 - 只改了 `frontend/dist`（前端静态文件）时，`docker restart quickquip-web-admin` 即可，无需重建。
 
-**历史数据回灌（可选）**：`scripts/` 随镜像分发两个一次性回灌脚本——`backfill_record_identities.py` 为存量记忆、语录和留言补齐正文片段与成员引用索引（专文见 [record-identities.md](record-identities.md)）；`backfill_chat_archive.py` 把 1.15.2 之前退役的旧每日消息 / 词云 JSONL（`data/daily_msgs/`、`data/wordcloud_msgs/`）导入聊天记录归档库 `data/chat_archive.db`（导入完成后旧 JSONL 目录方可清理）。服务器容器内运行：
+**历史数据回灌（可选）**：`scripts/maintenance/` 随镜像分发两个数据回灌脚本——`backfill_record_identities.py` 为存量记忆、语录和留言补齐正文片段与成员引用索引（专文见 [record-identities.md](record-identities.md)）；`backfill_chat_archive.py` 把 1.15.2 之前退役的旧每日消息 / 词云 JSONL（`data/daily_msgs/`、`data/wordcloud_msgs/`）导入聊天记录归档库 `data/chat_archive.db`（导入完成后旧 JSONL 目录方可清理）。服务器容器内运行：
 
 ```bash
-docker compose --env-file ../.env exec -T quickquip python scripts/backfill_chat_archive.py --dry-run
+docker compose --env-file ../.env exec -T quickquip python scripts/maintenance/backfill_chat_archive.py --dry-run
 ```
 
 `--dry-run` 仅预览；确认统计符合预期后去掉该参数正式执行。脚本统计新增、归因回填、已存在、跳过与写入失败，存在写入失败时返回非零——确认失败为零后再清理旧 JSONL。Windows 懒人包的对应说明见 [README.md](../../README.md)。
@@ -330,7 +336,7 @@ docker compose --env-file ../.env exec -T quickquip python scripts/backfill_chat
 docker compose --env-file ../.env up -d quickquip web-admin
 ```
 
-版本目录部署先按[手动访问步骤](../../prod.example/README.md#manual-compose-access)设置变量，沿用 `--env-file "$QUICKQUIP_ENV_FILE"`。使用根模板或自定义 Compose 的部署沿用启动时的 `-f` 等参数；仅改后台口令时可只更新 `web-admin`。下面的 `restart` 用于重新加载已挂载的 Python 源码。
+版本目录部署先按[手动访问步骤](../../scripts/deploy/README.md#manual-compose-access)设置变量，沿用 `--env-file "$QUICKQUIP_ENV_FILE"`。使用根模板或自定义 Compose 的部署沿用启动时的 `-f` 等参数；仅改后台口令时可只更新 `web-admin`。下面的 `restart` 用于重新加载已挂载的 Python 源码。
 
 ```bash
 # 更新 Python 源码后重启（hybrid 模式下无需重建）

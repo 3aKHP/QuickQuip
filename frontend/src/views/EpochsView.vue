@@ -2,11 +2,13 @@
   <div class="epochs-view">
     <UiPageHeader title="纪元看板" subtitle="锚点推进与上下文窗口运行态：保留条数、驱逐事件与信封成本">
       <template #actions>
-        <router-link to="/llm-config?section=epoch" custom v-slot="{ navigate }">
-          <UiButton variant="ghost" icon="SlidersHorizontal" @click="navigate">调整纪元阈值</UiButton>
-        </router-link>
-        <UiSegmented v-model="range" :options="rangeOptions" aria-label="时间范围" @update:model-value="reloadTimeline" />
-        <UiButton :loading="snapshotLoading" icon="RefreshCw" @click="refreshSnapshot()">刷新快照</UiButton>
+        <div class="page-actions">
+          <router-link to="/llm-config?section=epoch" custom v-slot="{ navigate }">
+            <UiButton variant="ghost" icon="SlidersHorizontal" @click="navigate">调整纪元阈值</UiButton>
+          </router-link>
+          <UiSegmented v-model="range" :options="rangeOptions" aria-label="时间范围" @update:model-value="reloadTimeline" />
+          <UiButton :loading="snapshotLoading" icon="RefreshCw" @click="refreshSnapshot()">刷新快照</UiButton>
+        </div>
       </template>
     </UiPageHeader>
 
@@ -36,13 +38,14 @@
         快照中该会话暂无纪元键——bot 进程重启后首轮请求才会懒初始化锚点。
       </p>
       <p v-if="activeKey?.history_limit != null" class="hint warn-hint">
-        该会话已设置 context_limit = {{ activeKey.history_limit }} 条，纪元退化为行数滚动窗（水位线仅供参考）。
+        该会话已设置 context_limit = {{ activeKey.history_limit }} 条，窗口按完整对话轮对齐；最新单轮超过行数时保留其有界表达（水位线仅供参考）。
       </p>
     </section>
 
     <div class="stat-cards stat-cards--kpi">
-      <UiStatCard label="当前保留条数" :value="kpiRows" unit="条" icon="Layers" tip="锚点之后的窗口行数（bot 进程实时快照）。" />
+      <UiStatCard label="当前保留条数" :value="kpiRows" unit="条" icon="Layers" tip="最近组装的历史窗口行数（bot 进程快照）。" />
       <UiStatCard label="窗口 tokens" :value="kpiTokens" unit="tokens" icon="Database" tip="窗口纪元预算估算（含每行 speaker 标签开销），与请求计量同口径。" />
+      <UiStatCard label="回放估算" :value="fmtTokens(activeKey?.replay_tokens)" :sub="activeKey ? `冻结历史 ${activeKey.frozen_segments} 段` : undefined" unit="tokens" icon="Database" tip="工具历史与原生块的回放估算，单独受回放预算约束。" />
       <UiStatCard label="信封 ≈ 每轮" :value="kpiEnvelope" unit="tok/轮" icon="Mail" tip="【轮次上下文】信封的每轮固定输入成本（时间范围内每轮均值）。" />
       <UiStatCard label="本纪元已存活" :value="kpiAge" icon="Hourglass" :tip="epochAgeTip" />
       <div class="kpi ring-card">
@@ -73,7 +76,7 @@
         <span><i :style="{ background: epochColors.window }" />纪元窗口</span>
         <span v-if="mode === 'stack'"><i :style="{ background: epochColors.envelope }" />信封层</span>
       </div>
-      <EChart v-if="hasChartData" :option="chartOption" :height="380" plot-click @plot-click="onScrub" />
+      <EChart v-if="hasChartData" :option="chartOption" :cursor-at="selectedTime" :height="380" plot-click @plot-click="onScrub" />
       <UiEmpty v-else icon="Activity" title="暂无时间轴数据" description="该会话在时间范围内没有 LLM 请求记录。" />
       <p class="hint">
         <UiIcon name="MousePointerClick" :size="13" /> 点击主图任意位置，把窗口/信封构成条定格到该时刻
@@ -183,6 +186,11 @@ const REASON_NAMES: Record<string, string> = {
   persona: '换人格',
   init: '初始化',
   clear: '清空上下文',
+  budget: '回放或请求预算',
+  context_limit: '会话行数限制',
+  history: '历史修订',
+  profile: '投影配置变化',
+  retention: '保留清理',
 }
 
 const SNAPSHOT_AUTO_MS = 60_000
@@ -326,7 +334,16 @@ function validateSnapshot(result: RuntimeActionResult): EpochSnapshot {
   return result as unknown as EpochSnapshot
 }
 
+let snapshotInFlight = false
+
 async function refreshSnapshot(auto = false) {
+  // 手动点击与 60s auto tick 并发只留一个在飞，避免重复 enqueue 服务端 action
+  if (snapshotInFlight) {
+    // 手动点击撞上在飞请求时给出 loading 反馈（复用在飞请求的结果），不再重复入队
+    if (!auto) snapshotLoading.value = true
+    return
+  }
+  snapshotInFlight = true
   if (!auto) snapshotLoading.value = true
   try {
     const queued = await requestEpochSnapshot()
@@ -342,6 +359,7 @@ async function refreshSnapshot(auto = false) {
       error.value = caught instanceof Error ? caught.message : '快照获取失败'
     }
   } finally {
+    snapshotInFlight = false
     snapshotLoading.value = false
   }
 }
@@ -681,6 +699,8 @@ function epochSpans(): Array<{ from: number; to: number; color: string; index: n
   return spans
 }
 
+// 整树 option：刻意不依赖 selectedTime——cursor 位置由 EChart 的 cursorAt prop
+// 增量合并，播放/擦洗不触发本 computed 重算全 series
 const chartOption = computed(() => {
   const t = chartTheme.value
   const colors = epochColors.value
@@ -822,7 +842,9 @@ const chartOption = computed(() => {
       symbol: 'none',
       silent: true,
       animation: false,
-      data: selectedTime.value != null ? [{ xAxis: selectedTime.value }] : [],
+      // 位置不进整树 option：由 EChart 的 cursorAt prop 按 id 增量合并，
+      // 播放/擦洗只更新这条 markLine，不触发全 series 重建
+      data: [] as Array<{ xAxis: number }>,
       lineStyle: { color: t.textMuted, type: 'dashed' as const, width: 1.2 },
       label: { show: false },
     },
@@ -892,7 +914,8 @@ onMounted(async () => {
     nowTick.value = Date.now()
   }, 1000)
   snapshotTimer = setInterval(() => {
-    void refreshSnapshot(true)
+    // 隐藏标签页不向 bot action queue 提交快照任务
+    if (!document.hidden) void refreshSnapshot(true)
   }, SNAPSHOT_AUTO_MS)
   // 快照优先：refreshSnapshot 内部 ensureDefaultGroup 选快照里最活跃的键；
   // 键空（bot 重启后尚无 chat）时退到会话列表回退选中
@@ -922,6 +945,16 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   gap: 16px;
+}
+.page-actions { display: flex; align-items: center; gap: var(--qq-gap-sm); }
+@media (max-width: 767px) {
+  /* 移动端按钮组换行独占一行；钳制在页内容宽内（main padding = --qq-gap-md），
+     避免按单行 max-content 撑破整页横向滚动 */
+  .page-actions {
+    flex-wrap: wrap;
+    justify-content: flex-end;
+    max-width: calc(100vw - 2 * var(--qq-gap-md));
+  }
 }
 .error {
   color: var(--qq-danger);

@@ -102,7 +102,7 @@ def write_llm_config_bundle(
     """Write the four canonical files into `base_dir` and return their paths."""
     legacy_path = base_dir / "config" / "llm.toml"
     legacy_path.parent.mkdir(parents=True, exist_ok=True)
-    config_path = base_dir / "data" / "llm_config.db"
+    config_path = base_dir / "config" / "managed" / "config.db"
     db_path = base_dir / "llm.db"
     vocab_path = base_dir / "vocab.yaml"
     identity_path = base_dir / "identities.yaml"

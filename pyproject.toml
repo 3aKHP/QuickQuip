@@ -4,9 +4,13 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "quickquip"
-version = "1.16.3"
+version = "1.16.4"
 requires-python = ">=3.11"
 dynamic = ["dependencies"]
+
+[project.scripts]
+qqconf = "quickquip.config_workspace.__main__:main"
+qqsync = "quickquip.config_sync.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

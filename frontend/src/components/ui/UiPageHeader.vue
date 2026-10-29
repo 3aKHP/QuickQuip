@@ -71,6 +71,10 @@ const brickStyle = computed(() => {
 
 .ui-page-header__actions {
   margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: var(--qq-gap-sm);
+  flex-shrink: 0;
 }
 
 .ui-page-header__title {
@@ -79,18 +83,30 @@ const brickStyle = computed(() => {
   font-weight: 600;
   color: var(--qq-text);
   line-height: 1.3;
+  /* CJK 标题优先在词边界折行，仅整词仍溢出时才词内断行 */
+  word-break: keep-all;
+  overflow-wrap: break-word;
 }
 
 .ui-page-header__subtitle {
   font-size: var(--qq-text-sm);
   color: var(--qq-text-muted);
   margin-top: var(--qq-gap-xs);
+  overflow-wrap: break-word;
 }
 
-.ui-page-header__actions {
-  display: flex;
-  align-items: center;
-  gap: var(--qq-gap-sm);
-  flex-shrink: 0;
+@media (max-width: 767px) {
+  /* info 保留最小宽度，避免标题被 brick 与 actions 过度挤压 */
+  .ui-page-header__info {
+    min-width: 12rem;
+  }
+
+  /* actions 独占一行并受行宽约束：flex-basis:100% 使容器按行宽定宽，
+     任意数量按钮在行宽内折行、整体右对齐 */
+  .ui-page-header__actions {
+    flex-basis: 100%;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
 }
 </style>

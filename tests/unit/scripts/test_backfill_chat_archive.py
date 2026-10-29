@@ -6,7 +6,9 @@ import sys
 from pathlib import Path
 
 
-SCRIPT_PATH = Path(__file__).resolve().parents[3] / "scripts" / "backfill_chat_archive.py"
+SCRIPT_PATH = (
+    Path(__file__).resolve().parents[3] / "scripts/maintenance/backfill_chat_archive.py"
+)
 
 
 def _load_script():

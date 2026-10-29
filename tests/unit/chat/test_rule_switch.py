@@ -94,3 +94,19 @@ def test_load_missing_file_is_noop(tmp_path: Path):
     s = GroupRuleSwitch()
     s.load(tmp_path / "missing.json")
     assert len(s.disabled) == 0
+def test_unchanged_shutdown_save_keeps_configuration_absence_and_text(tmp_path):
+    from quickquip.chat.rule_switch import GroupRuleSwitch
+
+    switch = GroupRuleSwitch()
+    path = tmp_path / "rule_switch.json"
+    switch.save(path)
+    assert not path.exists()
+    path.write_text("{  }\n", encoding="utf-8")
+    switch.load(path)
+    switch.save(path)
+    assert path.read_bytes() == b"{  }\n"
+    original = b'{"7001": ["rule_c", "legacy-unknown", "rule_a"]}\n'
+    path.write_bytes(original)
+    switch.load(path)
+    switch.save(path)
+    assert path.read_bytes() == original

@@ -8,6 +8,55 @@
 
 （暂无）
 
+## [1.16.4] - 2026-10-29
+
+本版交付 **qqconf 配置工作副本、qqsync 配置同步与部署、配置和运行存储分离**，并改善管理后台、纪元历史回放、Trace 存储和牛牛击剑结算。
+
+> [!IMPORTANT]
+> **1.16.3 → 1.16.4 包含破坏性变更，需要停服迁移。** 新版检测到旧配置库或混合存储会返回 `migration_required`。按[存储迁移指南](docs/admin/storage-migration.md)选择源码、Windows 包、本地 Docker 或云端 Docker 步骤。
+>
+> 1. 停止 Bot/Web，备份根 `.env`、配置、业务数据和私有资产，保留旧程序或镜像。LLBot 登录资产继续保留。
+> 2. 更新程序、依赖及 Compose 挂载。配置库迁至共享可写的 `config/managed/config.db`，发布和任务状态保存于 `data/config_runtime.db`；循环消息与一次性待办分别存储。
+> 3. 源码使用新版 Python 执行 `python -m quickquip.llm.config_cli migrate-storage --services-stopped`；Windows 使用包内 `python\python.exe`，完成迁移后再运行 `start.bat`。云端 deploy-v4 使用 `--migrate-storage`／`-MigrateStorage`，自动保留服务器配置并关闭本次同步。
+> 4. 保存迁移备份目录，启动新版并检查草稿／发布／实际加载版本、群参数、私聊状态和定时任务。后台旧登录态失效，需要重新登录。
+> 5. 日常 deploy-v4 默认推送配置，包含根 `.env`。首次升级成功后，先预览并明确同步来源；配置工具需在两端真实 `.env` 设置部署位置与运行方式。
+>
+> **回退 1.16.3**：先停止新版 Bot/Web，用新版迁移命令及本次备份目录执行反向转换，再启动旧程序。转换保留升级后业务记录和任务进度；配置备份与 `.runtime.db` 配套文件一同保存。完整回退命令见迁移指南。
+
+### 新增
+
+- **qqconf 本地工作副本**：用 `unpack`、`refresh`、`pack` 编辑数据库配置与原格式文件，支持字段合并、冲突预览和中断恢复。本地部署生成暂存，由 qqsync 生效；云端部署写入本地真实配置，作为推送来源。
+- **qqsync 配置部署与回流**：用 `refresh`、`push`、`pull` 同步完整受管配置，包含渠道、群参数、循环任务、根 `.env` 和运维配置；独立修改按字段合并，线上未发布草稿继续保留。原生与 Docker 服务按原启停状态应用或重启。
+- **Trace 媒体去重存储**：可按内容摘要保存内联媒体，减少多轮请求重复图片的磁盘占用，支持校验后恢复原始报文和附件下载。默认关闭；启用后将 Trace 数据库与 `data/trace_blobs/` 成组备份。感谢雾岛少帅（@xiaoyikunle0710-zy）提供初始实现。
+- **缓存与纪元诊断**：用量页展示请求缓存命中率和字段覆盖率，纪元页显示冻结历史段数、回放估算和窗口重建原因。
+
+### 变更
+
+- 配置文档、群／私聊参数和牛牛文案模式集中维护；私聊响应状态、发布执行和业务记录保留在运行侧。Web 私聊暂停／恢复与参数保存独立操作，重置参数保留会话。
+- 部署事务整合候选配置校验、镜像构建、停服发布、版本切换与健康检查；中断后重复原命令继续确认或恢复。
+- 部署、巡检、维护程序分别归入 `scripts/deploy/`、`scripts/ops/`、`scripts/maintenance/`，生产 Dockerfile 位于 `docker/Dockerfile.prod`。升级时更新 cron、快捷方式和自定义脚本路径；`prod/` 保留真实配置与登录资产。
+- Web Admin 页面按需加载，改善移动端布局、页头按钮、长文阅读和配置编辑区域；长列表达到 500 条时提示缩小检索范围。
+- 牛牛击剑奖励随体量和运势按对数曲线增长，真人败者默认损失为胜者奖励的一半，平局无损。移除旧 `fence_stake_*`、窃取比例、平局损失和机器人幻影长度参数，升级配置见[游戏管理](docs/admin/game-config.md#击剑奖励与配置升级)。既有长度保留，离线重置工具由管理员单独执行。
+- 管理会话增加绝对寿命，默认 168 小时；贴吧同步接口改为 POST，管理 API 文档端点关闭，自定义调用方需按新接口更新。
+
+### 修复
+
+- 纪元内历史表达保持稳定，窗口超限时按完整对话轮重建；修复引用、图注、身份以及 Gemini 流式签名片段的回放缺失，冷场计时覆盖工具续轮和长请求。
+- 修复 Web Admin 请求轮询重叠、后台错误反馈、移动端横向溢出及嵌套滚动区域过小等问题，补齐空态与 Bot 离线提示。
+- 修复 Windows 原生服务控制文件短暂占用导致的启动／恢复失败，以及部署升级和 Windows 维护工具的路径遗漏。
+- 首次升级保留服务器受管搜索配置，防止后续回流被误判为删除。
+- 牛牛双方数值和战绩在同一事务提交；过期结果及无法精确结算到 0.01 cm 的极大历史长度会在写库和设置冷却前拒绝。
+
+### 安全
+
+- 后台会话 ID 哈希落库，登录限流采用受控代理链解析，并限制失败与封禁记录容量；更新反代来源头建议。
+- 后台统一下发 CSP 等安全响应头，服务器错误不再回显内部异常细节，贴吧链接限制为 HTTP／HTTPS。
+- 更新前端依赖与构建工具，并在 CI 中检查生产依赖的高级别安全公告。
+
+### 预置 Skill 变动
+
+self-docs 同步配置工作副本、同步部署、存储迁移和运维入口。已安装副本可通过 Web Admin 或 `python scripts/maintenance/sync_preset_skills.py` 检查，再加 `--apply` 更新；操作见 [Skill 管理](docs/admin/skills.md)。
+
 ## [1.16.3] - 2026-10-16
 
 本版修复 Responses 后端新增流式事件时群聊 LLM 调用失败的问题。
@@ -1137,7 +1186,8 @@ Trace 会随历史请求重复存储内联媒体，多模态请求较多的部�
 - 初始化项目骨架：NoneBot2 + OneBot V11，规则驱动回复
 - 时区猜测、复读检测、好姐姐接龙、文字 meme 回复
 
-[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.16.3...HEAD
+[Unreleased]: https://github.com/3aKHP/QuickQuip/compare/v1.16.4...HEAD
+[1.16.4]: https://github.com/3aKHP/QuickQuip/compare/v1.16.3...v1.16.4
 [1.16.3]: https://github.com/3aKHP/QuickQuip/compare/v1.16.2...v1.16.3
 [1.16.2]: https://github.com/3aKHP/QuickQuip/compare/v1.16.1...v1.16.2
 [1.16.1]: https://github.com/3aKHP/QuickQuip/compare/v1.16.0...v1.16.1

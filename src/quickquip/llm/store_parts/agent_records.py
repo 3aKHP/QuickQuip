@@ -76,7 +76,8 @@ _AGENT_SCHEMA_DDL: tuple[str, ...] = (
     CREATE TABLE IF NOT EXISTS agent_scopes (
         scope_key TEXT PRIMARY KEY,
         generation INTEGER NOT NULL DEFAULT 0,
-        history_revision INTEGER NOT NULL DEFAULT 0
+        history_revision INTEGER NOT NULL DEFAULT 0,
+        private_chat_active INTEGER NOT NULL DEFAULT 0
     )
     """,
     """
@@ -347,6 +348,7 @@ class PruneReport:
     deleted_loop_ids: tuple[str, ...] = ()
     # 硬上限仍无法满足时需要推进的活动纪元锚点（调用方负责 reset，§8.4）。
     blocked_active_anchors: tuple[int, ...] = ()
+    required_anchor_id: int | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -442,6 +444,11 @@ class AgentRecordsStoreMixin:
                 "SELECT version FROM agent_schema_migrations"
             ).fetchall() if self._agent_table_exists(conn, "agent_schema_migrations") else []
             applied_versions = {int(row["version"]) for row in applied}
+            if self._agent_table_exists(conn, "agent_scopes"):
+                columns = {row["name"] for row in conn.execute("PRAGMA table_info(agent_scopes)")}
+                if "private_chat_active" not in columns:
+                    conn.execute("ALTER TABLE agent_scopes ADD COLUMN private_chat_active "
+                                 "INTEGER NOT NULL DEFAULT 0")
             if 1 not in applied_versions:
                 for statement in _AGENT_SCHEMA_DDL:
                     conn.execute(statement)
@@ -1844,6 +1851,7 @@ class AgentRecordsStoreMixin:
         floor_anchor = active[0] if active else None
         deleted: list[str] = []
         blocked: list[int] = []
+        required_anchor_id = None
         conn = self._connect()
         try:
             conn.execute("BEGIN IMMEDIATE")
@@ -1868,6 +1876,22 @@ class AgentRecordsStoreMixin:
                     # 剩余 Loop 全在活动纪元内；硬上限余量只能靠推进锚点。
                     if len(queue) > policy.max_loops or total_bytes > policy.max_bytes:
                         blocked = [floor_anchor]
+                        remaining_bytes = total_bytes
+                        remaining_count = len(queue)
+                        for candidate in queue:
+                            if (remaining_count <= policy.max_loops
+                                    and remaining_bytes <= policy.max_bytes):
+                                break
+                            last_row = conn.execute(
+                                "SELECT MAX(id) FROM conversation_messages WHERE agent_loop_id=?",
+                                (candidate["loop_id"],),
+                            ).fetchone()[0]
+                            required_anchor_id = max(
+                                required_anchor_id or 0,
+                                int(last_row or candidate["anchor_row_id"] or 0) + 1,
+                            )
+                            remaining_bytes -= int(candidate["record_bytes"])
+                            remaining_count -= 1
                     break
                 expired_by_age = str(row["closed_at"]) < cutoff_iso
                 over_count = len(queue) > policy.max_loops
@@ -1885,7 +1909,8 @@ class AgentRecordsStoreMixin:
         finally:
             conn.close()
         return PruneReport(
-            deleted_loop_ids=tuple(deleted), blocked_active_anchors=tuple(blocked)
+            deleted_loop_ids=tuple(deleted), blocked_active_anchors=tuple(blocked),
+            required_anchor_id=required_anchor_id,
         )
 
     def suppress_delivery(self, handle: LoopHandle, delivery_id: str) -> None:

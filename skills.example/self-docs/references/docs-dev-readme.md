@@ -2,13 +2,13 @@
 
 # QuickQuip 开发者文档
 
-本目录存放 QuickQuip 对外公开、当前有效的开发契约。它应足以让贡献者理解代码分层、运行时边界、工程规范和交付流程，无需访问本机私有材料。
+本目录存放 QuickQuip 对外公开的开发契约、工程规范和架构决策记录，帮助贡献者理解代码分层、运行时边界、交付流程及重要选择的依据。
 
 ## 与本地工作区的边界
 
 | 路径 | 是否公开 | 权威性 | 内容 |
 |---|---|---|---|
-| `docs/dev/` | 追踪并公开 | 当前开发与运行时契约 | 架构、工程规范、实现说明、测试与发布流程 |
+| `docs/dev/` | 追踪并公开 | 现行契约；决策记录按状态与适用背景阅读 | 架构、工程规范、实现说明、决策依据、测试与发布流程 |
 | 本地已忽略工作区 | 不公开 | 辅助上下文 | 计划、草稿、私有记录、沙箱、执行证据和历史归档 |
 
 公开开发文档不得依赖本地工作区中的任何文件。私有计划形成长期规则或已发布行为时，应提炼为本目录或相应的用户/管理员文档，并移除本机路径、私有拓扑、账号、token 和其他敏感内容。
@@ -17,6 +17,8 @@
 
 | 文档 | 职责 |
 |---|---|
+| [`../glossary.md`](../glossary.md) | 跨文档概念名称、简短定义与领域契约入口 |
+| [`adr/README.md`](adr/README.md) | 重要技术选择的背景、理由、影响、状态与替代关系 |
 | [`documenting.md`](documenting.md) | 全仓公开文档规范：读者与职责、事实与证据、文风、操作示例、格式、维护与审查 |
 | [`architecture.md`](architecture.md) | 目录结构、分层、依赖方向、组合根和数据/部署边界 |
 | [`style.md`](style.md) | 源码结构、可维护性、类型与输入边界、错误与状态、测试和评审问题 |
@@ -24,6 +26,9 @@
 | [`branching.md`](branching.md) | 分支模型、变更分级、验证、评审（含 KHPilot Bot Review 机制与双轨交叉核对）、发布和 hotfix 流程 |
 | [`versioning.md`](versioning.md) | 主题更新、累积更新、兼容性说明、开发版本与发布候选编号 |
 | [`record-identities.md`](record-identities.md) | 记录正文、共享身份、引用索引与兼容读取契约 |
+| [`../admin/config-sync.md`](../admin/config-sync.md) | qqsync 的单向同步、本地生效与自动恢复操作 |
+| [`configuration-storage.md`](configuration-storage.md) | 配置与运行存储的归属、事务和部署边界 |
+| [`config-workspace.md`](config-workspace.md) | qqconf 工作副本格式、字段合并、候选与恢复事务 |
 | [`llm-configuration-api.md`](llm-configuration-api.md) | LLM 配置修订、结构化交换、参数 metadata 与控制任务的 API 契约 |
 | [`llm-configuration-frontend.md`](llm-configuration-frontend.md) | LLM 配置前端交付契约、用户操作、字段语义、运行状态与验收场景 |
 | [`llm-module.md`](llm-module.md) | LLM 触发、上下文、记忆、provider、配置和运行时边界 |

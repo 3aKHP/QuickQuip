@@ -1,5 +1,6 @@
 from fastapi import FastAPI
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, JSONResponse
+from quickquip.common.config_writes import ConfigurationBusy
 from fastapi.staticfiles import StaticFiles
 from quickquip.app.web import auth
 from quickquip.app.web.routes import (
@@ -50,6 +51,29 @@ def _register_root_redirect(app: FastAPI) -> None:
         return RedirectResponse(f"{_OPS_PREFIX}/")
 
 
+# 全站安全响应头：CSP 允许同源 + data:/https: 图片（词云 base64、贴吧 imgproxy、
+# 总结外链图）与内联样式（组件 style 绑定）；SSE 走同源 connect-src。
+_SECURITY_HEADERS = {
+    "Content-Security-Policy": (
+        "default-src 'self'; img-src 'self' data: https:; "
+        "style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; "
+        "object-src 'none'; base-uri 'self'; frame-ancestors 'none'"
+    ),
+    "X-Content-Type-Options": "nosniff",
+    "Referrer-Policy": "no-referrer",
+    "X-Frame-Options": "DENY",
+}
+
+
+def _register_security_headers(app: FastAPI) -> None:
+    @app.middleware("http")
+    async def _security_headers(request, call_next):
+        response = await call_next(request)
+        for name, value in _SECURITY_HEADERS.items():
+            response.headers.setdefault(name, value)
+        return response
+
+
 def create_app() -> FastAPI:
     load_web_env()
     from quickquip.llm.client_fingerprints.catalog import get_catalog
@@ -60,7 +84,17 @@ def create_app() -> FastAPI:
 
     tieba_service.load()
 
-    app = FastAPI(title="QuickQuip Admin")
+    # 管理 API 的 OpenAPI/文档端点不对网络暴露；llm-configuration 的公开机器契约
+    # 由 scripts/ci/export_llm_configuration_openapi.py 在进程内导出维护。
+    app = FastAPI(title="QuickQuip Admin", docs_url=None, redoc_url=None, openapi_url=None)
+
+    @app.exception_handler(ConfigurationBusy)
+    async def configuration_busy_handler(request, error):
+        return JSONResponse(status_code=409, content={
+            "code": "configuration_busy", "message": str(error),
+        })
+
+    _register_security_headers(app)
 
     app.include_router(auth.router, prefix="/ops/api")
     app.include_router(stats.router, prefix="/ops/api", dependencies=auth.protected_dependencies)
@@ -133,10 +167,6 @@ def create_app() -> FastAPI:
     app.include_router(
         llm_configuration.router, prefix="/ops/api", dependencies=auth.protected_dependencies
     )
-
-    from quickquip.app.web.llm_configuration_schema import enrich_openapi
-    original_openapi = app.openapi
-    app.openapi = lambda: enrich_openapi(original_openapi())
 
     _register_root_redirect(app)
 

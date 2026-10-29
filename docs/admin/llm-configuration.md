@@ -1,8 +1,10 @@
 # LLM 配置数据库操作
 
-本文面向部署者，说明 LLM 配置的初始化、修改、生效及备份恢复。配置保存在 `data/llm_config.db`。渠道、模型、别名、请求参数、风格、价格、级联与全局设置通过 Web Admin 的“LLM 配置”页面维护。JSON 交换示例见 [`config/llm.json.example`](../../config/llm.json.example)，字段类型、继承规则与范围见受保护接口 `/ops/api/llm-configuration/metadata`，开发者接口契约见 [API 文档](../dev/llm-configuration-api.md)。
+本文面向部署者，说明 LLM 配置的初始化、修改、生效及备份恢复。配置保存在 `config/managed/config.db`。渠道、模型、别名、请求参数、风格、价格、级联与全局设置通过 Web Admin 的“LLM 配置”页面维护。JSON 交换示例见 [`config/llm.json.example`](../../config/llm.json.example)，字段类型、继承规则与范围见受保护接口 `/ops/api/llm-configuration/metadata`，开发者接口契约见 [API 文档](../dev/llm-configuration-api.md)。
 
 页面包含渠道与模型、对话与上下文、工具与技能、报告与路由、模型价格、发布与历史六个模块。渠道模块包含模型参数与回复风格，工具模块包含 MCP 状态，发布模块提供 JSON 导入导出与历史管理。顶部状态条展示草稿→已发布→Bot 运行的版本管道；渠道与模型的参数覆盖以“跟随上层/覆盖”表达继承，渠道详情内可直接查看生效参数与发起模型探测。
+
+草稿、修订、快照与加载版本的含义见[配置术语](../glossary.md#config-draft)。
 
 ## 首次启用 LLM
 
@@ -15,7 +17,7 @@
 5. **保存并应用。** 点击页面顶部“保存草稿”，再点击“应用到 Bot”。等待任务成功，确认顶部“Bot 实际运行”与“已发布版本”一致，心跳为新鲜状态。Bot 每 5 秒领取配置任务，运行它的终端或容器应保持启动。
 6. **在测试群提问。** 由群主、群管理员或[全局管理员](global-admins.md)先发送 `/llm on`，再发送 `/llm status` 确认本群 AI 已开启。随后发送 `/ai 请回复“测试成功”`，收到模型回答即完成这条路线。`/ai` 是默认前缀；已自定义前缀的群使用实际设置。提问会发出真实模型请求，按渠道计费。
 
-应用任务一直排队时，先确认 Bot 正在运行并与后台共享配置数据库；任务失败时查看该任务的错误，核对密钥变量、默认模型和人格文件。配置已加载而群内没有回复时，先看 `/llm status` 与触发前缀，再查 Bot 日志中的渠道请求错误。
+应用任务一直排队时，先确认 Bot 正在运行并与后台共享配置及运行数据库；任务失败时查看该任务的错误，核对密钥变量、默认模型和人格文件。配置已加载而群内没有回复时，先看 `/llm status` 与触发前缀，再查 Bot 日志中的渠道请求错误。
 
 ## 初始化与升级
 
@@ -27,7 +29,7 @@ python -m quickquip.llm.config_cli init
 
 初始化检查 `config/llm.toml`。有旧文件时只迁移一次；没有旧文件时建立关闭 LLM、无渠道的配置。已有数据库始终具有权威性，库损坏或 schema 不支持会明确报错。Windows `start.bat` 在启动服务前执行初始化；根 `docker-compose.example.yml` 的 `config-init` 在可写配置挂载中完成迁移，bot 和 Web 等待该服务成功后启动。生产部署脚本在切换前初始化服务器配置；手动生产安装先构建镜像，再按[部署指南第 4 步](deployment.md#4-启动服务)借用 Web 容器运行初始化命令。
 
-配置数据库当前为 schema 3：schema 2 增加请求指纹 Profile 字段，schema 3 增加版本标记（修订保存时间与备注）并把价格统一为按渠道计费。初始化会事务性升级已验证的 schema 1 或 2，保留草稿修订、已发布快照和操作记录。旧 schema 的配置库需要先停止旧 Bot 与 Web、备份数据库，再执行 `python -m quickquip.llm.config_cli init --services-stopped`。普通 Web 请求与部署准备中的初始化会拒绝直接升级这类库，保持旧程序可用。升级后的数据库需要支持 schema 3 的程序。回退旧程序时使用升级前备份。旧 schema 的历史备份可先复制到独立目录，运行新程序的 `init --services-stopped` 升级副本，再按恢复流程导入。升级到 schema 3 时，价格表中的全渠道兜底行会归属到渠道或移除，逐条结果写入升级报告，规则见下文价格。Profile 选择缺省为 `default`，自有品牌需要显式启用，配置见[请求指纹 Profile](client-fingerprints.md)。
+配置数据库为 schema 4，发布执行状态单独保存在 `data/config_runtime.db`。已有 schema 3 安装先按[存储迁移](storage-migration.md)停服切换；schema 1、2 使用支持 schema 3 的旧版本先完成升级。新安装的 `init` 创建配置与运行库，保留草稿保存、单独应用和版本标记的操作方式。Profile 选择缺省为 `default`，配置见[请求指纹 Profile](client-fingerprints.md)。
 
 
 迁移保留认证变量引用。发现认证字面量时，先将密钥写入根目录 `.env` 并把字段改为 `${VARIABLE}`。`api_key_env` 保存环境变量名称。认证 Header 可使用 `Bearer ${VARIABLE}`。数据库、导出、日志和操作错误不包含展开的认证值。
@@ -73,7 +75,7 @@ Web Admin 的“模型价格”按渠道分组：模型从该渠道的模型清�
 
 ### 迁移群绑定与退役渠道
 
-应用返回 `dependency_conflict` 且字段路径为 `group_settings.<scope>` 时，检查该群或私聊的渠道／模型覆盖。已关闭的群或私聊仍可保留覆盖，`/llm off` 不会删除引用。替换渠道时按以下顺序操作：
+应用返回 `dependency_conflict` 且字段路径为 `scope_settings.<scope>` 时，检查该群或私聊的渠道／模型覆盖。已关闭的群或私聊仍可保留覆盖，`/llm off` 不会删除引用。替换渠道时按以下顺序操作：
 
 1. 添加新渠道与模型，保存并应用，使目标成为已发布可用对象。
 2. 在“群 LLM”找到受影响 scope，将渠道／模型改为新目标或跟随默认并保存；私聊也可用 `/llm use <provider> [model]` 迁移。需要移除全部覆盖时，先核对页面“清空”将同时重置的设置。
@@ -82,6 +84,8 @@ Web Admin 的“模型价格”按渠道分组：模型从该渠道的模型清�
 群覆盖保存后用于后续请求，正在执行的请求使用原绑定与配置。
 
 ## CLI
+
+需要分文件审阅、注释和长期编辑时，使用[qqconf 工作副本](config-workspace.md)。`pack` 按根 `.env` 的部署位置写入：local 生成暂存，cloud 写入本地真实配置，再由 qqsync 部署生效。Web 或 JSON CLI 保存的草稿按本文流程单独应用。
 
 在项目根目录运行，可用全局 `--db <路径>` 指定配置库。JSON 导入上限为 1 MiB。除初始化外，命令需要已有配置库。下方演示从修订 1 导入并应用修订 2；执行前用 `status` 查询当前草稿修订，并替换 `--expected-revision`。任务 ID、快照 ID 和请求标识也须按本次操作填写；同一请求重试时复用请求标识。
 
@@ -111,15 +115,15 @@ python -m quickquip.llm.config_cli restore --file data/llm-config-backup.db --se
 
 ## 生产与回退
 
-生产配置通过 Web 或配置运维驱动变更。普通 deploy-v4 保留服务器配置数据库，上传排除本地 DB 和本地旧 LLM TOML；首次切换选择服务器迁移输入，并在候选构建通过后、启动前初始化。迁移后生成的人格文件随生产部署保留。
+生产配置通过 Web 或配置运维驱动变更。deploy-v4 默认[单向推送配置](config-sync.md)，排除本地 DB 和旧 LLM TOML 的原始上传。仍使用 `data/llm_config.db` 的安装先按[存储迁移](storage-migration.md)执行 `--migrate-storage`，该选项保留服务器配置并关闭本次同步。已经完成存储迁移、首次升级同步能力时使用 `--config-sync off`，随后选择初始来源建立基线。候选版本构建通过后初始化配置，配置变更通过服务提交和 Bot 应用确认。
 
-`prod/config-v1.sh` 与 `prod/config-v1.ps1` 提供 SSH CLI 驱动，支持 `status`、`export`、`preview`、`import`、`apply`、`backup` 和 `restore`，见 [生产模板](../../prod.example/README.md)。配置回流通过 JSON 导出；数据库回流通过一致备份。
+`scripts/deploy/legacy/config-v1.sh` 与 `scripts/deploy/legacy/config-v1.ps1` 提供 SSH CLI 驱动，支持 `status`、`export`、`preview`、`import`、`apply`、`backup` 和 `restore`，见 [生产模板](../../prod.example/README.md)。配置回流支持[共同基线同步](config-sync.md)和单独 JSON 导出；数据库回流通过一致备份。
 
 回退至 1.16.1 使用迁移前 TOML、独立人格与 generation 资产。保留新库便于再次升级；升级后的新配置修改不反向导出为 TOML。部署前核对实际配置来源、服务启动顺序和备份。
 
 ### 回退旧版本后再次升级
 
-升级或回退前，备份配置数据库及业务会话库 `data/llm.db`、追踪库 `data/llm_trace.db`；这些数据库分别保存配置、聊天／存档与 HTTP 观测记录。使用一致备份，或先停止 Bot 与 Web 后备份实际数据目录。配置库的 CLI `backup` 只覆盖 `llm_config.db`。
+升级或回退前，备份配置数据库及业务会话库 `data/llm.db`、追踪库 `data/llm_trace.db`；这些数据库分别保存配置、聊天／存档与 HTTP 观测记录。使用一致备份，或先停止 Bot 与 Web 后备份实际数据目录。配置 CLI 的 `backup` 自动保存配置库及同目录配套的 `.runtime.db` 文件，恢复时两份文件一同保留。
 
 若已经运行过 1.16.2，随后回退旧代码并产生会话操作，再次升级时需重新分配业务会话身份。旧程序不会维护新增身份字段：在停止 Bot 与 Web、备份当前 `data/llm.db` 后，对该会话库执行以下维护 SQL，完成后启动新版：
 

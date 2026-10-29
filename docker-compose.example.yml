@@ -76,6 +76,7 @@ services:
     env_file:
       - .env
     environment:
+      QUICKQUIP_MANAGED_CONTAINER: "1"
       DRIVER: "${DRIVER:-~fastapi+~websockets}"
       HOST: "0.0.0.0"
       PORT: "8080"
@@ -86,6 +87,7 @@ services:
     volumes:
       - ./data:/app/data
       - ./config:/app/config:ro
+      - ./config/managed:/app/config/managed
       # 群友身份与黑话词表（可选）。将 llm_about/vocab.yaml.example 和
       # llm_about/identities.yaml.example 复制为 .yaml 并编辑后，取消注释：
       # - ./llm_about:/app/llm_about:ro
@@ -114,6 +116,7 @@ services:
     env_file:
       - .env
     environment:
+      QUICKQUIP_MANAGED_CONTAINER: "1"
       WEB_ADMIN_HOST: "0.0.0.0"
       WEB_ADMIN_PORT: "5104"
       SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"

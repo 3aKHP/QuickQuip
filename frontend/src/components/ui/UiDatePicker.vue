@@ -35,6 +35,7 @@ import { VueDatePicker } from '@vuepic/vue-datepicker'
 import { zhCN } from 'date-fns/locale'
 import { format } from 'date-fns'
 import { useTheme } from '../../composables/useTheme'
+import '../../styles/datepicker.css'
 
 const props = withDefaults(defineProps<{
   /** '' 或模式对应格式的字符串 */

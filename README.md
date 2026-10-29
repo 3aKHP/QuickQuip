@@ -33,12 +33,15 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 - **多模态能力** — 图片生成、语音合成、语音识别、歌词创作与音乐生成、SVG 矢量图本地渲染（LLM `draw_svg` 工具）；模型在对话中生成的图片也会直接送达群聊。统一收口 `config/generation.toml`
 - **Web 管理后台** — LLM 配置数据库与分区工作台，草稿独立应用、保存时间与备注标记、Bot 实际加载状态，以及按渠道管理的模型价格；Vue 3 SPA 仪表板：统计、规则开关、唤醒管理、记忆编辑、对话浏览、配置在线编辑、Skill 管理、词云生成、用量看板、诊断工具、日志浏览。详见 [docs/admin/web-admin.md](docs/admin/web-admin.md)
 - **频率限制** — 滑动窗口限流保护，支持按群独立分桶（`scope = "group"`）或全局合并（`scope = "global"`）
+- **qqconf 本地配置工作副本** — 用 unpack、refresh、pack 编辑数据库配置与原格式文件，支持字段合并、只读预览和自动恢复。详见 [工作副本指南](docs/admin/config-workspace.md)
 
 完整命令速查：群聊见 [docs/user/group-commands.md](docs/user/group-commands.md)，私聊见 [docs/user/private-commands.md](docs/user/private-commands.md)。全部文档索引见 [docs/index.md](docs/index.md)。
 
 ---
 
 ## 快速开始
+
+按[安装与部署方式](docs/admin/installation.md)选择本地／云端与源码／Docker。以下安装步骤使用主机 Python 环境。
 
 ### 环境要求
 
@@ -110,7 +113,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    DEEPSEEK_API_KEY=your_key
    ```
 
-   运行 `python -m quickquip.llm.config_cli init` 初始化 `data/llm_config.db`；已有 `config/llm.toml` 时会执行一次迁移并保留原文件和资产备份。首次启用在第 11 步进行，此时后台和 Bot 都已运行。旧配置升级与 JSON 导入见 [LLM 配置管理](docs/admin/llm-configuration.md)。
+   运行 `python -m quickquip.llm.config_cli init` 初始化 `config/managed/config.db`；已有 `config/llm.toml` 时会执行一次迁移并保留原文件和资产备份。首次启用在第 11 步进行，此时后台和 Bot 都已运行。旧配置升级与 JSON 导入见 [LLM 配置管理](docs/admin/llm-configuration.md)。
 
 6. **可选：启用图片/语音/音乐生成和语音识别**
 
@@ -170,6 +173,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 ### Windows 懒人包
 
+**从 1.16.3 升级到 1.16.4**：本版需要停服迁移配置与运行存储。先停止旧 Bot/Web 并备份，将配置和数据放入新版包后，在包目录执行 `python\python.exe -m quickquip.llm.config_cli migrate-storage --services-stopped`，再运行 `start.bat`。各部署方式的完整步骤与回退见[存储迁移](docs/admin/storage-migration.md)。
+
 Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 前端和 Playwright Chromium。解压后运行 `start.bat`，首次运行会从示例文件生成 `.env`、常用 `config/*.toml`、`config/personas/` 与资料文件并暂停，LLM 数据库由初始化／迁移流程创建；请至少在 `.env` 中填写 `WEB_ADMIN_PASSWORD`、OneBot 连接配置和需要的 API key，再次运行 `start.bat` 启动。
 
 保持启动窗口运行，浏览器打开 `http://127.0.0.1:5104/ops/`，输入刚设置的管理口令。启用 AI 对话时接着按[首次启用 LLM](docs/admin/llm-configuration.md#首次启用-llm)操作。懒人包中的 Python 命令使用解压目录内的 `python\python.exe`。
@@ -180,9 +185,9 @@ Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 
 - **停止方式**：前台控制台（QQ Bot）按 `Ctrl+C`；Web Admin 是后台进程，关掉管理窗口不会带走它，需在 PowerShell 执行  `Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -match 'web_api.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId }`。
 - 运行期间任务栏会有一个最小化的“QuickQuip Admin”cmd 窗口（Web Admin 的启动壳），属正常现象，随 Web Admin 退出自动关闭；Web Admin 运行日志追加在 `data\web-admin.log`（无轮转）。
 
-升级涉及旧 `data/daily_msgs/`、`data/wordcloud_msgs/` 历史时，在解压目录运行 `python\python.exe scripts\backfill_chat_archive.py --dry-run` 预览，再去掉 `--dry-run` 回灌。脚本分别统计新增、归因回填、已存在、跳过和写入失败；存在写入失败时返回非零。确认失败为零、归档数量符合预期后再清理旧 JSONL。
+升级涉及旧 `data/daily_msgs/`、`data/wordcloud_msgs/` 历史时，在解压目录运行 `python\python.exe scripts\maintenance\backfill_chat_archive.py --dry-run` 预览，再去掉 `--dry-run` 回灌。脚本分别统计新增、归因回填、已存在、跳过和写入失败；存在写入失败时返回非零。确认失败为零、归档数量符合预期后再清理旧 JSONL。
 
-生产部署模板位于 `prod.example/`；公开分发镜像位于 `ghcr.io/3akhp/quickquip`。如需使用私有 compose、部署脚本和巡检脚本，先复制为 gitignore 的 `prod/`，应用密钥仍统一维护在根目录 `.env`。详见 [docs/admin/deployment.md](docs/admin/deployment.md)。
+生产部署模板位于 `prod.example/`；公开分发镜像位于 `ghcr.io/3akhp/quickquip`。实际 Compose 和通知配置保存在 Git 忽略的 `prod/`，部署与巡检程序从受版本控制的 `scripts/deploy/`、`scripts/ops/` 执行；应用密钥统一维护在根目录 `.env`。详见 [docs/admin/deployment.md](docs/admin/deployment.md)。
 
 ### 运行测试
 
@@ -227,9 +232,12 @@ src/
 | 文档 | 说明 |
 |------|------|
 | [docs/index.md](docs/index.md) | 文档总导航 |
+| [docs/glossary.md](docs/glossary.md) | 项目术语与概念关系 |
+| [docs/dev/adr/README.md](docs/dev/adr/README.md) | 重要架构决策的背景、理由与取舍 |
 | [docs/user/group-commands.md](docs/user/group-commands.md) | 群内指令速查 |
 | [docs/user/private-commands.md](docs/user/private-commands.md) | 私聊指令速查 |
-| [docs/admin/deployment.md](docs/admin/deployment.md) | 云端部署指南 |
+| [docs/admin/installation.md](docs/admin/installation.md) | 部署分类与四种组合的安装入口 |
+| [docs/admin/deployment.md](docs/admin/deployment.md) | 云端 Docker 部署指南 |
 | [docs/admin/onebot-adapters.md](docs/admin/onebot-adapters.md) | OneBot 适配器状态与选择 |
 | [docs/admin/configuration.md](docs/admin/configuration.md) | 完整配置参考 |
 | [docs/admin/web-admin.md](docs/admin/web-admin.md) | Web 管理后台 |

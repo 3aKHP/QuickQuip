@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import math
 import random
+import sqlite3
 import time
 from pathlib import Path
 
@@ -27,12 +29,24 @@ from quickquip.games.niuniu.events import (
     _normal_fence_event,
 )
 from quickquip.games.niuniu.dynamics import (
-    _fence_stake_balance,
-    _fence_stake_base,
+    _fence_luck_factor,
+    _fence_reward_base,
+    fence_resolve_bot,
+    fence_resolve_pvp,
 )
 from quickquip.games.niuniu.fencing import _fence_win_prob, _fence_winner_is_role
 from quickquip.games.niuniu.gluing import _glue_growth
 from quickquip.games.niuniu.store import _roll_lognormal
+
+
+def create_store(path, config=None):
+    from quickquip.configuration.text_modes import TextModeRepository
+    from quickquip.llm.config_document import empty_document
+    from quickquip.llm.config_store import ConfigStore
+    configuration = Path(path).with_name("configuration.db")
+    if not configuration.exists():
+        ConfigStore(configuration).create(empty_document())
+    return NiuNiuStore(path, config=config, text_modes=TextModeRepository(configuration))
 
 
 # ── helpers ────────────────────────────────────────────────────────────────
@@ -86,7 +100,7 @@ def _clean_cds():
 
 @pytest.fixture
 def store(tmp_path: Path) -> NiuNiuStore:
-    return NiuNiuStore(str(tmp_path / "test_niuniu.db"))
+    return create_store(str(tmp_path / "test_niuniu.db"))
 
 
 @pytest.fixture
@@ -252,7 +266,7 @@ class TestNiuNiuStoreCRUD:
             """
         )
         conn.close()
-        store = NiuNiuStore(db_path)
+        store = create_store(db_path)
         with store.connect() as c:
             cols = {
                 r["name"]
@@ -532,68 +546,160 @@ class TestFenceWinnerIsRole:
 
 
 # ═══════════════════════════════════════════════════════════════════════════
-# Zero-sum fencing stake tuning (fence_stake_* config)
+# Logarithmic fencing rewards
 # ═══════════════════════════════════════════════════════════════════════════
 
 
-class TestFenceStakeBase:
-    @pytest.fixture
-    def cfg(self):
-        return NiuNiuConfig()
-
-    def test_geo_mode_uses_geometric_mean(self, cfg):
-        assert _fence_stake_base(4.0, 9.0, cfg) == pytest.approx(6.0)
-
-    def test_min_mode_uses_shorter_side(self):
-        cfg = NiuNiuConfig(fence_stake_mode="min")
-        assert _fence_stake_base(4.0, 9.0, cfg) == 4.0
-
-    def test_geo_mode_zero_side_gives_zero_base(self, cfg):
-        assert _fence_stake_base(0.0, 9.0, cfg) == 0.0
-
-
-class TestFenceStakeBalance:
-    def test_floor_applies_on_mismatch(self):
-        cfg = NiuNiuConfig(fence_stake_balance_floor=0.5)
-        assert _fence_stake_balance(2.0, 100.0, cfg) == 0.5
-
-    def test_matched_lengths_give_one(self):
+class TestFenceRewards:
+    def test_base_matches_formula_and_recovers_from_zero(self):
         cfg = NiuNiuConfig()
-        assert _fence_stake_balance(9.0, 9.0, cfg) == 1.0
+        assert _fence_reward_base(10, -10, cfg) == pytest.approx(0.8 + 1.5 * math.log(4 / 3))
+        assert _fence_reward_base(0, 100, cfg) == 0.8
+        assert _fence_reward_base(4, -9, cfg) == pytest.approx(0.8 + 1.5 * math.log(1.2))
 
+    def test_size_and_luck_keep_growing_without_a_ceiling(self):
+        cfg = NiuNiuConfig()
+        sizes = [10., 100., 1e6, 1e20, 1e100, 1e308]
+        bases = [_fence_reward_base(x, -x, cfg) for x in sizes]
+        factors = [_fence_luck_factor(x) for x in sizes]
+        assert all(a < b for a, b in zip(bases, bases[1:]))
+        assert all(a < b for a, b in zip(factors, factors[1:]))
+        assert all(math.isfinite(x) for x in bases + factors)
+        assert factors[-1] > 30  # Regresses if the old luck cap returns.
+        assert _fence_luck_factor(1) == 1
+        assert _fence_luck_factor(0.01) == pytest.approx(0.5 + 0.5 * math.log1p(0.1) / math.log(2))
 
-class TestFenceStakeMfCap:
-    def test_zerohsum_stake_capped_under_extreme_luck(
-        self, store, uid_a, uid_b, monkeypatch
-    ):
-        """luck=1e6, cap=30: matched 100/100 → stake = 100×0.15×1.0×30 = 450."""
-        store.update_length(uid_a, 100.0)
-        store.update_length(uid_b, 100.0)
-        store.set_fence_luck(uid_a, 1e6)
-        store.set_fence_luck(uid_b, 1.0)
-        _patch_fence_event(monkeypatch, "normal")
-        _patch_random(monkeypatch, 0.0)  # attacker wins the roll
-        _patch_uniform(monkeypatch, 0.15)  # top of the base range
+    def test_joint_size_growth_is_logarithmic(self):
+        cfg = NiuNiuConfig()
+        difference = _fence_reward_base(1e20, -1e20, cfg) - _fence_reward_base(1e10, -1e10, cfg)
+        assert difference == pytest.approx(1.5 * math.log(1e10), abs=1e-8)
+
+    @pytest.mark.parametrize("event_name,a,b,roll", [
+        ("normal", 100., -100., 0.),
+        ("critical", 100., -100., 0.),
+        ("glancing", 100., -100., 0.),
+        ("reversal", 100., -100., 0.999),
+        ("slip", 100., -100., 0.),
+        ("dominate", 100., -100., 0.),
+        ("dominate", -100., 100., 0.999),
+        ("succubus_devour", -100., 100., 0.),
+        ("succubus_devour", 100., -100., 0.999),
+    ])
+    def test_winner_reward_and_half_loss_reach_store(self, store, uid_a, uid_b, monkeypatch,
+                                                    event_name, a, b, roll):
+        store.update_length(uid_a, a)
+        store.update_length(uid_b, b)
+        store.set_fence_luck(uid_a, 100.)
+        store.set_fence_luck(uid_b, 100.)
+        _patch_fence_event(monkeypatch, event_name)
+        _patch_uniform(monkeypatch, 1.)
+        # First roll determines the winner, second allows a heavy strike.
+        rolls = iter((roll, 0.))
+        monkeypatch.setattr(random, "random", lambda: next(rolls))
         fencing(store, uid_a, uid_b, group_id="test")
-        a = store.get_length(uid_a)
-        b = store.get_length(uid_b)
-        assert a == pytest.approx(550.0)
-        assert b == pytest.approx(-350.0)
-        assert a + b == pytest.approx(200.0)  # zero-sum preserved
+        da, db = round(store.get_length(uid_a) - a, 2), round(store.get_length(uid_b) - b, 2)
+        gain, loss = max(da, db), -min(da, db)
+        assert gain > 0
+        assert loss == round(gain * .5, 2)
+        assert store.get_records(uid_a, 1)[0]["diff"] == da
+        assert store.get_records(uid_b, 1)[0]["diff"] == db
 
-    def test_bot_stake_capped(self, store, uid_a, monkeypatch):
-        """Bot fencing shares the mf cap: √100×0.6×30 = 180."""
-        store.update_length(uid_a, 100.0)
-        store.set_fence_luck(uid_a, 1e6)
-        _patch_random(monkeypatch, 0.0)  # win branch
-        _patch_uniform(monkeypatch, 0.6)
-        fencing(store, uid_a, "bot", oppo_is_bot=True, group_id="test")
-        assert store.get_length(uid_a) == pytest.approx(280.0)
+    def test_normal_message_uses_actual_gain_and_loss(self, store, uid_a, uid_b, monkeypatch):
+        store.update_length(uid_a, 100.)
+        store.update_length(uid_b, -100.)
+        store.set_fence_luck(uid_a, 100.)
+        store.texts["default"].fence_shared["win_pos"] = ["gain={gain} loss={loss}"]
+        _patch_fence_event(monkeypatch, "normal")
+        _patch_uniform(monkeypatch, 1.)
+        _patch_random(monkeypatch, 0.)
+        assert fencing(store, uid_a, uid_b, group_id="test") == "gain=6.69 loss=3.35"
+        assert store.get_length(uid_a) == 106.69
+        assert store.get_length(uid_b) == -103.35
 
+    def test_bot_reward_is_symmetric(self, monkeypatch):
+        from quickquip.games.niuniu.text import default_text
+        _patch_uniform(monkeypatch, 1.)
+        _patch_random(monkeypatch, 0.)
+        win = fence_resolve_bot(100., 100., default_text(), NiuNiuConfig())
+        _patch_random(monkeypatch, .999)
+        lose = fence_resolve_bot(100., 100., default_text(), NiuNiuConfig())
+        assert win.my_new == 106.69
+        assert lose.my_new == 93.31
 
-# ═══════════════════════════════════════════════════════════════════════════
-# fencing
-# ═══════════════════════════════════════════════════════════════════════════
+    def test_high_luck_repeat_keeps_reward_growth_slow(self, monkeypatch):
+        from quickquip.games.niuniu.text import default_text
+        _patch_fence_event(monkeypatch, "normal")
+        _patch_uniform(monkeypatch, 1.)
+        _patch_random(monkeypatch, 0.)
+        a, b = 10., -10.
+        gains = []
+        for _ in range(200):
+            out = fence_resolve_pvp(a, b, 100., lambda: 1., default_text(), NiuNiuConfig())
+            gains.append(out.my_new - a)
+            a, b = out.my_new, out.oppo_new
+        assert a > 1000
+        assert gains[-1] < gains[0] * 10
+
+    def test_fencing_write_failure_rolls_back_both_and_cooldowns(self, store, uid_a, uid_b,
+                                                               monkeypatch):
+        store.update_length(uid_a, 100.)
+        store.update_length(uid_b, 100.)
+        records = store.get_records(uid_a)
+        with store.connect() as connection:
+            connection.execute("CREATE TRIGGER fail_second_record BEFORE INSERT ON niuniu_records "
+                               "WHEN NEW.action='fenced' "
+                               "BEGIN SELECT RAISE(ABORT, 'injected'); END")
+        _patch_fence_event(monkeypatch, "normal")
+        with pytest.raises(sqlite3.IntegrityError, match="injected"):
+            fencing(store, uid_a, uid_b, group_id="test")
+        assert store.get_length(uid_a) == store.get_length(uid_b) == 100.
+        assert store.get_records(uid_a) == records
+        assert fence_cd.check(uid_a) == fenced_cd.check(uid_b) == 0
+
+    def test_stale_player_prevents_partial_commit(self, store, uid_a, uid_b):
+        from quickquip.games.niuniu.store import FencingConflictError
+        a, b = store.get_length(uid_a), store.get_length(uid_b)
+        records = store.get_records(uid_a)
+        with pytest.raises(FencingConflictError):
+            store.commit_fencing([(uid_a, a, a + 5, "fencing"),
+                                  (uid_b, b + 1, b - 2.5, "fenced")])
+        assert store.get_length(uid_a) == a
+        assert store.get_length(uid_b) == b
+        assert store.get_records(uid_a) == records
+
+    @pytest.mark.parametrize("a,b,roll,is_bot", [
+        (1e20, 1e20, 0., False),  # Both deltas would disappear.
+        (1e16, 10., 0., False),  # Attacker delta would be quantized.
+        (10., 1e16, 0., False),  # Defender precision must prevent either write.
+        (1e20, 10., 0., True),
+        (1e20, 10., .999, True),
+    ])
+    def test_unrepresentable_reward_keeps_lengths_records_and_cooldowns(
+        self, store, uid_a, uid_b, monkeypatch, a, b, roll, is_bot,
+    ):
+        store.update_length(uid_a, a)
+        store.update_length(uid_b, b)
+        store.set_fence_luck(uid_a, 1.)
+        _patch_fence_event(monkeypatch, "normal")
+        _patch_uniform(monkeypatch, 1.)
+        _patch_random(monkeypatch, roll)
+        records_a, records_b = store.get_records(uid_a), store.get_records(uid_b)
+
+        result = fencing(store, uid_a, uid_b, oppo_is_bot=is_bot, group_id="test")
+
+        assert "精度" in result and "重置" in result
+        assert store.get_length(uid_a) == a
+        assert store.get_length(uid_b) == b
+        assert store.get_records(uid_a) == records_a
+        assert store.get_records(uid_b) == records_b
+        assert fence_cd.check(uid_a) == fenced_cd.check(uid_b) == 0
+
+    def test_obsolete_options_warn_and_cannot_restore_old_formula(self, caplog):
+        cfg = NiuNiuConfig.from_dict({"fence_stake_mf_cap": .01,
+                                      "fence_devour_steal_ratio": 100})
+        assert "fence_stake_mf_cap" in caplog.text
+        assert cfg.fence_loss_ratio == .5
+        assert not hasattr(cfg, "fence_stake_mf_cap")
 
 
 class TestFencing:
@@ -638,14 +744,15 @@ class TestFencing:
         assert any(r["action"] == "fencing" for r in a_recs)
         assert any(r["action"] == "fenced" for r in b_recs)
 
-    def test_draw_damages_both(self, store, uid_a, uid_b, monkeypatch):
+    def test_draw_keeps_both_lengths_and_records(self, store, uid_a, uid_b, monkeypatch):
         store.update_length(uid_a, 20.0)
         store.update_length(uid_b, 20.0)
         _patch_fence_event(monkeypatch, "draw")
         fencing(store, uid_a, uid_b, group_id="test")
-        # draw 两败俱伤(有意破例,非零和):双方各损,anti-inflation
-        assert store.get_length(uid_a) < 20.0
-        assert store.get_length(uid_b) < 20.0
+        assert store.get_length(uid_a) == 20.0
+        assert store.get_length(uid_b) == 20.0
+        assert store.get_records(uid_a, 1)[0]["action"] == "fencing_draw"
+        assert store.get_records(uid_b, 1)[0]["diff"] == 0
 
     def test_reversal_flips_transfer_direction(self, store, uid_a, uid_b, monkeypatch):
         """reversal 翻转胜负：本会败的局，攻击方最终净转移为正。"""
@@ -724,7 +831,7 @@ class TestFencing:
         monkeypatch.setattr(random, "random", lambda: 0.0)
         result = fencing(store, uid_a, uid_b, group_id="test")
         assert any(
-            kw in result for kw in ("腰斩", "处刑", "断头台", "支配")
+            kw in result for kw in ("重斩", "处刑", "断头台", "支配")
         ), f"Expected sever message, got: {result}"
 
     def test_succubus_devour_for_succubus(self, store, uid_a, uid_b, monkeypatch):
@@ -740,8 +847,7 @@ class TestFencing:
     def test_slip_attacker_always_loses(self, store, uid_a, uid_b, monkeypatch):
         store.update_length(uid_a, 200.0)
         store.update_length(uid_b, 1.0)
-        # 固定 fence_luck:悬殊对战(200 vs 1)下 stake 基于 min=1 极小,
-        # 随机低 luck 会 round 到 0 使 attacker 不变;固定后 stake 确定非 0
+        # 固定每日运势，观察滑倒事件的实际损失。
         store.set_fence_luck(uid_a, 1.0)
         _patch_fence_event(monkeypatch, "slip")
         fencing(store, uid_a, uid_b, group_id="test")
@@ -819,7 +925,7 @@ def safe_store(tmp_path: Path) -> NiuNiuStore:
     path = tmp_path / "niuniu_text_safe.toml"
     path.write_text(_SAFE_TEXT_TOML, encoding="utf-8")
     cfg = NiuNiuConfig(niuniu_safe_text_path=str(path))
-    return NiuNiuStore(str(tmp_path / "test_niuniu.db"), config=cfg)
+    return create_store(str(tmp_path / "test_niuniu.db"), config=cfg)
 
 
 class TestTextPartialOverride:
@@ -875,7 +981,7 @@ class TestTextPartialOverride:
         path = tmp_path / "empty_safe.toml"
         path.write_text("# nothing here\n", encoding="utf-8")
         cfg = NiuNiuConfig(niuniu_safe_text_path=str(path))
-        store = NiuNiuStore(str(tmp_path / "db.db"), config=cfg)
+        store = create_store(str(tmp_path / "db.db"), config=cfg)
         safe = store.texts["safe"]
         default = store.texts["default"]
         assert [e["name"] for e in safe.glue_events] == [
@@ -889,7 +995,7 @@ class TestTextPartialOverride:
         path = tmp_path / "niuniu_text.toml"
         path.write_text(_SAFE_TEXT_TOML, encoding="utf-8")
         cfg = NiuNiuConfig(niuniu_text_path=str(path))
-        store = NiuNiuStore(str(tmp_path / "db.db"), config=cfg)
+        store = create_store(str(tmp_path / "db.db"), config=cfg)
         default = store.texts["default"]
         names = {e["name"] for e in default.glue_events}
         assert "normal" in names and "brand_new_event" in names

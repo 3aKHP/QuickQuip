@@ -755,7 +755,7 @@ async def test_memory_crud_basic(wired_service):
 
 
 def _replace_persona_files(service, entries):
-    directory = service.config_path.parent.parent / "config" / "personas"
+    directory = service.config_dir / "personas"
     for file in directory.glob("*.toml"):
         file.unlink()
     for ident, text in entries.items():

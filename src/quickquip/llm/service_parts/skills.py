@@ -150,7 +150,7 @@ class SkillsToolMixin:
         if names:
             logger.warning(
                 "已安装 Skill 与当前版本预置副本分叉"
-                "（可运行 scripts/sync_preset_skills.py 检视并同步）：%s",
+                "（可运行 scripts/maintenance/sync_preset_skills.py 检视并同步）：%s",
                 "、".join(sorted(names)),
             )
         else:

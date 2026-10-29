@@ -1,6 +1,6 @@
 """杀戮尖塔卡牌/遗物中文词表：加载、排除与查询。
 
-词表由 ``scripts/refresh_sts_lexicon.py`` 从 nkhoit/spire-archive 生成（两代
+词表由 ``scripts/maintenance/refresh_sts_lexicon.py`` 从 nkhoit/spire-archive 生成（两代
 cards/relics 与简中本地化 join 后按中文名跨代去重）。本模块经
 ``importlib.resources`` 加载 vendored 文件，套用 ``EXCLUDED_NAMES`` 得到活跃集合，
 供「xxx了」公式的命中判定与 LLM 候选约束使用。

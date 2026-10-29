@@ -30,7 +30,7 @@ Docker 镜像与 Windows 懒人包携带 `skills.example/`；Windows `start.bat`
 
 ## 配置（`settings.skills`）
 
-通过 Web Admin“LLM 配置”或配置 CLI 编辑并保存草稿，单独应用后由 Bot 接纳。资源上限与开关保存在 `data/llm_config.db`，Skill 内容继续由独立目录维护。完整流程见 [LLM 配置管理](llm-configuration.md)。
+通过 Web Admin“LLM 配置”或配置 CLI 编辑并保存草稿，单独应用后由 Bot 接纳。资源上限与开关保存在 `config/managed/config.db`，Skill 内容继续由独立目录维护。完整流程见 [LLM 配置管理](llm-configuration.md)。
 
 首次启用在“LLM 工坊 → LLM 配置 → 工具与技能”操作：
 
@@ -49,6 +49,8 @@ Docker 镜像与 Windows 懒人包携带 `skills.example/`；Windows `start.bat`
 
 ## 工具面
 
+清单、激活与按需读取的设计依据见 [ADR-0015](../dev/adr/0015-progressive-skill-loading.md)。
+
 启用后，系统提示包含已安装 Skill 的名称和描述清单，AI 据此决定何时激活；激活后 `SKILL.md` 正文才进入对话。四个工具：
 
 | 工具 | 行为 |
@@ -61,6 +63,8 @@ Docker 镜像与 Windows 懒人包携带 `skills.example/`；Windows `start.bat`
 脚本按扩展名选择解释器：`.py` 优先使用 PATH 中的 `python3`，找不到时使用运行 Bot 的 Python；`.sh` 使用 PATH 中的 `sh`。解释器直接读取脚本，执行位与 shebang 不影响选择。Windows 主机优先使用 `.py`；需要 `.sh` 时须先在 Bot 环境提供 `sh`，缺失会返回错误。
 
 ## 安全模型
+
+资产信任与脚本执行的设计依据见 [ADR-0016](../dev/adr/0016-trusted-skill-execution.md)。
 
 Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令正文会进入对话上下文，脚本会在部署主机上执行。运行时按以下规则读取资源和执行脚本：
 
@@ -77,6 +81,8 @@ Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令�
 
 ## 预置 Skill
 
+可选副本、漂移检测与显式同步的选择依据见 [ADR-0017](../dev/adr/0017-preset-skill-distribution.md)。
+
 `skills.example/` 随附两个官方 Skill：
 
 - `self-docs`：内置公开文档副本（用户手册、管理手册、配置参考、项目治理与协作约定等；同步源名单见 `scripts/ci/sync_self_docs_references.py`），AI 被问到机器人用法、命令、配置或项目协作约定时激活检索后作答。
@@ -86,9 +92,9 @@ Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令�
 
 预置 Skill 经复制到达 `skills/`；QuickQuip 版本升级会更新 `skills.example/`，已复制的本地副本不会随之自动更新。可通过以下入口查看差异并同步：
 
-- **运行时漂移检测（只读）**：bot 每次扫描 Skill 目录时，对 `skills/` 与 `skills.example/` 中的同名 Skill 做全文件字节级指纹比对。分叉时记录 WARNING 日志（分叉名单变化才记录，同状态只记录一次；回归一致时记 INFO），`/skill list` 在对应条目标注“与当前版本预置不同，可运行 scripts/sync_preset_skills.py 更新”。检测结果只进日志与命令回复，不进入 catalog 块、系统提示与任何模型注入面，也不占用 catalog 预算。`skills.example/` 缺失时（pip 安装形态）检测自动跳过。
-- **同步脚本**：`python scripts/sync_preset_skills.py`（或 `--check`）报告每个预置 Skill 的四态——`current`（与预置副本一致）、`diverged`（已安装但不同）、`missing`（未安装）、`conflict`（存在同名非目录项或符号链接，需人工处理）；发现冲突时退出码为 2，人工处理后重试。`--apply` 安装缺失项并把分叉项覆盖为预置副本，原副本整体备份为 `skills/.preset-backups/<name>.preset-backup-<时间戳>`（备份容器自身无 SKILL.md，运行时扫描不感知；备份保存原有定制，确认后自行清理）。脚本只依赖 Python 标准库，Docker / Linux 裸机 / Windows 形态通用；bot 每轮现扫 `skills/`，下一轮请求读取同步后的文件，无需重启。
-- **部署入口**：`prod.example/deploy-v4.sh` / `deploy-v4.ps1` 在 deploy、dry-run 与 migrate 时自动执行一次 `--check` 报告并给出同步命令（best-effort，不阻断部署）；源码形态部署在版本升级后按 Release notes 的“预置 Skill 变动”小节指引手动执行同步（该小节是 release PR 模板的固定检查项）。
+- **运行时漂移检测（只读）**：bot 每次扫描 Skill 目录时，对 `skills/` 与 `skills.example/` 中的同名 Skill 做全文件字节级指纹比对。分叉时记录 WARNING 日志（分叉名单变化才记录，同状态只记录一次；回归一致时记 INFO），`/skill list` 在对应条目标注“与当前版本预置不同，可运行 scripts/maintenance/sync_preset_skills.py 更新”。检测结果只进日志与命令回复，不进入 catalog 块、系统提示与任何模型注入面，也不占用 catalog 预算。`skills.example/` 缺失时（pip 安装形态）检测自动跳过。
+- **同步脚本**：`python scripts/maintenance/sync_preset_skills.py`（或 `--check`）报告每个预置 Skill 的四态——`current`（与预置副本一致）、`diverged`（已安装但不同）、`missing`（未安装）、`conflict`（存在同名非目录项或符号链接，需人工处理）；发现冲突时退出码为 2，人工处理后重试。`--apply` 安装缺失项并把分叉项覆盖为预置副本，原副本整体备份为 `skills/.preset-backups/<name>.preset-backup-<时间戳>`（备份容器自身无 SKILL.md，运行时扫描不感知；备份保存原有定制，确认后自行清理）。脚本只依赖 Python 标准库，Docker / Linux 裸机 / Windows 形态通用；bot 每轮现扫 `skills/`，下一轮请求读取同步后的文件，无需重启。
+- **部署入口**：`scripts/deploy/deploy-v4.sh` / `deploy-v4.ps1` 在 deploy、dry-run 与 migrate 时自动执行一次 `--check` 报告并给出同步命令（best-effort，不阻断部署）；源码形态部署在版本升级后按 Release notes 的“预置 Skill 变动”小节指引手动执行同步（该小节是 release PR 模板的固定检查项）。
 - **Web 管理面**：Web Admin“Skill”页顶面板按同一判定语义展示各预置 Skill 状态，支持勾选同步与一键同步全部待处理，覆盖分叉项前同样自动备份至 `skills/.preset-backups/`；详见“Web 管理与导入”。
 
 ## Web 管理与导入
@@ -103,7 +109,7 @@ Web Admin 导航“LLM 工坊”区的“Skill”页（`/ops/#/skills`）提供 
 
 ### 预置同步（页面内）
 
-页顶“预置同步”面板与 `scripts/sync_preset_skills.py` 同一判定语义，逐项报告 `current`（已安装，与预置副本一致）/ `diverged`（已安装，与预置副本不同）/ `missing`（未安装）/ `conflict`（存在同名非目录项，需人工处理）；仅本地（非预置）的 Skill 单独列出。勾选后“同步所选”，或“一键同步全部待处理”；`diverged` 项覆盖前旧副本整体备份至 `skills/.preset-backups/`，确认本地定制无丢失后自行清理。
+页顶“预置同步”面板与 `scripts/maintenance/sync_preset_skills.py` 同一判定语义，逐项报告 `current`（已安装，与预置副本一致）/ `diverged`（已安装，与预置副本不同）/ `missing`（未安装）/ `conflict`（存在同名非目录项，需人工处理）；仅本地（非预置）的 Skill 单独列出。勾选后“同步所选”，或“一键同步全部待处理”；`diverged` 项覆盖前旧副本整体备份至 `skills/.preset-backups/`，确认本地定制无丢失后自行清理。
 
 ### 安装第三方 Skill
 

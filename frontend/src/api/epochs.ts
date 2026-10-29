@@ -8,6 +8,7 @@ import { request } from './index'
 import type { RuntimeActionResponse } from './llmRuntime'
 
 export type EpochReason = 'cold' | 'hot' | 'rows' | 'persona' | 'init' | 'clear'
+  | 'budget' | 'context_limit' | 'history' | 'profile' | 'retention'
 
 export interface EpochPoint {
   /** UTC ISO 时间戳 */
@@ -65,6 +66,9 @@ export interface EpochKeySnapshot {
   provider_id: string
   model: string
   anchor_id: number
+  epoch_id: string
+  frozen_segments: number
+  replay_tokens: number
   last_activity_at: number
   idle_seconds: number
   params: EpochParamsInfo | null

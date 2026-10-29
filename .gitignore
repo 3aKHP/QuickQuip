@@ -64,6 +64,7 @@ config/sensitive_words.toml
 config/awakening.toml
 config/admins.toml
 config/personas/
+config/managed/
 config/client_profiles/
 config/llm.local.toml
 config/llm.*.local.toml
@@ -87,3 +88,7 @@ docker/*.Dockerfile
 # Frontend build output
 dist/
 node_modules/
+
+# Local configuration workspaces and generated candidates
+/.config-workspace/
+/.config-staging*/

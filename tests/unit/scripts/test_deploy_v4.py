@@ -8,6 +8,7 @@ import os
 from pathlib import Path
 import runpy
 import shutil
+import sqlite3
 import subprocess
 import sys
 import tarfile
@@ -15,8 +16,9 @@ import tarfile
 import pytest
 
 
-TEMPLATE = Path(__file__).resolve().parents[3] / "prod.example"
-STATE = runpy.run_path(str(TEMPLATE / "deploy-state.py"))
+PROJECT = Path(__file__).resolve().parents[3]
+TEMPLATE = PROJECT / "scripts/deploy"
+STATE = runpy.run_path(str(TEMPLATE / "server/deploy-state.py"))
 OLD = "20260907-010000-aaaaaaaaaaaa"
 NEW = "20260907-020000-bbbbbbbbbbbb"
 
@@ -31,7 +33,7 @@ def deployment(tmp_path):
     inbox = root / ".deploy/incoming" / NEW
     inbox.mkdir(parents=True)
     for name in ("deploy-state.py", "remote-deploy-v4.sh"):
-        shutil.copyfile(TEMPLATE / name, inbox / name)
+        shutil.copyfile(TEMPLATE / "server" / name, inbox / name)
     tree = inbox / "tree"
     (tree / "prod").mkdir(parents=True)
     (tree / "prod/docker-compose.yml").write_text("services: {}\n")
@@ -80,8 +82,27 @@ if args[0] == "compose":
                     "environment": {"ONEBOT_ACCESS_TOKEN": "new"}, "volumes": volumes,
                 }}}
             ))
-    elif "build" in args and os.environ.get("FAIL_BUILD") == "1":
-        sys.exit(1)
+    elif "run" in args and "migrate-storage" in args:
+        from quickquip.configuration.migration import migrate, rollback
+        if "--rollback" in args:
+            print(json.dumps(rollback(root, args[args.index("--rollback") + 1],
+                                      services_stopped=True)))
+        else:
+            print(json.dumps(migrate(root, services_stopped=True)))
+    elif "build" in args:
+        import yaml
+        directory = root / "releases" / release
+        config = yaml.safe_load((directory / "prod/docker-compose.yml").read_text())
+        build = config.get("services", {}).get("quickquip", {}).get("build")
+        if build and not (directory / build["dockerfile"]).is_file():
+            sys.exit("Build Dockerfile missing")
+        if os.environ.get("FAIL_BUILD") == "1":
+            sys.exit(1)
+    elif "stage" in args and os.environ.get("STAGED_COMPOSE"):
+        target = args[args.index("--release") + 1] if "--release" in args else release
+        (root / "releases" / target / "prod/docker-compose.yml").write_text(
+            os.environ["STAGED_COMPOSE"]
+        )
     elif "run" in args and os.environ.get("FAIL_CONFIG_INIT") == "1":
         sys.exit(1)
     elif "up" in args:
@@ -93,8 +114,15 @@ if args[0] == "compose":
         print("test-container")
     elif "logs" in args:
         print("Bot 123456 connected")
+    elif "exec" in args and "quickquip.llm.config_cli" in args and "status" in args:
+        import argparse
+        # The previous release supports require-loaded but no timestamp argument.
+        parser = argparse.ArgumentParser()
+        parser.add_argument("--require-loaded", action="store_true")
+        parser.parse_args(args[args.index("status") + 1:])
+        print(json.dumps({"bot": {"heartbeat_at": float(os.environ.get("BOT_HEARTBEAT", "2"))}}))
 elif args[0] == "inspect":
-    print("true")
+    print("1970-01-01T00:00:01Z" if "{{.State.StartedAt}}" in args else "true")
 """
     )
     docker.chmod(0o700)
@@ -103,6 +131,9 @@ elif args[0] == "inspect":
         PATH=f"{bin_dir}:{os.environ['PATH']}",
         TEST_ROOT=str(root),
         TEST_NEW=NEW,
+        PYTHONPATH=os.pathsep.join((
+            str(PROJECT / "src"), os.environ.get("PYTHONPATH", ""),
+        )),
     )
     return root, inbox, env
 
@@ -129,6 +160,112 @@ def test_success_commits_environment_and_previous(deployment):
     assert not inbox.exists()
 
 
+@pytest.mark.parametrize("exit_code", [0, 17])
+def test_private_hook_runs_after_activation_without_changing_release_result(deployment, exit_code):
+    root, inbox, _ = deployment
+    hook = inbox / "shared/prod/hooks/deployment.sh"
+    hook.parent.mkdir(parents=True)
+    hook.write_text(
+        '#!/bin/bash\n'
+        'printf "%s:%s" "$1" "$(readlink "$QUICKQUIP_ROOT/current")" '
+        '> "$QUICKQUIP_ROOT/hook-result"\n'
+        f'exit {exit_code}\n'
+    )
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "hook-result").read_text() == "deploy:releases/" + NEW
+    assert (root / "current").readlink() == Path("releases") / NEW
+    assert (root / ".env").read_text() == "ONEBOT_ACCESS_TOKEN=new\n"
+    assert not inbox.exists()
+
+
+def test_private_hook_ignoring_termination_cannot_hold_deployment_lock(deployment):
+    root, inbox, env = deployment
+    hook = inbox / "shared/prod/hooks/deployment.sh"
+    hook.parent.mkdir(parents=True)
+    hook.write_text("trap '' TERM\nwhile :; do sleep 1; done\n")
+    # Scale the real timeout arguments down; preserve signal/grace semantics.
+    timeout = Path(env["PATH"].split(os.pathsep)[0]) / "timeout"
+    timeout.write_text(
+        f'#!{sys.executable}\nimport os,sys\n'
+        'args = ["--kill-after=0.1" if arg == "--kill-after=5" else '
+        '"0.1" if arg == "30" else arg for arg in sys.argv[1:]]\n'
+        f'os.execv({shutil.which("timeout")!r}, ["timeout", *args])\n'
+    )
+    timeout.chmod(0o700)
+    result = run_deploy(deployment)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert "private deployment hook failed" in result.stdout
+    assert (root / "current").readlink() == Path("releases") / NEW
+    assert not inbox.exists()
+    # A separate process must be able to acquire the released deployment lock.
+    acquired = subprocess.run(["flock", "-n", str(root / ".deploy/lock"), "true"])
+    assert acquired.returncode == 0
+
+
+@pytest.mark.parametrize("direction", ["off", "push", "pull"])
+def test_legacy_compose_builds_with_tracked_dockerfile(deployment, direction):
+    root, inbox = _sync_candidate(deployment)
+    dockerfile = inbox / "tree/docker/Dockerfile.prod"
+    dockerfile.parent.mkdir()
+    dockerfile.write_text("FROM synthetic-current-source\n")
+    legacy = "services:\n  quickquip:\n    build:\n      dockerfile: prod/Dockerfile\n"
+    compose = inbox / "tree/prod/docker-compose.yml"
+    compose.write_text(legacy if direction != "pull" else legacy.replace(
+        "prod/Dockerfile", "docker/Dockerfile.prod"
+    ))
+    options = {"CONFIG_SYNC": direction}
+    if direction != "off":
+        options |= {"SYNC_OPERATION": "a" * 32, "CONFIG_SYNC_PROTOCOL": "2"}
+    if direction == "pull":
+        # The remote stage replaces even an already updated local Compose.
+        options["STAGED_COMPOSE"] = legacy
+    result = run_deploy(deployment, **options)
+    assert result.returncode == 0, result.stdout + result.stderr
+    release = root / "releases" / NEW
+    assert (release / "prod/docker-compose.yml").read_text() == legacy
+    assert (release / "prod/Dockerfile").read_text() == "FROM synthetic-current-source\n"
+    assert not (root / "prod/Dockerfile").exists()
+
+
+@pytest.mark.parametrize("existing", [False, True])
+def test_bootstrap_keeps_search_configuration_for_first_pull(deployment, tmp_path, existing):
+    root, inbox, _ = deployment
+    checkout = tmp_path / "checkout"
+    checkout.mkdir()
+    manifest = TEMPLATE / "deploy-manifest.txt"
+    for name in manifest.read_text().splitlines():
+        path = checkout / name
+        if (PROJECT / name).is_dir():
+            path.mkdir(parents=True, exist_ok=True)
+        else:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            path.write_text("synthetic release file\n")
+    relative = Path("docker/searxng/settings.yml")
+    default = "general:\n  instance_name: synthetic-default\n"
+    (checkout / relative).parent.mkdir(parents=True, exist_ok=True)
+    (checkout / relative).write_text(default)
+    (checkout / "prod/docker-compose.yml").write_text("services: {}\n")
+    marker = checkout / "src/quickquip/config_sync/rpc.py"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text("# bootstrap configuration preservation marker\n")
+    production = "general:\n  instance_name: synthetic-production\n"
+    if existing:
+        previous = root / "releases" / OLD / relative
+        previous.parent.mkdir(parents=True, exist_ok=True)
+        previous.write_text(production)
+    subprocess.run(
+        ["tar", "-czf", str(inbox / "release.tar.gz"), "-T", str(manifest)],
+        cwd=checkout, check=True, capture_output=True,
+    )
+    shutil.rmtree(inbox / "tree")
+    result = run_deploy(deployment, CONFIG_SYNC="off")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "releases" / NEW / relative).read_text() == (
+        production if existing else default
+    )
+
+
 @pytest.mark.parametrize("failure", ["build", "up"])
 def test_failure_restores_original_files_and_links(deployment, failure):
     root, inbox, _ = deployment
@@ -152,6 +289,31 @@ def test_failed_recovery_retains_private_backup_and_reports_failure(deployment):
     assert (inbox / "backup/.env").read_text() == "ONEBOT_ACCESS_TOKEN=old\n"
     assert (inbox / "backup").stat().st_mode & 0o777 == 0o700
     assert (root / "current").readlink() == Path("releases") / OLD
+
+
+def test_upgrade_failure_recovers_legacy_configuration_health(deployment):
+    root, _, _ = deployment
+    cli = root / "releases" / OLD / "src/quickquip/llm/config_cli.py"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("# Previous release with status --require-loaded.\n")
+    result = run_deploy(deployment, FAIL_UP="new", DEPLOY_HEALTH_TIMEOUT="1")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "RECOVERY SUCCEEDED" in result.stdout
+    assert (root / "current").readlink() == Path("releases") / OLD
+
+
+def test_rollback_checks_legacy_configuration_health(deployment):
+    root, _, _ = deployment
+    target = root / "releases" / NEW
+    (target / "prod").mkdir(parents=True)
+    (target / "prod/docker-compose.yml").write_text("services: {}\n")
+    cli = target / "src/quickquip/llm/config_cli.py"
+    cli.parent.mkdir(parents=True)
+    cli.write_text("# Previous release with status --require-loaded.\n")
+    (root / "previous").symlink_to(f"releases/{NEW}")
+    result = run_deploy(deployment, action="rollback", DEPLOY_HEALTH_TIMEOUT="1")
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / "current").readlink() == Path("releases") / NEW
 
 
 def test_lock_rejects_second_action_before_live_mutation(deployment):
@@ -350,21 +512,21 @@ def _write_fake_sudo(bin_dir: Path, available: bool) -> None:
     sudo.chmod(0o700)
 
 
-def test_capture_baseline_keeps_skills_volume_on_shared_root(tmp_path, monkeypatch):
+@pytest.mark.parametrize("shared", ["skills", "config/managed", "config/managed/child"])
+def test_capture_baseline_keeps_shared_volumes_on_root(tmp_path, monkeypatch, shared):
     root = _minimal_server_root(tmp_path)
     _write_skill(root / "skills/demo/SKILL.md", "---\nname: demo\ndescription: 演示\n---\n正文\n")
+    _write_skill(root / shared / "state", "shared content")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_fake_docker_for_baseline(bin_dir)
+    _write_fake_docker_for_baseline(bin_dir, source="${QUICKQUIP_ROOT:-..}/" + shared)
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     baseline = tmp_path / "baseline"
     STATE["capture_baseline"](root, baseline)
-    assert not (baseline / "skills").exists()
+    assert not (baseline / shared).exists()
     config = json.loads((baseline / "prod/docker-compose.yml").read_text())
     (volume,) = config["services"]["quickquip"]["volumes"]
-    # The literal ${QUICKQUIP_ROOT:-..}/skills placeholder resolves to the
-    # deployment-root shared directory.
-    assert volume["source"] == str(root / "skills")
+    assert volume["source"] == str(root / shared)
     assert config["services"]["quickquip"]["image"] == f"quickquip-quickquip:{baseline.name}"
 
 
@@ -553,6 +715,15 @@ def _add_config_initializer(deployment):
     candidate = inbox / "tree/config"
     candidate.mkdir()
     return old, candidate
+
+
+def test_previous_bot_heartbeat_cannot_acknowledge_new_container(deployment):
+    root, _, _ = deployment
+    _add_config_initializer(deployment)
+    result = run_deploy(deployment, BOT_HEARTBEAT="0", DEPLOY_HEALTH_TIMEOUT="1")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "RECOVERY SUCCEEDED" in result.stdout
+    assert (root / "current").readlink() == Path("releases") / OLD
 
 
 def test_config_migration_selects_server_assets_before_initializer(deployment):
@@ -788,3 +959,169 @@ def test_first_migration_copies_protected_assets_as_deployment_user(deployment):
     owners = (root / "asset-owners").read_text().splitlines()
     assert len(owners) == 4
     assert all(str(config) in entry for entry in owners)
+
+
+def _sync_candidate(deployment):
+    root, inbox, _ = deployment
+    marker = inbox / 'tree/src/quickquip/config_sync/rpc.py'
+    marker.parent.mkdir(parents=True)
+    marker.write_text('# isolated configuration protocol marker\n')
+    return root, inbox
+
+
+def test_sync_deployment_preserves_selected_environment(deployment):
+    root, _ = _sync_candidate(deployment)
+    result = run_deploy(deployment, CONFIG_SYNC='auto', SYNC_OPERATION='a' * 32,
+                        ENV_SOURCE='server')
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / '.env').read_text() == 'ONEBOT_ACCESS_TOKEN=old\n'
+    calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
+    stage = next(i for i, call in enumerate(calls) if 'stage' in call)
+    commit = next(i for i, call in enumerate(calls) if 'candidate-commit' in call)
+    application_up = next(i for i, call in enumerate(calls) if '--force-recreate' in call)
+    assert stage < application_up < commit
+    assert any('wait' in call for call in calls[commit:])
+
+
+def test_sync_failure_restores_database_before_previous_containers(deployment):
+    root, _ = _sync_candidate(deployment)
+    result = run_deploy(deployment, CONFIG_SYNC='auto', SYNC_OPERATION='a' * 32,
+                        FAIL_UP='new')
+    assert result.returncode == 1, result.stdout + result.stderr
+    calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
+    restore = next(i for i, call in enumerate(calls) if 'recover' in call)
+    old_up = next(i for i, call in enumerate(calls)
+                  if 'up' in call and any(OLD in value for value in call))
+    verified = next(i for i, call in enumerate(calls) if 'recovery-verified' in call)
+    assert restore < old_up < verified
+
+
+def test_sync_exact_assets_do_not_reinherit_deleted_files(deployment):
+    root, inbox = _sync_candidate(deployment)
+    initializer = inbox / 'tree/src/quickquip/llm/config_cli.py'
+    initializer.parent.mkdir(parents=True)
+    initializer.write_text('# initializer marker\n')
+    old = root / 'releases' / OLD / 'config'
+    (old / 'personas').mkdir(parents=True)
+    (old / 'client_profiles').mkdir()
+    (old / 'personas/migrated-removed.toml').write_text('id="removed"\n')
+    (old / 'client_profiles/removed.toml').write_text('id="removed"\n')
+    (old / 'generation.toml').write_text('[image]\nenabled=false\n')
+    (root / 'data').mkdir()
+    (root / 'data/llm_config.db').write_text('existing marker')
+    result = run_deploy(deployment, CONFIG_SYNC='auto', SYNC_OPERATION='a' * 32)
+    assert result.returncode == 0, result.stdout + result.stderr
+    candidate = root / 'releases' / NEW / 'config'
+    assert not (candidate / 'personas/migrated-removed.toml').exists()
+    assert not (candidate / 'client_profiles/removed.toml').exists()
+    assert not (candidate / 'generation.toml').exists()
+
+
+def test_interrupted_deployment_recovers_using_durable_journal(deployment):
+    root, inbox = _sync_candidate(deployment)
+    docker = Path(deployment[2]['PATH'].split(os.pathsep)[0]) / 'docker'
+    body = docker.read_text().replace(
+        '    elif "up" in args:',
+        '''    elif "candidate-commit" in args and os.environ.get("KILL_COMMIT") == "1":
+        os.kill(os.getppid(), 9)
+    elif "up" in args:''',
+    )
+    docker.write_text(body)
+    result = run_deploy(deployment, CONFIG_SYNC='auto', SYNC_OPERATION='a' * 32, KILL_COMMIT='1')
+    assert result.returncode == -9
+    assert (root / 'current').readlink() == Path('releases') / NEW
+    assert (root / '.deploy' / f'{NEW}.transaction.json').exists()
+    result = run_deploy(deployment, action='recover', CONFIG_SYNC='auto', SYNC_OPERATION='a' * 32)
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert (root / 'current').readlink() == Path('releases') / OLD
+    assert (root / '.env').read_text() == 'ONEBOT_ACCESS_TOKEN=old\n'
+    assert not inbox.exists()
+
+
+@pytest.mark.parametrize("failure", ["", "new", "migration"])
+def test_storage_migration_precedes_start_and_reverses_before_old_release(deployment, failure):
+    root, _, _ = deployment
+    _add_config_initializer(deployment)
+    (root / "data").mkdir()
+    with sqlite3.connect(root / "data/niuniu.db") as connection:
+        connection.executescript(
+            "CREATE TABLE players(uid TEXT PRIMARY KEY,score INTEGER);"
+            "INSERT INTO players VALUES('player',99);"
+            "CREATE TABLE niuniu_group_text(group_id TEXT PRIMARY KEY,text_mode TEXT);"
+            "INSERT INTO niuniu_group_text VALUES('12345','safe');"
+        )
+    if failure == "migration":
+        (root / "data/scheduled_messages.json").write_text("invalid JSON")
+    result = run_deploy(deployment, MIGRATE_STORAGE="1", FAIL_UP=failure)
+    calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+    migration = next(i for i, call in enumerate(calls) if "migrate-storage" in call)
+    old_compose = str(root / "releases" / OLD / "prod/docker-compose.yml")
+    old_stop = next(i for i, call in enumerate(calls)
+                    if "stop" in call and old_compose in call)
+    assert old_stop < migration
+    if not failure:
+        assert result.returncode == 0, result.stdout + result.stderr
+        assert (root / "config/managed/config.db").exists()
+        start = next(i for i, call in enumerate(calls) if "up" in call)
+        assert migration < start
+        assert (root / "current").readlink() == Path("releases") / NEW
+    else:
+        assert result.returncode == 1, result.stdout + result.stderr
+        assert not (root / "config/managed/config.db").exists()
+        assert (root / "current").readlink() == Path("releases") / OLD
+        if failure == "new":
+            reverse = next(i for i, call in enumerate(calls) if "--rollback" in call)
+            restart = next(i for i, call in enumerate(calls)
+                           if "up" in call and old_compose in call)
+            assert migration < reverse < restart
+    with sqlite3.connect(root / "data/niuniu.db") as connection:
+        assert connection.execute("SELECT score FROM players").fetchone()[0] == 99
+        if failure:
+            assert connection.execute("SELECT text_mode FROM niuniu_group_text").fetchone() == (
+                "safe",
+            )
+
+
+def test_configuration_rollback_stops_candidate_with_its_staged_environment(tmp_path):
+    script = (
+        Path(__file__).resolve().parents[3] / 'scripts/deploy/server/remote-deploy-v4.sh'
+    ).read_text()
+    finish = script[script.index('finish() {'):script.index('\ntrap finish EXIT')]
+    root = tmp_path / 'root'
+    incoming = root / '.deploy/incoming/new'
+    (incoming / 'shared').mkdir(parents=True)
+    (incoming / 'shared/.env').write_text('NEW_REQUIRED=present\n')
+    (root / '.env').write_text('NEW_REQUIRED=present\n')
+    trace = tmp_path / 'trace'
+    import shlex
+    program = f'''
+Root={shlex.quote(str(root))}
+Incoming={shlex.quote(str(incoming))}
+Trace={shlex.quote(str(trace))}
+Backup="$Incoming/backup"
+Action=deploy; RecoveryReady=0; Succeeded=0; StorageBackup=""
+SyncOperation=aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ConfigSyncProtocol=2; Changed=1; Activated=1; ServicesStopped=1
+Prev=old; Id=new; OriginalCurrent=old; PrevPrevious=older; SharedSudo=0
+step() {{ echo "$*"; }}
+compose() {{
+    if [ "$1" = new ] && ! grep -q NEW_REQUIRED "$QUICKQUIP_ENV_FILE"; then return 1; fi
+    echo "stop:$1" >> "$Trace"
+}}
+shared_state() {{ printf 'OLD=present\\n' > "$Root/.env"; }}
+sync_rpc() {{ echo "config:$2" >> "$Trace"; }}
+set_link() {{ echo "link:$1:$2" >> "$Trace"; }}
+verify_release() {{ return 0; }}
+up() {{ echo "start:$1" >> "$Trace"; }}
+health() {{ return 0; }}
+{finish}
+trap finish EXIT
+exit 1
+'''
+    result = subprocess.run(['bash', '-c', program], text=True, capture_output=True, timeout=10)
+    assert result.returncode == 1, result.stdout + result.stderr
+    events = trace.read_text().splitlines()
+    assert events.count('stop:new') == 1
+    assert 'config:recover' in events
+    assert 'start:old' in events
+    assert 'config:recovery-verified' in events

@@ -15,6 +15,8 @@
   声明；仅关联未完成的用 `Refs #<issue>`，并在 issue 上留跟踪评论。
   无关联 issue 时删除 Closes 行。
 
+  引入或调整项目概念、架构约束时，在 Summary 或 Notes 中关联对应术语或 ADR。
+
   feat/fix/refactor：把本地 changelog 草稿正文附进本 PR 描述，
   便于 review（CONTRIBUTING.md「CHANGELOG 流程」）。
 -->
@@ -38,4 +40,5 @@ Closes #<issue>
 
 ## Notes / Follow-ups
 
+<!-- 相关术语、架构决策及后续事项按本次变更填写。 -->
 - ...

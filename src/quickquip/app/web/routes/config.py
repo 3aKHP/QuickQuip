@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+from quickquip.common.config_writes import configuration_write
 import logging
 import tomllib
 from pathlib import Path
@@ -69,8 +71,10 @@ def _resolve(key: str) -> Path:
     return _CONFIG_DIR / entry["filename"]
 
 
-def _lock_for(path: Path) -> FileLock:
-    return FileLock(str(path) + ".lock")
+@contextmanager
+def _lock_for(path: Path):
+    with configuration_write(_CONFIG_DIR.parent / "data"), FileLock(str(path) + ".lock"):
+        yield
 
 
 @router.get("/config")

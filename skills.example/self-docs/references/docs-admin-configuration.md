@@ -17,7 +17,7 @@ LLM 配置示例为导出 JSON 中的字段片段；请在 Web Admin“LLM 配�
 | `DRIVER` | NoneBot2 驱动器；正向 WebSocket 连接 OneBot 协议端时需包含 `~websockets` | `~fastapi+~websockets` |
 | `HOST` | 监听地址 | `0.0.0.0` |
 | `PORT` | 监听端口 | `8080` |
-| `QQ_ACCOUNT` | QQ 号（云端部署必填） | — |
+| `QQ_ACCOUNT` | QQ 号（项目 Compose 模板启动 LLBot 时必填） | — |
 | `ONEBOT_WS_URLS` | OneBot V11 WebSocket 地址列表 | — |
 | `ONEBOT_ACCESS_TOKEN` | OneBot 接入令牌 | — |
 | `TZ` | 容器与进程时区（日志、定时任务展示时间等） | `Asia/Shanghai` |
@@ -58,6 +58,17 @@ LLM 工具 `search_web` 与 `/search` 命令固定走项目内 SearXNG。普通�
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
 | `LLM_TRACE_FLAG_FILE` | LLM HTTP Trace 持久开关文件路径；文件存在时按调用记录完整请求/响应 JSON 文本到 `data/llm_trace.db`，供 Web Admin 的 LLM Trace 页面按需读取 | — |
+| `LLM_TRACE_MEDIA_MIN_BYTES` | Trace 内联媒体抽取门槛（载荷原文 UTF-8 字节数），推荐启用值 `65536`；未设置或为 `0` 时关闭。Bot 和 Web 在启动时读取。操作见下方“Trace 媒体存储” | `0` |
+
+### Trace 媒体存储
+
+Trace 开启期间，可在根 `.env` 设置 `LLM_TRACE_MEDIA_MIN_BYTES=65536` 并重启 Bot 与 Web，对新记录中达到门槛的内联媒体去重。正文显示占位符，原始载荷保存在 `data/trace_blobs/`；既有记录继续按原格式读取。完整 JSON 与 SSE 单行 JSON 中的 data URI 和明确媒体字段受支持。
+
+备份与恢复时，将 `data/llm_trace.db` 和 `data/trace_blobs/` 作为一组：停服后同时备份，恢复时同时还原。部署模板挂载整个 `data/`，无需额外挂载。不要把多个独立 Trace 数据库指向同一个 blob 目录。
+
+设置为 `0` 并重启会停止新记录的媒体抽取，当前版本仍能恢复已抽取记录。回退到不支持该清单格式的旧版本时，旧程序会显示占位符；需要完整历史报文时，应先在支持此功能的版本中导出原文，或恢复启用前的 Trace 备份。已有大记录的批量转换另行安排。
+
+管理员可通过 `/ops/api/logs/trace/calls/{call_id}?restore=true` 获取经校验的完整正文；`call_id` 使用详情记录中的实际 ID。`/ops/api/logs/trace/blobs/{sha256}` 使用占位符中的摘要下载媒体附件，两个接口均要求有效的后台登录态。文件缺失或恢复校验失败时，先检查数据库与 blob 目录是否来自同一备份。清空 Trace 会移除记录并清理无引用媒体文件；下载只开放给仍被记录引用的载荷。
 
 ### 贴吧
 
@@ -91,6 +102,7 @@ MCP server 的普通字段支持 `${ENV_VAR}` 与 `${ENV_VAR:-default}`；认证
 | `WEB_ADMIN_HOST` | 监听地址 | `127.0.0.1` |
 | `WEB_ADMIN_PORT` | 监听端口 | `5104` |
 | `WEB_ADMIN_SESSION_TTL_HOURS` | session 有效期（小时） | `168` |
+| `WEB_ADMIN_SESSION_MAX_AGE_HOURS` | session 绝对寿命（小时），自创建起超过后必须重新登录 | `168` |
 | `WEB_ADMIN_COOKIE_SECURE` | 是否下发 Secure cookie：`auto` / `true` / `false` | `auto` |
 
 ### Docker 构建相关
@@ -101,13 +113,13 @@ MCP server 的普通字段支持 `${ENV_VAR}` 与 `${ENV_VAR:-default}`；认证
 | `PIP_TRUSTED_HOST` | pip 信任主机 |
 | `PLAYWRIGHT_BASE_IMAGE` | Playwright 基础镜像（可含国内代理前缀） |
 
-GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜像构建，并内置 Docker CLI，便于贴吧采集和可选 MCP docker transport 使用。使用 docker transport 时须自行挂载宿主机 Docker socket；默认 compose 保持该 socket 未挂载。
+GHCR 分发镜像和 `docker/Dockerfile.prod` 均基于 Playwright Python 镜像构建，并内置 Docker CLI，便于贴吧采集和可选 MCP docker transport 使用。使用 docker transport 时须自行挂载宿主机 Docker socket；默认 compose 保持该 socket 未挂载。
 
 ---
 
 ## LLM 配置数据库
 
-`data/llm_config.db` 是运行时的配置来源，JSON 是配置交换格式。通过 Web Admin“LLM 配置”或 `python -m quickquip.llm.config_cli` 修改草稿，再单独提交应用；Bot 启动加载已发布快照。`draft_revision`、`published_revision` 与 Bot 回报的 `loaded_revision` 分别表示草稿、发布和实际运行版本。旧 `config/llm.toml` 只作为首次迁移输入及 1.16.1 回退资产保留。完整流程、备份与回退说明见 [LLM 配置管理](llm-configuration.md)。
+`config/managed/config.db` 是运行时的配置来源，JSON 是配置交换格式。通过 Web Admin“LLM 配置”或 `python -m quickquip.llm.config_cli` 修改草稿，再单独提交应用；Bot 启动加载已发布快照。`draft_revision`、`published_revision` 与 Bot 回报的 `loaded_revision` 分别表示草稿、发布和实际运行版本。旧 `config/llm.toml` 只作为首次迁移输入及 1.16.1 回退资产保留。完整流程、备份与回退说明见 [LLM 配置管理](llm-configuration.md)。
 
 下文路径对应完整 JSON 文档，认证字段只保存根 `.env` 的变量名或引用。字段范围、枚举和继承能力由 `/ops/api/llm-configuration/metadata` 提供；新增写入拒绝非法值。
 
@@ -137,18 +149,18 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `auto_memory_prompt` | 自动记忆抽取自定义判定 prompt | `""` |
 | `auto_memory_max_tokens` | 自动记忆抽取判定最大输出 token | `256` |
 | `epoch_context_tokens` | 会话纪元标尺（标准 CTX）：懒初始化与 `/llm use` 新键的锚点跨度 | `8000` |
-| `epoch_cold_idle_seconds` | 冷场判定 T：距该键上次 LLM 请求超过此秒数视为缓存已冷（宁短勿长：设短退化为滚动窗形态，设长则每轮全价且窗口更长） | `300` |
+| `epoch_cold_idle_seconds` | 冷场缩窗等待时间 T：距该会话／渠道／模型最近一次调用开始或结束超过此秒数，且窗口超过冷场触发水位时缩窗；工具续轮、失败及取消也更新活动时间 | `300` |
 | `epoch_cold_target_tokens` | 冷场重置后窗口缩到的 token 估算目标（L_cold） | `4000` |
 | `epoch_cold_trigger_tokens` | 冷场重置触发水位：冷场且窗口超过此值才缩（H_cold） | `5000` |
 | `epoch_hot_target_tokens` | 触顶重置后窗口缩到的 token 估算目标（L_hot，长话题保护） | `32000` |
 | `epoch_cap_tokens` | 窗口硬上限：超过即触发触顶重置（H_hot / cap） | `64000` |
 | `recent_context_token_budget` | 【现场】补丁每轮 token 预算：近期消息缓冲服役给 LLM 的上限（从最新往回截） | `800` |
 | `recent_context_floor_seconds` | 【现场】滑动保底窗秒数：窗内消息即使已服役过也会重附（增量语义之外的保底） | `300` |
-| `request_input_token_budget` | 实际请求输入预算（应用侧估算口径，非模型平台上限）：按“provider 显式覆盖 > 模型窗口推导（窗口−输出预留）> 本缺省”解析，超限时主链先把纪元窗口缩到热水位重建请求重试一次，仍超限才拒绝发起；工具调用循环内的逐轮门禁超限立即中止该循环（无降级重试）；可在渠道或模型的 `parameters` 覆盖（null 表示继承） | `96000` |
+| `request_input_token_budget` | 实际请求输入预算（应用侧估算口径）：按“provider 显式覆盖 > 模型窗口推导（窗口−输出预留）> 本缺省”解析。超限时主链先缩到热水位，无法缩窗时进一步减少历史回放，重组重试一次；仍超限则拒绝发起。工具续轮超限立即中止。可在渠道或模型 `parameters` 覆盖（null 表示继承） | `96000` |
 | `agent_record_retention_days` | 已关闭对话轮（Loop）保留天数，按关闭时间计 | `30` |
-| `agent_record_max_loops_per_scope` | 每会话已关闭 Loop 数量上限，先触顶者触发清理最旧完整 Loop | `1000` |
+| `agent_record_max_loops_per_scope` | 每会话已关闭 Loop 数量上限；数量或字节先触顶者触发清理最旧完整 Loop，并推进受影响的活动纪元 | `1000` |
 | `agent_record_max_bytes_per_scope` | 每会话 Loop 业务记录字节上限（UTF-8 计量） | `67108864` |
-| `agent_replay_loop_tokens` | 历史 Loop 重放投影预算的推导下限（token 估算，512-4194304）：实际预算按“请求输入预算 − 纪元可见窗上限 − system/工具预留 − 当前 Loop 比例预留”推导（配置了模型容量的 provider 自动放大到窗口量级），超限按固定阶梯确定性精简（先剥原生 thinking，再丢原生副本，再收工具结果）；可在渠道或模型的 `parameters` 中硬覆盖 | `4096` |
+| `agent_replay_loop_tokens` | 整个历史 Loop 回放预算的推导下限（token 估算，512-4194304）：实际预算按“请求输入预算 − 纪元可见窗上限 − system/工具预留 − 当前 Loop 比例预留”推导。可在渠道或模型 `parameters` 中硬覆盖。超限时重建纪元并保留完整历史后缀，目标为预算的 `epoch_hot_target_tokens / epoch_cap_tokens`；最新单个 Loop 仍超限时按既有阶梯精简并冻结表达 | `4096` |
 | `agent_delivery_intermediate_enabled` | 中间轮交付的全局默认：开启后工具调用多轮回复中非最终轮的普通正文照常先于工具执行外发；关闭时非最终正文只记录不发送（`suppressed_by_policy`） | `false` |
 | `agent_delivery_final_enabled` | 最终轮分段的全局默认：开启后最终正文按自然段拆成多条消息发送；关闭时最终正文整条发送。两域独立；旧迁移输入中的 `agent_delivery_enabled` 按两域同值转换。各群/私聊会话可用 `/llm delivery intermediate/final/all …` 或 Web Admin“群 LLM”按会话覆盖 | `false` |
 | `reply_split_threshold_chars` | 回复超过该长度（Unicode code point）才进行自然分段 | `800` |
@@ -157,7 +169,7 @@ GHCR 分发镜像和 `prod.example/Dockerfile` 均基于 Playwright Python 镜�
 | `reply_max_chunks_per_loop` | 单次对话交付条目上限（含文字、媒体与通知，1-256） | `64` |
 | `mention_cooldown_seconds` | 出站“@名字”艾特的同目标冷却秒数：窗内重复艾特同一人降级为纯文本（0 关闭冷却，0-86400） | `600` |
 
-以上 6 个 `epoch_*` 键均可在渠道或模型的 `parameters` 对象内同名覆盖（如 DeepSeek 的缓存存活更久，`epoch_cold_idle_seconds` 可放宽到 `21600`）；未覆盖的键继承 `settings.runtime` 值。参数关系需满足 `0 < cold_target < cold_trigger ≤ hot_target < cap` 且 `context_tokens > 0`，新写入的非法组合由校验拒绝。`recent_context_*` 两键仅全局，不支持 provider 覆盖。
+以上 6 个 `epoch_*` 键均可在渠道或模型的 `parameters` 对象内同名覆盖；未覆盖的键继承 `settings.runtime` 值。参数关系需满足 `0 < cold_target < cold_trigger ≤ hot_target < cap` 且 `context_tokens > 0`，新写入的非法组合由校验拒绝。冷场时间决定应用何时缩窗，调整时结合用量页的缓存指标与纪元事件观察。`recent_context_*` 两键仅全局，不支持 provider 覆盖。
 
 ### `settings.triggers` — 触发方式
 

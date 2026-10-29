@@ -1,9 +1,8 @@
-"""SQLite persistence for LLM configuration and immutable execution snapshots."""
+"""SQLite persistence for configuration documents and immutable local history."""
 
 from __future__ import annotations
 
 import json
-import errno
 import os
 import re
 import uuid
@@ -12,7 +11,7 @@ from contextlib import contextmanager
 from functools import lru_cache
 from pathlib import Path
 
-SCHEMA_VERSION = 3
+from quickquip.configuration.database import DOMAIN_SCHEMA, SCHEMA_VERSION
 
 # Snapshot-owned settings that do not require a relational lookup/index column.
 # Keep the schema-2 projection compatible with databases from existing installations.
@@ -21,7 +20,7 @@ DOCUMENT_ONLY_SETTINGS = {"runtime": frozenset({"claude_code_device_id", "gemini
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS config_meta (
  singleton INTEGER PRIMARY KEY CHECK(singleton=1), schema_version INTEGER NOT NULL,
- draft_revision INTEGER NOT NULL, published_revision INTEGER NOT NULL,
+ draft_revision INTEGER NOT NULL,
  document TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS config_snapshots (
  revision INTEGER PRIMARY KEY, document TEXT NOT NULL, created_at REAL NOT NULL);
@@ -48,19 +47,6 @@ CREATE TABLE IF NOT EXISTS route_entries (
 CREATE TABLE IF NOT EXISTS config_settings (id TEXT PRIMARY KEY, document TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS config_migrations (
  id INTEGER PRIMARY KEY, source TEXT NOT NULL, report TEXT NOT NULL, created_at REAL NOT NULL);
-CREATE TABLE IF NOT EXISTS config_operations (
- id TEXT PRIMARY KEY, request_id TEXT UNIQUE NOT NULL, kind TEXT NOT NULL,
- target_revision INTEGER NOT NULL REFERENCES config_snapshots(revision),
- status TEXT NOT NULL CHECK(status IN ('queued','running','succeeded','failed','cancelled')),
- stage TEXT NOT NULL, payload TEXT NOT NULL, result TEXT, error TEXT,
- created_at REAL NOT NULL, updated_at REAL NOT NULL, owner TEXT,
- claim_token TEXT, lease_until REAL);
-CREATE UNIQUE INDEX IF NOT EXISTS one_pending_apply ON config_operations(kind)
- WHERE kind='apply' AND status IN ('queued','running');
-CREATE TABLE IF NOT EXISTS bot_runtime (
- singleton INTEGER PRIMARY KEY CHECK(singleton=1), boot_id TEXT NOT NULL,
- loaded_revision INTEGER NOT NULL, application_version TEXT NOT NULL,
- heartbeat_at REAL NOT NULL, components TEXT NOT NULL);
 """
 
 
@@ -133,7 +119,7 @@ def expected_schema_objects(version=SCHEMA_VERSION):
         conn.executescript(
             _SCHEMA
             + (_REVISIONS_SCHEMA if version >= 3 else "")
-            + declared_schema(legacy=version == 1)
+            + declared_schema(legacy=version == 1) + DOMAIN_SCHEMA
         )
         return {
             (row[0], row[1]): _schema_tokens(row[2])
@@ -161,6 +147,15 @@ def dumps(value) -> str:
     return json.dumps(
         value, ensure_ascii=False, sort_keys=True, separators=(",", ":"), allow_nan=False
     )
+
+
+def next_revision(connection):
+    """Publication snapshots and the editable draft share one revision namespace."""
+    return connection.execute(
+        "SELECT MAX((SELECT draft_revision FROM config_meta),"
+        "(SELECT COALESCE(MAX(revision),0) FROM config_revisions),"
+        "(SELECT COALESCE(MAX(revision),0) FROM config_snapshots))+1"
+    ).fetchone()[0]
 
 
 class ConfigStore:
@@ -235,51 +230,8 @@ class ConfigStore:
             )
 
     def upgrade(self, *, services_stopped=False):
-        """Atomically extend a verified v1/v2 database, preserving immutable snapshots."""
-        from quickquip.llm.config_document import ConfigError
-
-        conn = sqlite3.connect(self.path, timeout=10, isolation_level=None)
-        try:
-            conn.execute("PRAGMA foreign_keys=ON")
-            conn.execute("PRAGMA synchronous=FULL")
-            row = conn.execute(
-                "SELECT schema_version FROM config_meta WHERE singleton=1"
-            ).fetchone()
-            if row and row[0] == SCHEMA_VERSION:
-                self._verify_schema(conn)
-                return
-            conn.execute("BEGIN IMMEDIATE")
-            row = conn.execute(
-                "SELECT schema_version FROM config_meta WHERE singleton=1"
-            ).fetchone()
-            if row and row[0] == SCHEMA_VERSION:
-                self._verify_schema(conn)
-            elif row and row[0] in (1, 2):
-                self._verify_schema(conn, row[0])
-                if not services_stopped:
-                    raise ConfigError(
-                        "services_running",
-                        "Stop bot and Web, back up the database, then run init --services-stopped",
-                    )
-                if row[0] == 1:
-                    conn.execute('ALTER TABLE runtime_settings ADD COLUMN client_cluster TEXT')
-                    conn.execute("UPDATE runtime_settings SET client_cluster=''")
-                _upgrade_to_revisions(conn)
-                conn.execute("UPDATE config_meta SET schema_version=?", (SCHEMA_VERSION,))
-                self._verify_schema(conn)
-            else:
-                raise ConfigError("unsupported_schema", "Unsupported configuration schema")
-            conn.commit()
-        except sqlite3.DatabaseError as exc:
-            conn.rollback()
-            if "readonly" in str(exc).lower():
-                raise PermissionError(errno.EROFS, "Writable configuration initialization required")
-            raise ConfigError("unsupported_schema", "Configuration schema upgrade failed") from None
-        except BaseException:
-            conn.rollback()
-            raise
-        finally:
-            conn.close()
+        """Layout changes are performed by the explicit offline migration."""
+        self.verify()
 
     def verify(self):
         """Check a schema-compatible backup before it can replace live state."""
@@ -320,11 +272,11 @@ class ConfigStore:
             conn.execute("PRAGMA journal_mode=WAL")
             conn.execute("PRAGMA foreign_keys=ON")
             conn.execute("PRAGMA synchronous=FULL")
-            conn.executescript(_SCHEMA + _REVISIONS_SCHEMA + declared_schema())
+            conn.executescript(_SCHEMA + _REVISIONS_SCHEMA + declared_schema() + DOMAIN_SCHEMA)
             with conn:
                 conn.execute(
-                    "INSERT INTO config_meta VALUES (1,?,?,?,?)",
-                    (SCHEMA_VERSION, 1, 1, dumps(document)),
+                    "INSERT INTO config_meta VALUES (1,?,?,?)",
+                    (SCHEMA_VERSION, 1, dumps(document)),
                 )
                 now = time.time()
                 conn.execute(
@@ -342,34 +294,6 @@ class ConfigStore:
             conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
         finally:
             conn.close()
-
-
-def _upgrade_to_revisions(conn):
-    """Schema 2 → 3: backfill revision labels and lift the draft to the current format.
-
-    Snapshot times are the best saved-time evidence for old revisions; an unsnapshotted
-    draft keeps an unknown time. Snapshots stay byte-identical: readers upgrade format-1
-    documents with the same deterministic function, so the draft keeps its revision.
-    """
-    import time
-
-    from quickquip.llm.config_document import upgrade_document
-
-    conn.execute(_REVISIONS_SCHEMA)
-    conn.execute(
-        "INSERT INTO config_revisions(revision,saved_at) "
-        "SELECT revision,created_at FROM config_snapshots"
-    )
-    meta = conn.execute("SELECT draft_revision,document FROM config_meta").fetchone()
-    conn.execute("INSERT OR IGNORE INTO config_revisions(revision) VALUES(?)", (meta[0],))
-    document, changes = upgrade_document(json.loads(meta[1]))
-    if dumps(document) != meta[1]:
-        conn.execute("UPDATE config_meta SET document=? WHERE singleton=1", (dumps(document),))
-        project_document(conn, document)
-    conn.execute(
-        "INSERT INTO config_migrations(source,report,created_at) VALUES(?,?,?)",
-        ("schema-3", dumps({"schema_version": 3, "pricing": changes}), time.time()),
-    )
 
 
 def project_document(conn, document):
@@ -427,3 +351,31 @@ def project_document(conn, document):
         projected = {k: v for k, v in settings.items()
                      if k not in DOCUMENT_ONLY_SETTINGS.get(name, ())}
         _insert_fields(conn, f"{name}_settings", {"singleton": 1}, projected)
+
+
+def projection_consistent(connection) -> None:
+    """Compare stored projections against an independently projected draft in memory."""
+    import sqlite3
+    from quickquip.configuration.errors import ConfigError
+
+    document = json.loads(connection.execute("SELECT document FROM config_meta").fetchone()[0])
+    with sqlite3.connect(":memory:") as expected:
+        expected.executescript(_SCHEMA + _REVISIONS_SCHEMA + declared_schema())
+        project_document(expected, document)
+        tables = [
+            row[0]
+            for row in expected.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            if not row[0].startswith("config_") and row[0] != "bot_runtime"
+        ]
+        tables.append("config_settings")
+        for table in tables:
+            actual_rows = sorted(
+                tuple(row) for row in connection.execute(f'SELECT * FROM "{table}"')
+            )
+            expected_rows = sorted(expected.execute(f'SELECT * FROM "{table}"').fetchall())
+            if actual_rows != expected_rows:
+                raise ConfigError(
+                    "projection_mismatch",
+                    "Draft and relational projections differ; use ConfigService",
+                    table,
+                )

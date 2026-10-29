@@ -72,6 +72,8 @@ chmod +x .git/hooks/pre-push
 
 ## PR 与文档扫尾
 
+项目概念见[术语表](docs/glossary.md)，重要技术选择的记录方式见[ADR 索引](docs/dev/adr/README.md)。新增或调整概念、架构约束时，更新相关条目并在 PR 中关联；参数行为与操作步骤继续维护在领域契约中。
+
 变更按 [`docs/dev/branching.md`](docs/dev/branching.md) 的 Develop direct、Quick PR、Standard PR、Huge PR、Hot-Fix 或 Release 工作流执行。Standard PR 需要未参与实现的独立 CR 与一轮 Bot Review；Huge PR 还需要 Tier 2 Deep-CR。
 
 PR 描述说明动机、范围、验证方式和未验证项。解决 Issue 时在正文单独使用 `Closes #<issue>`；仅关联工作使用 `Refs #<issue>`。

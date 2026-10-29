@@ -73,6 +73,7 @@ class GroupRuleSwitch:
     def __init__(self, max_groups: int = 1024):
         self.max_groups = max_groups
         self.disabled: OrderedDict[str, set[str]] = OrderedDict()
+        self._saved = None
 
     def _touch(self, group_key: str) -> None:
         if group_key in self.disabled:
@@ -133,9 +134,18 @@ class GroupRuleSwitch:
                 self.disabled[str(gid)] = valid
 
     def save(self, path: str | Path) -> None:
-        save_json(path, self.to_dict())
+        value = self.to_dict()
+        if self._saved == value:
+            return
+        previous = load_json(path)
+        if previous == value or (previous is None and not value and not Path(path).exists()):
+            self._saved = value
+            return
+        save_json(path, value)
+        self._saved = value
 
     def load(self, path: str | Path) -> None:
         data = load_json(path)
         if data is not None:
             self.from_dict(data)
+        self._saved = self.to_dict()

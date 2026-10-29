@@ -4,6 +4,8 @@
 
 开发文档的公共/私有边界与职责索引见 [`README.md`](README.md)；源码结构规则见 [`style.md`](style.md)。
 
+项目概念见[术语表](../glossary.md)，重要技术选择的背景和取舍见[架构决策索引](adr/README.md)。其中，[领域分层与装配](adr/0006-layered-architecture-composition.md)、[统一聊天归档](adr/0007-unified-chat-archive.md)和[事务部署](adr/0011-transactional-deployment-recovery.md)记录本页核心结构的依据。
+
 ---
 
 ## 核心概念：分发层与自用层
@@ -88,12 +90,13 @@ QuickQuip/
 │   ├── quickquip/          # 业务逻辑包
 │   └── plugins/            # NoneBot2 插件入口薄层
 ├── tests/                  # pytest 测试套件
-├── scripts/                # 运维与数据回灌脚本（部分随镜像分发）
+├── scripts/                # 按部署、巡检、维护、CI 与钩子分类的通用程序
 ├── frontend/               # Web 管理后台前端（Vue 3 SPA）
 │   ├── src/                # 源码
 │   └── dist/               # 构建产物（gitignore）
 ├── docker-compose.example.yml  # Docker Compose 编排示例（含内置 SearXNG）
 ├── docker/
+│   ├── Dockerfile.prod     # 生产镜像构建
 │   └── searxng/
 │       └── settings.yml    # SearXNG 配置
 ├── config/                 # 配置文件目录（见下文专节）
@@ -122,6 +125,9 @@ QuickQuip/
 src/quickquip/
 ├── chat/                    # 框架无关的聊天业务（时区猜测、复读、彩蛋规则、接龙、统计、规则开关、语境规则、每日总结/播报收集与生成编排、周期报告、唤醒、词云、节日检测）
 ├── common/                  # 通用工具（限流、持久化、消息去重、最近消息缓冲）
+├── config_sync/             # qqsync 单向同步、服务生效、SSH/Compose 与部署事务
+├── config_workspace/        # qqconf 工作副本编码、布局、配置候选和编辑恢复
+├── configuration/           # 配置归属、逻辑快照、字段合并、原格式文本和持久写入
 ├── games/                   # 游戏模块（registry、scores、economy、config、各游戏实现）
 ├── llm/                     # LLM 运行时（多 provider、工具调用循环、MCP 客户端、记忆存储、persona、身份映射、词表、健康检查、用量统计与定价、quick_judge、single_shot；核心门面拆到 service_parts/）
 ├── generation/              # 多模态产出配置、模型解析、图片/语音/音乐 provider 调用
@@ -146,6 +152,18 @@ src/quickquip/
 源码位于 `src/plugins/`。每个文件都是薄层 re-export，把 `quickquip.*` 里的对象暴露给 NoneBot2 插件发现机制。不含任何业务逻辑。
 
 `bot.py` 通过 `nonebot.load_plugins(*plugins.__path__)` 加载已安装的 `plugins` 包路径。
+
+---
+
+## `frontend/` — Web 管理后台前端
+
+Web Admin 前端是独立的 pnpm 工程（`quickquip-admin-v2`），技术栈为 Vue 3.5 + TypeScript strict + Vite 8 + vue-router 4（hash 模式，base `/ops/`）。关键约定：
+
+- 路由页面在 `src/config/nav.ts` 登记，路由由其派生；除首页静态引入外，页面组件一律路由级动态 import。
+- 后端接口封装按领域收在 `src/api/`，可复用状态与请求编排收在 `src/composables/`，`src/components/ui/` 是设计系统组件。
+- 构建产物 `frontend/dist/`（gitignore）由 `app/web/` 以 StaticFiles 挂载到 `/ops/`；前端不设路由守卫，鉴权由后端强制。
+
+开发命令、测试双栈与部署形态见 [`../../frontend/README.md`](../../frontend/README.md)。
 
 ---
 
@@ -178,13 +196,17 @@ src/quickquip/
 
 ---
 
+## 受管配置存储
+
+`config/managed/config.db` 集中保存 SQLite 配置及本机配置历史，`config/managed/scheduled_messages.json` 保存循环任务。生产部署共享挂载该目录，Bot 与 Web 通过领域仓储写入。发布执行状态、私聊活跃状态和业务记录保存在运行存储，具体归属与事务见[配置与运行存储](configuration-storage.md)。
+
 ## `data/` — 运行时持久化数据（自用层，gitignore）
 
 ```
 data/
 ├── stats.json              # 群消息统计
 ├── rule_switch.json        # 群规则开关状态
-├── scheduled_messages.json # 群聊定时消息任务
+├── pending_scheduled_messages.json # 一次性待办任务
 ├── llm.db                  # LLM 对话历史与长期记忆（SQLite）
 ├── daily_summaries.db      # 每日群聊总结存档（SQLite）
 ├── period_reports.db       # 周期报告（周报/月报）存档（SQLite）
@@ -194,7 +216,7 @@ data/
 ├── web_admin_actions.db    # Web Admin 到 bot 进程的动作队列
 ├── audit.db                # Web Admin 审计日志（SQLite）
 ├── llm_trace.db            # LLM HTTP 调用索引与完整 JSON 请求/响应文本（SQLite，保留 14 天）
-├── llm_config.db           # 草稿、不可变发布快照、配置任务与 Bot 心跳
+├── config_runtime.db       # 发布指针、任务固定输入、执行状态与 Bot 心跳
 ├── llm_usage.db            # LLM 用量与成本统计（SQLite）
 ├── mcp_status.json         # MCP server 装载状态快照
 ├── cron_jobs.json          # Cron 定时任务调度状态快照（bot 进程写，web-admin 读）
@@ -255,8 +277,10 @@ docs/
 
 ### `prod.example/` 与 `prod/`
 
-- `prod.example/`：可公开分发的生产运维模板，包含 compose、Dockerfile、部署脚本、巡检脚本和示例通知配置。
-- `prod/`：由 `prod.example/` 复制得到的真实生产运维目录，进入 `.gitignore`，可保存服务器专用脚本配置、OneBot 协议端登录态目录和运维通知密钥。
+- `prod.example/`：生产 Compose 和运维通知配置模板。
+- `prod/`：Git 忽略的真实 Compose、OneBot 协议端登录目录和运维通知配置。
+- `scripts/deploy/`、`scripts/ops/`：由 Git 维护的部署和巡检程序；[脚本导航](../../scripts/README.md)说明各子目录。
+- `docker/Dockerfile.prod`：生产构建程序，构建参数通过 Compose 和根 `.env` 配置。
 - 本地私有工作区保存草稿、测试沙箱、探针脚本和工作文档。
 
 ### 私有环境变量与根 `.env` 的关系
@@ -279,7 +303,7 @@ Compose 挂载与部署脚本使用上述统一路径。
 | 路径 | 原因 |
 |---|---|
 | `.env`, `.env.*` | 含真实密钥（`.env.example` 除外） |
-| `data/llm_config.db` | 运行配置、发布快照与控制状态 |
+| `config/managed/` | SQLite 配置与循环任务，包含私有配置 |
 | `config/llm.toml` | 首次迁移输入与迁移前版本回退资产 |
 | `config/llm.*.local.toml` | 旧部署的本地覆盖资产 |
 | `config/generation.toml` | 含真实多模态 provider 配置 |

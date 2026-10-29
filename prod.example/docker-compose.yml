@@ -26,7 +26,7 @@ services:
     image: quickquip-app:${QUICKQUIP_RELEASE:-latest}
     build:
       context: ..
-      dockerfile: prod/Dockerfile
+      dockerfile: docker/Dockerfile.prod
       args:
         PIP_INDEX_URL: "${PIP_INDEX_URL:-https://pypi.tuna.tsinghua.edu.cn/simple}"
         PIP_TRUSTED_HOST: "${PIP_TRUSTED_HOST:-pypi.tuna.tsinghua.edu.cn}"
@@ -45,10 +45,12 @@ services:
       ONEBOT_ACCESS_TOKEN: "${ONEBOT_ACCESS_TOKEN:-}"
       SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:?请在 ../.env 设置外部 searxng 地址}"
       PYTHONPATH: "/app/src"
+      QUICKQUIP_MANAGED_CONTAINER: "1"
     shm_size: "1gb"
     volumes:
       - ${QUICKQUIP_ROOT:-..}/data:/app/data
       - ../config:/app/config:ro
+      - ${QUICKQUIP_ROOT:-..}/config/managed:/app/config/managed
       - ../llm_about:/app/llm_about:ro
       - ../bot.py:/app/bot.py:ro
       - ../src:/app/src:ro
@@ -72,11 +74,13 @@ services:
       WEB_ADMIN_PORT: "5104"
       SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:?请在 ../.env 设置外部 searxng 地址}"
       PYTHONPATH: "/app/src"
+      QUICKQUIP_MANAGED_CONTAINER: "1"
     ports:
       - "127.0.0.1:5104:5104"
     volumes:
       - ${QUICKQUIP_ROOT:-..}/data:/app/data
       - ../config:/app/config
+      - ${QUICKQUIP_ROOT:-..}/config/managed:/app/config/managed
       - ../llm_about:/app/llm_about
       - ../frontend/dist:/app/frontend/dist:ro
       - ../web_api.py:/app/web_api.py:ro

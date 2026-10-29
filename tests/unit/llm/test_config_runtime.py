@@ -237,7 +237,7 @@ async def test_boot_loads_published_and_recovers_publication(llm_service, monkey
     )
     claimed = runtime.config_service.tasks.claim("crashed-bot")
     runtime.config_service.publish(claimed["id"], claimed["claim_token"])
-    with runtime.config_service.store.connect(write=True) as conn:
+    with runtime.config_service.execution.connect(write=True) as conn:
         conn.execute("UPDATE config_operations SET lease_until=0 WHERE id=?", (operation["id"],))
     draft = runtime.config_service.read()
     draft["document"]["settings"]["runtime"]["max_prompt_chars"] = 3100

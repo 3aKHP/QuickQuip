@@ -87,7 +87,7 @@
         </template>
 
         <template v-else>
-          <SettingField class="server-grid__wide" label="服务地址" :model-value="String(server.url ?? '')" placeholder="https://example.com/mcp" @update:model-value="patch(index, { url: String($event) })" />
+          <SettingField class="server-grid__wide" label="服务地址" :model-value="String(server.url ?? '')" :placeholder="MCP_SERVER_URL_PLACEHOLDER" @update:model-value="patch(index, { url: String($event) })" />
           <div class="server-grid__wide">
             <p class="sub-label">请求头 <UiInfoTip text="密钥值必须写成 ${变量名} 引用，不能直接填写。" /></p>
             <KeyValueEditor :model-value="objectValue(server.headers)" @update:model-value="patch(index, { headers: $event })" />
@@ -190,6 +190,10 @@ const servers = computed<JsonObject[]>(() => {
 const transportOptions = MCP_TRANSPORT_OPTIONS.map(value => ({ value, label: value }))
 const pullPolicyOptions = MCP_PULL_POLICY_OPTIONS.map(value => ({ value, label: { always: '总是拉取', missing: '缺失才拉取', never: '从不拉取' }[value]! }))
 const negotiationOptions = MCP_NEGOTIATION_OPTIONS.map(value => ({ value, label: { legacy: '旧版（固定版本）', auto: '自动协商', modern: '现代（仅新版本）' }[value]! }))
+
+// 含 "//" 的占位文本必须经常量绑定：vue-tsc 3.3.12+ 模板 codegen 会把组件 props 里的 "//"
+// 误改写为块注释导致虚拟文件解析失败（language-tools#6264），直接写在模板里会让全文件报 TS2304
+const MCP_SERVER_URL_PLACEHOLDER = 'https://example.com/mcp'
 
 function mcpSection(): JsonObject {
   const settings = store.document.value?.settings

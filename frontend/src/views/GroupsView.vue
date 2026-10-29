@@ -166,4 +166,8 @@ async function periodNow(type: 'weekly' | 'monthly', gid: string) {
 .period-select { width: 92px; padding: 4px 6px; font-size: var(--qq-text-xs); }
 .add-row { display: flex; gap: var(--qq-gap-sm); margin-top: var(--qq-gap-sm); flex-wrap: wrap; }
 .add-row select, .add-row input { flex: 1; min-width: 120px; }
+@media (max-width: 767px) {
+  /* 窄屏下选择下拉独占一行，避免占位文案被并排输入框挤成截断 */
+  .add-row select { flex: 1 1 100%; }
+}
 </style>

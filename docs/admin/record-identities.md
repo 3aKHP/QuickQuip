@@ -7,15 +7,15 @@
 在项目根目录执行，默认只读预览：
 
 ```bash
-python scripts/backfill_record_identities.py
-python scripts/backfill_record_identities.py --database memories --group 123456 --preview-limit 20
-python scripts/backfill_record_identities.py --database quotes --record-id 42 --preview-limit 1
+python scripts/maintenance/backfill_record_identities.py
+python scripts/maintenance/backfill_record_identities.py --database memories --group 123456 --preview-limit 20
+python scripts/maintenance/backfill_record_identities.py --database quotes --record-id 42 --preview-limit 1
 ```
 
-Docker 镜像与生产部署清单均包含本脚本。使用生产 compose 时，先按 [部署模板的手动 compose 访问说明](../../prod.example/README.md#manual-compose-access) 设置环境并进入 compose 目录，再在应用容器内执行预览：
+Docker 镜像与生产部署清单均包含本脚本。使用生产 compose 时，先按 [部署模板的手动 compose 访问说明](../../scripts/deploy/README.md#manual-compose-access) 设置环境并进入 compose 目录，再在应用容器内执行预览：
 
 ```bash
-docker compose --env-file "$QUICKQUIP_ENV_FILE" exec -T quickquip python scripts/backfill_record_identities.py --preview-limit 0
+docker compose --env-file "$QUICKQUIP_ENV_FILE" exec -T quickquip python scripts/maintenance/backfill_record_identities.py --preview-limit 0
 ```
 
 `--database` 可选 `memories`、`quotes`、`offline_messages`、`all`；默认扫描 `data/llm.db`、`data/quotes.db`、`data/offline_messages.db`。`--path` 可指定单个数据库路径，必须同时选择一个具体数据库。`--record-id` 使用数据库主键；语录的数据库 ID 与群内显示序号分别维护。`--preview-limit 0` 仅输出统计，适合生产存量只读盘点。
@@ -25,7 +25,7 @@ docker compose --env-file "$QUICKQUIP_ENV_FILE" exec -T quickquip python scripts
 确认预览后显式写入：
 
 ```bash
-python scripts/backfill_record_identities.py --database memories --group 123456 --apply
+python scripts/maintenance/backfill_record_identities.py --database memories --group 123456 --apply
 ```
 
 每个数据库写入前使用 SQLite backup 生成同目录下带 UTC 时间戳的 `.identities-*.bak` 文件，并打印备份路径。每批默认 200 条，可用 `--batch-size` 调整。写入前在事务内核对源正文和片段值，遇到并发编辑或删除时跳过。已有片段保留，仅补充缺失引用索引；重复执行可继续完成剩余记录。任意失败返回非零退出码。
