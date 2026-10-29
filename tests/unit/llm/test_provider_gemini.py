@@ -90,7 +90,7 @@ async def test_gemini_function_call_payload_and_response():
     assert response.tool_calls[0].arguments_json == '{"query": "哈基镜"}'
 
 
-async def test_gemini_builtin_tool_array_schemas_declare_items(llm_service):
+async def test_gemini_builtin_tool_schemas_match_parameters_contract(llm_service):
     client = FakeGeminiClient(
         _provider_config(),
         {"candidates": [{"content": {"parts": [{"text": "ok"}]}}]},
@@ -108,25 +108,35 @@ async def test_gemini_builtin_tool_array_schemas_declare_items(llm_service):
     }
 
     missing_items: list[str] = []
+    invalid_enums: list[str] = []
 
-    def collect_missing_items(schema, path: str) -> None:
+    def check_schema(schema, path: str) -> None:
         if not isinstance(schema, dict):
             return
         if schema.get("type") == "array" and "items" not in schema:
             missing_items.append(path)
+        # Gemini's parameters Schema proto declares enum as repeated string.
+        if "enum" in schema and any(not isinstance(v, str) for v in schema["enum"]):
+            invalid_enums.append(path)
         for name, subschema in schema.get("properties", {}).items():
-            collect_missing_items(subschema, f"{path}.properties[{name}]")
+            check_schema(subschema, f"{path}.properties[{name}]")
         if "items" in schema:
-            collect_missing_items(schema["items"], f"{path}.items")
+            check_schema(schema["items"], f"{path}.items")
         for index, subschema in enumerate(schema.get("anyOf", [])):
-            collect_missing_items(subschema, f"{path}.anyOf[{index}]")
+            check_schema(subschema, f"{path}.anyOf[{index}]")
 
     for index, declaration in enumerate(declarations):
-        collect_missing_items(
+        check_schema(
             declaration["parameters"],
             f"functionDeclarations[{index}].parameters",
         )
     assert missing_items == []
+    assert invalid_enums == []
+
+    memory = next(item for item in declarations if item["name"] == "write_memory")
+    version = memory["parameters"]["properties"]["content_parts"]["properties"]["version"]
+    assert version["type"] == "integer"
+    assert version["minimum"] == version["maximum"] == 1
 
 
 async def test_gemini_mcp_style_array_schema_gets_default_items():

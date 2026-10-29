@@ -164,7 +164,8 @@ def register_memory_tools(registry, store, settings, capacity, enabled) -> None:
                         "含明确艾特的条目使用读取返回的结构，编辑 text 正文并保留 member 引用"
                     ),
                     "properties": {
-                        "version": {"type": "integer", "enum": [1]},
+                        # Gemini's parameters proto only accepts string enum values.
+                        "version": {"type": "integer", "minimum": 1, "maximum": 1},
                         "parts": {
                             "type": "array",
                             "items": {
