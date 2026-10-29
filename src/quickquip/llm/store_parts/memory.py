@@ -180,7 +180,7 @@ class MemoryStoreMixin:
                 raise MemoryConflict("记忆已修改或删除，请重新读取")
         return 1
 
-    def search_memories(self, group_id, *, query, limit):
+    def search_memories(self, group_id, *, query, limit: int | None):
         items = self.list_memories(group_id, limit=None)
         if not query.strip():
             return items[:limit]
@@ -189,7 +189,7 @@ class MemoryStoreMixin:
         matcher = RecordQuery(query, snapshot)
         ids = {item['id'] for item in ranked}
         ranked.extend(item for item in items if item['id'] not in ids
-                      and matcher.matches(item, True))
+                      and _matches_entry(item, matcher, query))
         return ranked[:limit]
 
     def memories_about_member(self, group_id, member_id, *, limit):

@@ -6,11 +6,13 @@ import json
 from collections.abc import Callable
 
 from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
-from quickquip.common.record_content import references, validate, render
+from quickquip.common.record_content import references, validate, render, display
 from quickquip.common.sensitive_filter import scan_and_log
 from quickquip.llm.memory_content import metadata
+from quickquip.llm.memory_envelope import excerpt
 
 MEMORY_TOOL_NAMES = frozenset({"list_memories", "read_memory", "write_memory", "delete_memory"})
+_SEARCH_EXCERPT_TOKENS = 128
 _RULES = (
     "自主维护当前会话记忆，修改前读取条目和来源。管理约定冲突时依次优先考虑"
     "全局管理员、群主、群管理员、普通成员；个人事实按可靠来源和明确更正判断。"
@@ -64,14 +66,27 @@ class MemoryTools:
     async def list_entries(self, args, context):
         scope = self.scope(context, "list_memories")
         offset = max(0, int(args.get("offset", 0)))
-        items = self.store.list_memories(
-            scope, keyword=args.get("keyword") or None, limit=21, offset=offset
-        )
+        keyword = (args.get("keyword") or "").strip()
+        total = self.store.count_memories(scope)
+        if keyword:
+            matches = self.store.search_memories(scope, query=keyword, limit=None)
+            matched_count = len(matches)
+            items = matches[offset:offset + 21]
+        else:
+            matched_count = total
+            items = self.store.list_memories(scope, limit=21, offset=offset)
+        entries = []
+        for item in items[:20]:
+            entry = entry_payload(item, full=False)
+            if keyword:
+                entry["excerpt"] = excerpt(display(item), keyword, _SEARCH_EXCERPT_TOKENS)
+            entries.append(entry)
         return json.dumps(
             {
-                "total": self.store.count_memories(scope),
+                "total": total,
+                "matched_count": matched_count,
                 "next_offset": offset + 20 if len(items) > 20 else None,
-                "items": [entry_payload(item, full=False) for item in items[:20]],
+                "items": entries,
             },
             ensure_ascii=False,
         )
@@ -139,10 +154,13 @@ def register_memory_tools(registry, store, settings, capacity, enabled) -> None:
         (
             "list_memories",
             handlers.list_entries,
-            "搜索或分页浏览当前会话的记忆目录。",
+            "按问题或关键词检索当前会话记忆，按相关性返回目录和正文节选；"
+            "用 read_memory 按 ID 读取全文。不传关键词时按最新顺序浏览，每页 20 条。",
             {
-                "keyword": {"type": "string", "maxLength": 256},
-                "offset": {"type": "integer", "minimum": 0},
+                "keyword": {"type": "string", "maxLength": 256,
+                            "description": "要查的问题或关键词，例如：周末联机什么时候集合"},
+                "offset": {"type": "integer", "minimum": 0,
+                           "description": "续页使用上次返回的 next_offset，并保持 keyword 不变"},
             },
             [],
         ),
