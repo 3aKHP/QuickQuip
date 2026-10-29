@@ -33,7 +33,7 @@ First application setup, including a standalone search-service route and the req
 
 ## Configuration Synchronization
 
-Set `QUICKQUIP_DEPLOY_LOCATION=cloud` and `QUICKQUIP_DEPLOY_RUNTIME=docker` in the real root `.env` on both ends. Upgrade an existing server with `bash scripts/deploy/deploy-v4.sh --config-sync off`; a new server additionally needs `--env local`. Initialize configuration storage before the first synchronization.
+Set `QUICKQUIP_DEPLOY_LOCATION=cloud` and `QUICKQUIP_DEPLOY_RUNTIME=docker` in the real root `.env` on both ends. Servers using `data/llm_config.db` require `bash scripts/deploy/deploy-v4.sh --migrate-storage`; this retains server configuration and disables synchronization for the migration. For an already migrated server receiving qqsync for the first time, use `--config-sync off`; a new server additionally needs `--env local`. Follow the [storage migration steps](../../docs/admin/storage-migration.md) before the first synchronization.
 
 Choose the first source through the command direction:
 

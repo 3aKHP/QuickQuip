@@ -56,7 +56,7 @@ ssh -N -L 5104:127.0.0.1:5104 user@server
 
 保持隧道运行，在本地浏览器打开 `http://127.0.0.1:5104/ops/`，用服务器根 `.env` 中的 `WEB_ADMIN_PASSWORD` 登录。接着按[首次启用 LLM](llm-configuration.md#首次启用-llm)完成模型设置与第一条回复验证。
 
-`deploy-v4` 的自动发布与现有配置同步驱动面向云端 Docker。源码服务目前由部署者的启动方式管理。
+`deploy-v4` 的代码发布面向云端 Docker。云端源码的程序更新由部署者管理；新版标准入口启动的 Bot/Web 支持通过 qqsync 同步配置和暂停／恢复服务，见[配置同步](config-sync.md)。
 
 ## 本地 Docker 安装
 

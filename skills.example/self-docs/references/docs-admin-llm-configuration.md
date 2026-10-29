@@ -87,7 +87,7 @@ Web Admin 的“模型价格”按渠道分组：模型从该渠道的模型清�
 
 ## CLI
 
-需要分文件审阅、注释和长期编辑时，使用[qqconf 工作副本](config-workspace.md)。`pack` 根据本地服务状态写入真实配置或候选；真实草稿按本文流程应用。
+需要分文件审阅、注释和长期编辑时，使用[qqconf 工作副本](config-workspace.md)。`pack` 按根 `.env` 的部署位置写入：local 生成暂存，cloud 写入本地真实配置，再由 qqsync 部署生效。Web 或 JSON CLI 保存的草稿按本文流程单独应用。
 
 在项目根目录运行，可用全局 `--db <路径>` 指定配置库。JSON 导入上限为 1 MiB。除初始化外，命令需要已有配置库。下方演示从修订 1 导入并应用修订 2；执行前用 `status` 查询当前草稿修订，并替换 `--expected-revision`。任务 ID、快照 ID 和请求标识也须按本次操作填写；同一请求重试时复用请求标识。
 
@@ -117,7 +117,7 @@ python -m quickquip.llm.config_cli restore --file data/llm-config-backup.db --se
 
 ## 生产与回退
 
-生产配置通过 Web 或配置运维驱动变更。deploy-v4 使用[共同基线进行双向配置同步](config-sync.md)，排除本地 DB 和旧 LLM TOML 的原始上传。首次升级同步能力使用 `--config-sync off` 保留服务器配置，随后选择初始来源建立基线。候选版本构建通过后初始化配置，配置变更通过服务提交和 Bot 应用确认。
+生产配置通过 Web 或配置运维驱动变更。deploy-v4 默认[单向推送配置](config-sync.md)，排除本地 DB 和旧 LLM TOML 的原始上传。仍使用 `data/llm_config.db` 的安装先按[存储迁移](storage-migration.md)执行 `--migrate-storage`，该选项保留服务器配置并关闭本次同步。已经完成存储迁移、首次升级同步能力时使用 `--config-sync off`，随后选择初始来源建立基线。候选版本构建通过后初始化配置，配置变更通过服务提交和 Bot 应用确认。
 
 `scripts/deploy/legacy/config-v1.sh` 与 `scripts/deploy/legacy/config-v1.ps1` 提供 SSH CLI 驱动，支持 `status`、`export`、`preview`、`import`、`apply`、`backup` 和 `restore`，见 [生产模板](../../prod.example/README.md)。配置回流支持[共同基线同步](config-sync.md)和单独 JSON 导出；数据库回流通过一致备份。
 

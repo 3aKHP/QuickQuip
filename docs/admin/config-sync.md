@@ -102,7 +102,7 @@ bash scripts/deploy/deploy-v4.sh --config-sync pull
 
 PowerShell 使用 `scripts/deploy/deploy-v4.ps1`、`-Plan` 和 `-ConfigSync pull`。部署脚本复用 qqsync 的计划和安装流程，把候选配置、镜像构建、停服发布、版本切换及健康检查放进同一笔部署。代码发布会启动新版本并检查健康状态。
 
-已有服务器首次升级到支持 qqsync 的代码时使用 `--config-sync off`；新服务器首次部署再加 `--env local`。`off` 保留服务器配置，独立的 `--env` / `-EnvSource` 选项用于这个流程。普通 push/pull 部署已经包含 `.env`。平铺目录迁移和完整运维步骤见[生产模板](../../prod.example/README.md)。
+仍使用 `data/llm_config.db` 的服务器先按[存储迁移](storage-migration.md)执行 `--migrate-storage`；该选项自动关闭本次同步并保留服务器配置。已经完成存储迁移、首次升级 qqsync 的服务器使用 `--config-sync off`；新服务器首次部署再加 `--env local`。`off` 保留服务器配置，独立的 `--env` / `-EnvSource` 选项用于这个流程。普通 push/pull 部署已经包含 `.env`。平铺目录迁移和完整运维步骤见[生产模板](../../prod.example/README.md)。
 
 ## 预览、输出与中断
 

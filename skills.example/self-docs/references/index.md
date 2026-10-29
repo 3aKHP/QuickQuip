@@ -17,7 +17,7 @@
 
 ## Root 文档
 
-- `CHANGELOG.md` → `references/root-changelog.md` — Changelog ｜ 关键词：response.metadata、scripts/sync_preset_skills.py、config/llm.toml、data/llm_config.db、.env、config/、data/、prod.example/、python -m quickquip.llm.config_cli init、data/llm-config-migration/
+- `CHANGELOG.md` → `references/root-changelog.md` — Changelog ｜ 关键词：migration_required、.env、config/managed/config.db、data/config_runtime.db、；Windows 使用包内、，完成迁移后再运行、。云端 deploy-v4 使用、-MigrateStorage、.runtime.db、unpack
 - `CLAUDE.md` → `references/root-claude.md` — CLAUDE.md — AI 协作者说明 ｜ 关键词：docs/dev/documenting.md、docs/dev/、docs/admin/、docs/user/、prod.example/、scripts/deploy/、scripts/ops/、prod/、.venv、uv venv
 - `CODE_OF_CONDUCT.md` → `references/root-code_of_conduct.md` — RFC 325799 — QuickQuip Code of Conduct ｜ 关键词：∀t: Reading(t) → Reading(t)、submit(x) → (User(x) ↔ User(x))、|P| ∈ {0, 1} → ∀p ∈ P: Civil(p, air)、Comply(x) → ¬Violate(x)、Disagree(x) → (C ≡ C)、P(reply) + P(¬reply) = 1
 - `CONTRIBUTING.md` → `references/root-contributing.md` — Contributing to QuickQuip ｜ 关键词：docs/dev/README.md、docs/dev/branching.md、style.md、testing.md、documenting.md、src/、python、CLAUDE.md、CLAUDE.local.md、scripts/git-hooks/pre-push
@@ -59,7 +59,7 @@
 - `docs/admin/record-identities.md` → `references/docs-admin-record-identities.md` — 记录身份迁移与验收 ｜ 关键词：requirements.txt、--database、memories、quotes、offline_messages、all、data/llm.db、data/quotes.db、data/offline_messages.db、--path
 - `docs/admin/sensitive-filter.md` → `references/docs-admin-sensitive-filter.md` — 敏感词过滤部署与维护 ｜ 关键词：config/sensitive_words.toml、words、block、soft、/llm reload、/llm health verbose、sensitive_filter、GET /ops/api/sensitive-filter/status、[内容已屏蔽]、/draw
 - `docs/admin/skills.md` → `references/docs-admin-skills.md` — Skill 系统（skills/） ｜ 关键词：skills/、SKILL.md、references/、scripts/、skills.example/、skills、self-docs、skills/self-docs/SKILL.md、cp -r current/skills.example/self-docs skills/、start.bat
-- `docs/admin/storage-migration.md` → `references/docs-admin-storage-migration.md` — 将配置与运行数据分开存储 ｜ 关键词：data/llm_config.db、backup、.env、--env local、-EnvSource local、config/managed/、--migrate、config/managed/config.db、data/config_runtime.db、config/managed/scheduled_messages.json
+- `docs/admin/storage-migration.md` → `references/docs-admin-storage-migration.md` — 将配置与运行数据分开存储 ｜ 关键词：data/llm_config.db、.env、config/、data/、llm_about/、skills/、config/managed/、QUICKQUIP_MANAGED_CONTAINER=1、QUICKQUIP_DEPLOY_LOCATION=local|cloud、QUICKQUIP_DEPLOY_RUNTIME=source|docker
 - `docs/admin/tool-discovery.md` → `references/docs-admin-tool-discovery.md` — LLM 工具发现配置 ｜ 关键词：tool_search、settings.tools、enabled、enabled_mode = "replace"、discovery_mode、off、on、auto、discovery_min_tools、discovery_search_limit
 - `docs/admin/web-admin.md` → `references/docs-admin-web-admin.md` — Web Admin 管理后台 ｜ 关键词：/ops/、.env、WEB_ADMIN_PASSWORD、start.bat、http://127.0.0.1:5104/ops/、auth_basic、GET /ops/api/auth/me、Set-Cookie、/ops/api/*、data/web_admin_sessions.db
 
