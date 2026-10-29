@@ -120,3 +120,14 @@ jobs:
           sudo --preserve-env=QUICKQUIP_DOCKER_SMOKE
           "$(command -v python)" -m pytest tests/integration/test_docker_config_sync.py
           --basetemp "${{ runner.temp }}/pytest-docker-config"
+
+  release-artifacts:
+    name: Candidate release acceptance
+    if: >-
+      (github.event_name == 'pull_request' && github.base_ref == 'main' && startsWith(github.head_ref, 'release/')) ||
+      (github.event_name == 'push' && github.ref == 'refs/heads/main')
+    uses: ./.github/workflows/_release-artifacts.yml
+    permissions:
+      contents: read
+    with:
+      ref: ${{ github.event.pull_request.head.sha || github.sha }}
