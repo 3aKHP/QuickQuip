@@ -164,7 +164,7 @@
 | `max_prompt_chars` | System Prompt 最大字符数限制 | `4000` |
 | `tool_calling_enabled` | 是否允许模型发起工具调用（Tool Calling） | `false` |
 | `tool_max_rounds` | 单次对话中工具调用循环（Tool Loop）的最大轮数 | `8` |
-| `tool_max_calls_per_round` | 单轮循环内最多允许并发执行的工具调用次数 | `16` |
+| `tool_max_calls_per_round` | 单轮循环内最多允许执行的工具调用次数 | `16` |
 | `retry_max_attempts` | LLM 请求失败时的最大尝试次数（含首次调用；仅对上游返回 429 / 5xx 或网络错误生效） | `3` |
 | `retry_base_delay` | 重试指数退避的基础等待秒数 | `1.0` |
 | `retry_jitter` | 重试退避的随机抖动比例（范围 `0`～`1`，设为 `0` 表示关闭抖动） | `0.5` |
@@ -499,7 +499,7 @@ Gemini 和 Responses 需要完整的工具调用与结果配对。工具批次�
 | `url` | `http` / `sse` | 远端 MCP 服务端点 URL（`http` 与 `sse` 模式下**必填**） | — |
 | `headers` | `http` / `sse` | 注入 HTTP 请求的自定义 Header（值支持 `${ENV_VAR}` 或 `${ENV_VAR:-default}`） | — |
 | `negotiation` | 仅 `http` | 协议版本协商模式：`legacy`（默认）/ `auto` / `modern` | `legacy` |
-| `protocol_version` | 仅 `http` | 当 `negotiation = "legacy"` 时，`initialize` 握手固定使用的协议版本 | `"2025-03-26"` |
+| `protocol_version` | 全部 | legacy 初始化时，`initialize` 握手固定使用的协议版本；HTTP `auto` 回退到 legacy 后也使用该值 | `"2025-03-26"` |
 | `supported_protocol_versions` | 仅 `http` | 当 `negotiation` 设为 `auto` 或 `modern` 时，客户端声明可接受的协议版本列表（这两种模式下**必填**） | — |
 | `command` | `stdio` | 本地子进程启动命令 | — |
 | `args` | `stdio` / `docker` | 启动命令参数数组 | `[]` |
