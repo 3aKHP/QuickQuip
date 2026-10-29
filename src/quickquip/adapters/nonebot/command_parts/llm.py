@@ -326,25 +326,10 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             svc.set_chat_memory_enabled(chat_id, False, chat_type=chat_type)
             await llm_cmd.finish(f"{scope_label}记忆注入已关闭")
 
-        if tokens[:1] == ["auto_memory"] and len(tokens) >= 2:
-            sub = tokens[1].lower()
-            if sub == "on":
-                svc.set_chat_auto_memory_enabled(chat_id, True, chat_type=chat_type)
-                await llm_cmd.finish(f"{scope_label}自动记忆抽取已开启")
-            if sub == "off":
-                svc.set_chat_auto_memory_enabled(chat_id, False, chat_type=chat_type)
-                await llm_cmd.finish(f"{scope_label}自动记忆抽取已关闭")
-            if sub == "reset":
-                svc.set_chat_auto_memory_enabled(chat_id, None, chat_type=chat_type)
-                default = "开" if svc.config.runtime.auto_memory_enabled else "关"
-                await llm_cmd.finish(f"{scope_label}自动记忆抽取已跟随全局默认（当前：{default}）")
-            if sub == "status":
-                settings = svc.get_chat_settings(chat_id, chat_type=chat_type)
-                default = "开" if svc.config.runtime.auto_memory_enabled else "关"
-                current = "开" if settings.auto_memory_enabled else "关"
-                await llm_cmd.finish(
-                    f"{scope_label}自动记忆抽取：{current}（全局默认 {default}）"
-                )
+        if tokens[:1] == ["auto_memory"]:
+            await llm_cmd.finish(
+                "自动抽取已退役。开启记忆与工具调用后，主模型自主维护记忆；"
+                "也可使用 /remember 和 /forget 直接管理。")
 
         if tokens[:1] == ["delivery"]:
             await _handle_delivery_command(

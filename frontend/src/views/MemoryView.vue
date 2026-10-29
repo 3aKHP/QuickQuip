@@ -1,95 +1,143 @@
 <template>
-  <div class="mem-view">
-    <UiPageHeader title="记忆管理" subtitle="按群查看、编辑与新增长期记忆条目">
-      <template #actions>
-        <router-link to="/llm-config?section=context" custom v-slot="{ navigate }">
-          <UiButton variant="ghost" icon="SlidersHorizontal" @click="navigate">配置记忆提取与上限</UiButton>
-        </router-link>
-      </template>
+  <div class="memory-view">
+    <UiPageHeader title="记忆管理" subtitle="群内记忆由全群共享，私聊记忆独立保存">
+      <template #actions><router-link to="/llm-config?section=context">配置记忆与容量</router-link></template>
     </UiPageHeader>
     <div class="toolbar">
-      <label>群组<select v-model="groupId" @change="load"><option value="">-- 选择群 --</option><option v-for="g in groups" :key="g" :value="g">{{ g }}</option></select></label>
-      <input v-model="keyword" placeholder="关键词过滤" class="kw-input" @keyup.enter="load" /><UiInfoTip text="支持正文关键词、成员名字、别名和 QQ；留空显示全部（最多 200 条）。" />
-      <UiButton :loading="loading" icon="RefreshCw" :disabled="!groupId" @click="load">刷新</UiButton>
-      <UiButton v-if="groupId" variant="danger" icon="Trash2" @click="clearAll">清空全部</UiButton>
+      <label>会话<select v-model="chatType" @change="reset"><option value="group">群聊</option><option value="private">私聊</option></select></label>
+      <label>{{ chatType === 'group' ? '群号' : 'QQ 号' }}<input v-model="chatId" :list="chatType === 'group' ? 'memory-groups' : undefined" @change="reset" /></label>
+      <datalist id="memory-groups"><option v-for="g in groups" :key="g" :value="g" /></datalist>
+      <input v-model="keyword" aria-label="搜索记忆" placeholder="标题、正文、名字或 QQ" @keyup.enter="reset" />
+      <UiButton :disabled="!validScope" :loading="loading" @click="reset">查询</UiButton>
+      <span v-if="status">已使用 {{ status.count }} / {{ status.capacity }} 条</span>
+      <UiButton v-if="loadedScope" variant="danger" @click="clearAll">清空全部</UiButton>
     </div>
-    <p v-if="error" class="error">{{ error }}</p>
-    <UiLoading v-else-if="loading" />
-    <UiEmpty v-else-if="!groupId" icon="Users" title="请先选择群组" description="从上方「群组」下拉选择一个群，即可查看、编辑或新增该群的长期记忆。" />
-    <UiEmpty v-else-if="memories.length === 0" icon="Brain" title="暂无记忆条目" description="该群还没有长期记忆：可在下方「新增记忆」手动添加，或由 Bot 在对话中自动抽取（需在 LLM 配置中开启记忆提取）。" />
-
-    <TransitionGroup name="list" tag="div" class="mem-list">
-      <UiCard v-for="m in memories" :key="m.id" padding="md" shadow="sm">
-        <div class="mem-meta"><span class="meta-id">#{{ m.id }}</span><UiTag size="sm" :variant="m.scope === 'user' ? 'success' : 'info'">{{ m.scope }}</UiTag><UiInfoTip :text="scopeTip" /><span v-if="m.user_id" class="meta-text">{{ m.user_display || m.user_id }} ({{ m.user_id }})</span><span class="meta-text">conf {{ m.confidence.toFixed(2) }}</span><UiInfoTip :text="confTip" /><span class="meta-text">{{ m.updated_at.slice(0, 16).replace('T', ' ') }}</span></div>
-        <div v-if="editing !== m.id" class="mem-content">{{ m.content_display ?? m.content }}</div>
-        <details v-if="editing !== m.id"><summary>查看原文</summary><pre>{{ m.content }}</pre></details>
-        <div v-if="editing !== m.id && m.tags.length" class="mem-tags"><UiTag v-for="t in m.tags" :key="t">{{ t }}</UiTag></div>
-        <div v-if="editing === m.id" class="edit-block">
-          <RecordContentEditor v-model="editParts" :group-id="groupId" />
-          <div class="edit-row"><input v-model="editTags" placeholder="标签（逗号分隔）" /><input v-model.number="editConf" type="number" step="0.1" min="0" max="1" style="width:90px" /></div>
-          <div class="edit-actions"><UiButton variant="primary" icon="Check" @click="saveEdit(m)">保存</UiButton><UiButton variant="ghost" @click="editing = null">取消</UiButton></div>
-        </div>
-        <div v-if="editing !== m.id" class="mem-actions"><UiButton size="sm" icon="Pencil" @click="startEdit(m)">编辑</UiButton><UiButton size="sm" variant="danger" icon="Trash2" @click="del(m.id)">删除</UiButton></div>
+    <p v-if="error" role="alert">{{ error }}</p>
+    <UiLoading v-if="loading" />
+    <UiEmpty v-else-if="!loadedScope" title="请选择会话" description="输入群号或私聊对象的 QQ 号后查询。" />
+    <UiEmpty v-else-if="!memories.length" title="没有匹配的记忆" description="可以调整关键词，或在下方添加记忆。" />
+    <div class="memory-list">
+      <UiCard v-for="item in memories" :key="item.id" padding="md">
+        <div class="meta">#{{ item.id }} · {{ item.title }} · {{ item.updated_at.slice(0, 16).replace('T', ' ') }}</div>
+        <p>{{ item.description }}</p>
+        <p class="meta">{{ writerLabel(item.writer) }}；依据：{{ item.source_user_id || '未知发言者' }}（{{ roleLabel(item.source_role) }}）</p>
+        <p v-if="item.user_id" class="meta">历史关联成员：QQ {{ item.user_id }}</p>
+        <template v-if="editing === item.id">
+          <input v-model="editTitle" aria-label="标题" maxlength="64" />
+          <input v-model="editDescription" aria-label="描述" maxlength="160" />
+          <RecordContentEditor v-model="editBody" :group-id="loadedScope" />
+          <div class="actions"><UiButton :disabled="saving" @click="saveEdit(item)">保存</UiButton><UiButton variant="ghost" @click="editing = null">取消</UiButton></div>
+        </template>
+        <template v-else>
+          <pre>{{ item.content_display || item.content }}</pre>
+          <details><summary>查看原文</summary><pre>{{ item.content }}</pre></details>
+          <div class="actions"><UiButton @click="startEdit(item)">编辑</UiButton><UiButton variant="danger" @click="remove(item)">删除</UiButton></div>
+        </template>
       </UiCard>
-    </TransitionGroup>
-
-    <UiCard v-if="groupId" padding="md" shadow="sm" class="add-card">
-      <h3 class="section-title">新增记忆<UiInfoTip :text="newMemoryTip" /></h3>
-      <div class="add-form">
-        <RecordContentEditor v-model="newParts" :group-id="groupId" />
-        <div class="add-row"><select v-model="newScope"><option value="group">group</option><option value="user">user</option></select><input v-model="newUserId" placeholder="user_id（可选）" style="width:120px" /><input v-model="newTags" placeholder="标签（逗号分隔）" /><UiInfoTip text="标签仅用于管理页的人工分类浏览，不参与对话中的记忆检索——检索只匹配记忆正文。" /><UiButton variant="primary" icon="Plus" @click="addMemory">添加</UiButton></div>
-      </div>
+    </div>
+    <div v-if="loadedScope" class="toolbar">
+      <UiButton :disabled="loading || offset === 0" @click="page(-1)">上一页</UiButton>
+      <span>第 {{ offset / 50 + 1 }} 页</span>
+      <UiButton :disabled="loading || memories.length < 50" @click="page(1)">下一页</UiButton>
+    </div>
+    <UiCard v-if="loadedScope" padding="md">
+      <h3>新增记忆</h3>
+      <p>正文支持 Markdown。标题和描述留空时，从正文自动提取。</p>
+      <input v-model="newTitle" maxlength="64" aria-label="新记忆标题" placeholder="标题（可选）" />
+      <input v-model="newDescription" maxlength="160" aria-label="新记忆描述" placeholder="描述（可选）" />
+      <RecordContentEditor v-model="newBody" :group-id="loadedScope" />
+      <UiButton :disabled="saving" @click="add">添加</UiButton>
     </UiCard>
   </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, toRaw } from 'vue'
 import RecordContentEditor from '../components/RecordContentEditor.vue'
-import { emptyRecordBody as emptyBody, type RecordBody } from '../api/recordContent'
-import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiCard from '../components/ui/UiCard.vue'; import UiButton from '../components/ui/UiButton.vue'; import UiTag from '../components/ui/UiTag.vue'; import UiLoading from '../components/ui/UiLoading.vue'; import UiEmpty from '../components/ui/UiEmpty.vue'; import UiInfoTip from '../components/ui/UiInfoTip.vue'
-import { fetchKnownGroups } from '../api/groups'; import { fetchMemories, createMemory, updateMemory, deleteMemory, clearAllMemories } from '../api/memory'; import { toast } from '../toast'
+import UiPageHeader from '../components/ui/UiPageHeader.vue'
+import UiCard from '../components/ui/UiCard.vue'
+import UiButton from '../components/ui/UiButton.vue'
+import UiLoading from '../components/ui/UiLoading.vue'
+import UiEmpty from '../components/ui/UiEmpty.vue'
+import { emptyRecordBody, type RecordBody } from '../api/recordContent'
+import { fetchKnownGroups } from '../api/groups'
+import { fetchMemories, fetchMemoryStatus, createMemory, updateMemory, deleteMemory, clearAllMemories, type MemoryEntry, type MemoryStatus } from '../api/memory'
+import { toast } from '../toast'
 
-const editParts = ref<RecordBody>(emptyBody()); const newParts = ref<RecordBody>(emptyBody())
-
-const groups = ref<string[]>([]); const groupId = ref(''); const keyword = ref(''); const memories = ref<any[]>([]); const loading = ref(false); const error = ref<string | null>(null); const editing = ref<number | null>(null); const editTags = ref(''); const editConf = ref(1.0); const newScope = ref('group'); const newUserId = ref(''); const newTags = ref('')
-
-/** scope 与置信度口径：列表条目与「新增记忆」说明共用同一来源，避免两处文案漂移 */
-const scopeTip = 'group = 该群所有对话都会检索到；user = 仅在与该 uid 用户相关的对话中才被检索引用。'
-const confTip = 'conf = 置信度（0–1），检索时按置信度降序优先注入提示词；手动添加默认 1.0，自动抽取固定 0.5，可在编辑中调整。'
-const newMemoryTip = `scope 选 group 对全群生效；选 user 需填 user_id，仅在与该用户的对话中被检索引用。${confTip}`
-
-onMounted(async () => { try { groups.value = (await fetchKnownGroups()).groups || [] } catch (e: unknown) { error.value = `加载失败: ${(e as Error).message}` } })
-async function load() { if (!groupId.value) return; loading.value = true; error.value = null; try { memories.value = await fetchMemories(groupId.value, keyword.value) } catch (e: unknown) { error.value = (e as Error).message } finally { loading.value = false } }
-function startEdit(m: any) { editing.value = m.id; editParts.value = JSON.parse(JSON.stringify(m.content_parts || { version: 1, parts: [{ type: 'text', text: m.content }] })); editTags.value = m.tags.join(', '); editConf.value = m.confidence }
-async function saveEdit(m: any) { try { await updateMemory(groupId.value, m.id, { content_parts: editParts.value, tags: editTags.value.split(',').map(t => t.trim()).filter(Boolean), confidence: isNaN(editConf.value) ? null : Number(editConf.value) }); editing.value = null; toast('已保存'); await load() } catch (e: unknown) { toast((e as Error).message, 'error') } }
-async function del(id: number) { if (!confirm(`删除记忆 #${id}？`)) return; try { await deleteMemory(groupId.value, id); memories.value = memories.value.filter(m => m.id !== id); toast('已删除') } catch (e: unknown) { toast((e as Error).message, 'error') } }
-async function clearAll() { if (!confirm(`清空群 ${groupId.value} 全部记忆？`)) return; try { const r = await clearAllMemories(groupId.value); memories.value = []; toast(`已删除 ${r.deleted} 条`) } catch (e: unknown) { toast((e as Error).message, 'error') } }
-async function addMemory() { if (!newParts.value.parts.some(p => p.type !== 'text' || p.text.trim())) { toast('内容不能为空', 'error'); return }; try { await createMemory(groupId.value, { content_parts: newParts.value, scope: newScope.value, user_id: newUserId.value.trim() || null, tags: newTags.value.split(',').map(t => t.trim()).filter(Boolean) }); newParts.value = emptyBody(); newUserId.value = ''; newTags.value = ''; toast('已添加'); await load() } catch (e: unknown) { toast((e as Error).message, 'error') } }
+const chatType = ref('group'), chatId = ref(''), keyword = ref(''), loadedScope = ref('')
+const groups = ref<string[]>([]), memories = ref<MemoryEntry[]>([])
+const offset = ref(0), status = ref<MemoryStatus | null>(null)
+const loading = ref(false), saving = ref(false), error = ref('')
+const editing = ref<number | null>(null), editVersion = ref(0)
+const editTitle = ref(''), editDescription = ref(''), newTitle = ref(''), newDescription = ref('')
+const editBody = ref<RecordBody>(emptyRecordBody()), newBody = ref<RecordBody>(emptyRecordBody())
+const validScope = computed(() => /^\d{5,12}$/.test(chatId.value))
+const scope = computed(() => `${chatType.value === 'private' ? 'private:' : ''}${chatId.value}`)
+let loadSequence = 0
+const errorText = (e: unknown) => e instanceof Error ? e.message : String(e)
+const roleLabel = (role: string) => ({ GLOBAL_ADMIN: '全局管理员', GROUP_OWNER: '群主', GROUP_ADMIN: '群管理员', MEMBER: '普通成员' }[role] || '角色未知')
+const writerLabel = (writer: string) => ({ model: '模型维护', command: '群内指令', web: '管理页编辑', legacy: '历史条目' }[writer] || writer)
+onMounted(async () => {
+  try { groups.value = (await fetchKnownGroups()).groups || [] }
+  catch (e) { error.value = errorText(e) }
+})
+async function reset() {
+  offset.value = 0; editing.value = null; loadedScope.value = ''; status.value = null; memories.value = []
+  await load()
+}
+async function load() {
+  const sequence = ++loadSequence
+  if (!validScope.value) { loading.value = false; return }
+  const target = scope.value
+  loading.value = true; error.value = ''
+  try {
+    const [items, capacity] = await Promise.all([fetchMemories(target, keyword.value, offset.value), fetchMemoryStatus(target)])
+    if (sequence !== loadSequence) return
+    memories.value = items; status.value = capacity; loadedScope.value = target
+  } catch (e) { if (sequence === loadSequence) error.value = errorText(e) }
+  finally { if (sequence === loadSequence) loading.value = false }
+}
+async function page(delta: number) { offset.value = Math.max(0, offset.value + 50 * delta); editing.value = null; await load() }
+function startEdit(item: MemoryEntry) {
+  editing.value = item.id; editVersion.value = item.version
+  editTitle.value = item.title; editDescription.value = item.description
+  editBody.value = structuredClone(toRaw(item.content_parts))
+}
+async function saveEdit(item: MemoryEntry) {
+  const target = loadedScope.value
+  saving.value = true
+  try {
+    await updateMemory(target, item.id, { version: editVersion.value, title: editTitle.value, description: editDescription.value, content_parts: editBody.value })
+    editing.value = null; toast('已保存'); await load()
+  } catch (e) { toast(errorText(e), 'error') }
+  finally { saving.value = false }
+}
+async function add() {
+  saving.value = true
+  try {
+    await createMemory(loadedScope.value, { title: newTitle.value || undefined, description: newDescription.value || undefined, content_parts: newBody.value })
+    newBody.value = emptyRecordBody(); newTitle.value = ''; newDescription.value = ''
+    toast('已添加'); await reset()
+  } catch (e) { toast(errorText(e), 'error') }
+  finally { saving.value = false }
+}
+async function remove(item: MemoryEntry) {
+  if (!confirm(`删除记忆 #${item.id}？`)) return
+  try { await deleteMemory(loadedScope.value, item.id, item.version); toast('已删除'); await load() }
+  catch (e) { toast(errorText(e), 'error') }
+}
+async function clearAll() {
+  if (!confirm('清空当前会话的全部记忆？')) return
+  try { const result = await clearAllMemories(loadedScope.value); toast(`已删除 ${result.deleted} 条`); await reset() }
+  catch (e) { toast(errorText(e), 'error') }
+}
 </script>
 
 <style scoped>
-.mem-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
-.error { color: var(--qq-danger); }
-.toolbar { display: flex; align-items: center; gap: var(--qq-gap-md); flex-wrap: wrap; margin-bottom: var(--qq-gap-lg); padding: var(--qq-gap-sm) var(--qq-gap-md); background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); }
-.toolbar label { display: flex; align-items: center; gap: var(--qq-gap-xs); color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
-.kw-input { width: 180px; }
-
-.mem-list { display: flex; flex-direction: column; gap: var(--qq-gap-sm); margin-bottom: var(--qq-gap-md); }
-.mem-meta { display: flex; align-items: center; flex-wrap: wrap; gap: var(--qq-gap-xs); font-size: var(--qq-text-xs); margin-bottom: var(--qq-gap-sm); }
-.meta-id { color: var(--qq-text-muted); font-family: var(--qq-font-mono); }
-.meta-text { color: var(--qq-text-muted); }
-.mem-content { font-size: var(--qq-text-base); white-space: pre-wrap; word-break: break-all; color: var(--qq-text); line-height: 1.7; }
-.mem-tags { margin-top: var(--qq-gap-sm); display: flex; gap: var(--qq-gap-xs); flex-wrap: wrap; }
-.mem-actions { margin-top: 10px; display: flex; gap: var(--qq-gap-xs); }
-.edit-block { display: flex; flex-direction: column; gap: var(--qq-gap-sm); margin-top: 6px; }
-.edit-block textarea { width: 100%; resize: vertical; }
-.edit-row { display: flex; gap: var(--qq-gap-sm); flex-wrap: wrap; }
-.edit-row input { flex: 1; min-width: 120px; }
-.edit-actions { display: flex; gap: var(--qq-gap-xs); }
-.add-card { margin-bottom: var(--qq-gap-md); }
-.add-card h3 { margin: 0 0 var(--qq-gap-sm) 0; }
-.add-form { display: flex; flex-direction: column; gap: var(--qq-gap-sm); }
-.add-form textarea { width: 100%; resize: vertical; }
-.add-row { display: flex; gap: var(--qq-gap-sm); flex-wrap: wrap; align-items: center; }
+.memory-view, .memory-list { display: flex; flex-direction: column; gap: var(--qq-gap-md); }
+.toolbar, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--qq-gap-sm); }
+.meta { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
+pre { white-space: pre-wrap; overflow-wrap: anywhere; font-family: inherit; }
+input { margin: 4px; }
+[role="alert"] { color: var(--qq-danger); }
 </style>

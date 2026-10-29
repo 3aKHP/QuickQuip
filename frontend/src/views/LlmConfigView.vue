@@ -386,7 +386,7 @@ const SETTINGS_BLOCKS: Record<string, SettingsBlock[]> = {
   ],
   context: [
     { title: '上下文与历史窗口', section: 'runtime', fields: ['history_limit', 'history_max_messages_per_group', 'recent_context_token_budget', 'recent_context_floor_seconds', 'request_input_token_budget'] },
-    { title: '长期记忆与自动提取', section: 'runtime', fields: ['memory_limit', 'memory_max_items_per_group', 'auto_memory_enabled', 'auto_memory_prompt', 'auto_memory_max_tokens'] },
+    { title: '长期记忆', section: 'runtime', fields: ['memory_limit', 'memory_max_items_per_group'] },
   ],
   tools: [
     { title: '工具调用轮次与上限', section: 'runtime', fields: ['tool_calling_enabled', 'tool_max_rounds', 'tool_max_calls_per_round'] },

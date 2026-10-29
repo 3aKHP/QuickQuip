@@ -113,17 +113,9 @@
                 </select>
               </div>
               <div class="field">
-                <label>记忆启用<UiInfoTip text="开启后每轮回复前会从该会话记忆库检索相关记忆注入提示词（注入条数为 LLM 配置 [runtime] memory_limit，默认 6）；关闭后既不读记忆，自动记忆抽取也不会生效。" /></label>
+                <label>记忆启用<UiInfoTip text="开启后回答前自动召回相关记忆，默认最多 5 条正文，并受输入预算限制；同时开启工具调用时，主模型可以维护条目。关闭后停止模型记忆读写，人工指令和管理页仍可使用。" /></label>
                 <select v-model="draftTriState.memory_enabled">
                   <option :value="null">跟随默认（{{ defaultHint('memory_enabled') }}）</option>
-                  <option :value="true">开</option>
-                  <option :value="false">关</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>自动记忆抽取<UiInfoTip text="开启后自动从该会话的对话中提炼记忆条目，结果可在「记忆」页查看与编辑。" /></label>
-                <select v-model="draftTriState.auto_memory_enabled">
-                  <option :value="null">跟随默认（{{ defaultHint('auto_memory_enabled') }}）</option>
                   <option :value="true">开</option>
                   <option :value="false">关</option>
                 </select>

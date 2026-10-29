@@ -8,7 +8,7 @@ builtin tool declarations, discovery policy, and tool handlers.
 MRO contract: McpLifecycleMixin reads only host-owned public attributes —
 ``self.mcp_manager``, ``self.config``, ``self.tool_registry`` (all initialised
 in ``LLMService.__init__``) — plus its own ``self._mcp_*`` state, initialised
-by ``_init_mcp_lifecycle()`` (mirroring the ``_init_auto_memory()`` precedent).
+by ``_init_mcp_lifecycle()``.
 It never reaches into another mixin's private state; other mixins and the host
 must go through the public interface (``ensure_mcp_ready`` / ``startup`` /
 ``shutdown`` / ``reload_mcp`` / ``start_mcp_background`` for lifecycle actions,

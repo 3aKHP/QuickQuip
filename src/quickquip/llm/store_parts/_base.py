@@ -83,6 +83,8 @@ class _StoreBase:
             from quickquip.common.record_storage import migrate
             with self._connect() as conn:
                 migrate(conn, "memories")
+                from quickquip.llm.store_parts.memory_schema import migrate_memory_entries
+                migrate_memory_entries(conn)
         except sqlite3.Error as exc:
             logger.error("LLMStore 数据库初始化失败 (%s)：%s", self.path, exc)
             self._unavailable = True
@@ -206,6 +208,9 @@ class _StoreBase:
             }
             if "sender_name" not in conversation_columns:
                 conn.execute("ALTER TABLE conversation_messages ADD COLUMN sender_name TEXT")
+            if "sender_role" not in conversation_columns:
+                conn.execute("ALTER TABLE conversation_messages ADD COLUMN "
+                             "sender_role TEXT NOT NULL DEFAULT 'unknown'")
             if "canonical_name" not in conversation_columns:
                 conn.execute("ALTER TABLE conversation_messages ADD COLUMN canonical_name TEXT")
             if "message_id" not in conversation_columns:

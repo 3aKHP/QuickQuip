@@ -161,8 +161,8 @@
 | `gemini_cli_install_id` | 可选的 Gemini CLI 安装 UUIDv4；留空时自动使用持久化随机身份，见[请求指纹 Profile](client-fingerprints.md) | `""` |
 | `history_limit` | **历史兼容字段**（仅解析，不再参与窗口计算）。默认由下方的“会话纪元（Epoch）”自动管理；当群聊或私聊通过 `/llm context_limit <n>` 手动固定窗口行数时，保留最新 `n` 行（上限 `1024` 条） | `10` |
 | `history_max_messages_per_group` | **历史兼容字段**（解析后忽略其值）。对话存储现按会话纪元锚点裁剪，单会话硬上限为 `2048` 行 | `40` |
-| `memory_limit` | 单次模型调用最多注入的长期记忆条数 | `6` |
-| `memory_max_items_per_group` | 单个群聊最多存储的长期记忆条数硬上限 | `200` |
+| `memory_limit` | 单轮自动召回正文条数，最多 5 条；同时受 2048 token 总预算限制 | `5` |
+| `memory_max_items_per_group` | 每个群或私聊最多存储的记忆条数；满额拒绝新增，保留已有条目 | `1000` |
 | `max_prompt_chars` | System Prompt 最大字符数限制 | `4000` |
 | `tool_calling_enabled` | 是否允许模型发起工具调用（Tool Calling） | `false` |
 | `tool_max_rounds` | 单次对话中工具调用循环（Tool Loop）的最大轮数 | `8` |
@@ -170,9 +170,6 @@
 | `retry_max_attempts` | LLM 请求失败时的最大尝试次数（含首次调用；仅对上游返回 429 / 5xx 或网络错误生效） | `3` |
 | `retry_base_delay` | 重试指数退避的基础等待秒数 | `1.0` |
 | `retry_jitter` | 重试退避的随机抖动比例（范围 `0`～`1`，设为 `0` 表示关闭抖动） | `0.5` |
-| `auto_memory_enabled` | 自动长期记忆抽取的全局默认开关 | `false` |
-| `auto_memory_prompt` | 自动记忆抽取的自定义判定 Prompt | `""` |
-| `auto_memory_max_tokens` | 自动记忆抽取判定的最大输出 Token 数 | `256` |
 | `epoch_context_tokens` | **会话纪元标尺（标准 CTX）**：会话懒初始化与 `/llm use` 切换新模型时的初始锚点 Token 跨度 | `8000` |
 | `epoch_cold_idle_seconds` | **冷场缩窗等待时间（T）**：距离该会话／渠道／模型最近一次调用（含工具续轮、失败或取消）开始或结束超过此秒数，且当前窗口大小超过 `epoch_cold_trigger_tokens` 时，触发冷场缩窗 | `300` |
 | `epoch_cold_target_tokens` | **冷场目标水位（`L_cold`）**：触发冷场重置后，上下文窗口收缩到的目标 Token 估算值 | `4000` |
@@ -264,7 +261,7 @@
 | `discovery_min_tools` | `auto` 模式下触发按需发现的“可延迟工具”数量阈值 | `10` |
 | `discovery_search_limit` | 模型单次调用 `tool_search` 最多返回并加载的工具数量 | `5` |
 | `discovery_max_loaded_tools` | 单次会话中允许同时加载的工具总数上限（含常驻工具；达到该上限后停止新增加载，已加载的工具集合保持可用） | `12` |
-| `always_loaded` | 开启工具发现时，第一轮就直接暴露给模型的常驻工具名列表（未配置时使用右侧内置默认集合） | `["tool_search", "tool_list", "get_identity", "list_memories", "search_web", "activate_skill"]` |
+| `always_loaded` | 开启工具发现时，第一轮就直接暴露给模型的常驻工具名列表（未配置时使用右侧内置默认集合） | `["tool_search", "tool_list", "get_identity", "list_memories", "read_memory", "write_memory", "delete_memory", "search_web", "activate_skill"]` |
 
 > **本地元工具工作原理与 v1.12 升级提示**：
 > - `tool_search` 和 `tool_list` 是 QuickQuip 本地实现的元工具（不依赖 Claude 原生的服务端 tool search 特性）。当接入了庞大的 MCP 工具集时，模型会先调用 `tool_search` 按关键词搜索相关工具；若搜不到，还可调用 `tool_list` 浏览工具分组、工具名称或按精确名称加载工具，然后在下一轮 Tool Loop 中直接调用刚刚被加载进上下文的真实工具（详见专题文档 [tool-discovery.md](tool-discovery.md)）。

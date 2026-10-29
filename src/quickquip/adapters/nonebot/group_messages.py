@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.common.admins import message_actor_role
+
 from quickquip.app.identities import identities as stored_identities
 
 import logging
@@ -50,10 +52,11 @@ def _remember_recent_message(
     rendered_text: str,
     message_id: str = "",
     image_urls: list[str] | None = None,
+    sender_role: str = "unknown",
 ) -> None:
     recent_messages.add_message(
         group_id, user_id, sender_name, canonical_name, rendered_text,
-        message_id=message_id, image_urls=image_urls,
+        message_id=message_id, image_urls=image_urls, sender_role=sender_role,
     )
 
 
@@ -294,6 +297,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             _remember_recent_message(
                 group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
                 image_urls=rendered_message.image_urls,
+                sender_role=message_actor_role(event).name,
             )
             if (
                 not roll_reply("llm_chat", group_id=group_id)
@@ -313,6 +317,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 cooldown_seconds=mention_cooldown_seconds(svc),
             )
             result = await svc.generate_reply(
+                sender_role=message_actor_role(event).name,
                 group_id=group_id,
                 user_id=user_id,
                 sender_name=sender_name,
@@ -404,6 +409,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             _remember_recent_message(
                 group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
                 image_urls=rendered_message.image_urls,
+                sender_role=message_actor_role(event).name,
             )
             if (
                 not roll_reply(awakening_result.rule_name, group_id=group_id)
@@ -431,6 +437,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
                 cooldown_seconds=mention_cooldown_seconds(svc),
             )
             result = await svc.generate_reply(
+                sender_role=message_actor_role(event).name,
                 group_id=group_id,
                 user_id=user_id,
                 sender_name=sender_name,
@@ -504,6 +511,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
             _remember_recent_message(
                 group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
                 image_urls=rendered_message.image_urls,
+                sender_role=message_actor_role(event).name,
             )
             return
         reply_message = _build_rule_reply_message(
@@ -516,12 +524,14 @@ def register_message_matcher(on_message, Message, MessageSegment):
             _remember_recent_message(
                 group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
                 image_urls=rendered_message.image_urls,
+                sender_role=message_actor_role(event).name,
             )
             return
         if not rate_limiter.allow(result["rate_limit_key"], user_id, group_id=group_id):
             _remember_recent_message(
                 group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
                 image_urls=rendered_message.image_urls,
+                sender_role=message_actor_role(event).name,
             )
             return
 
@@ -530,6 +540,7 @@ def register_message_matcher(on_message, Message, MessageSegment):
         _remember_recent_message(
             group_id, user_id, sender_name, canonical_name, rendered_text, message_id,
             image_urls=rendered_message.image_urls,
+            sender_role=message_actor_role(event).name,
         )
         with bot_action_trace(
             trigger_kind=str(result.get("trigger_kind", "rule")),

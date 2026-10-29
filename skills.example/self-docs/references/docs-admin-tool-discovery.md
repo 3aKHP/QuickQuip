@@ -51,7 +51,7 @@
 | `discovery_min_tools` | `auto` 模式下，可延迟工具数超过该值才启用工具发现 |
 | `discovery_search_limit` | 单次 `tool_search` 最多返回并加载的工具数；同一上限也约束 `tool_list mode = "load"` 的单次加载数 |
 | `discovery_max_loaded_tools` | 新增工具时比较当前已加载总数，`always_loaded` 常驻工具计入；达到该值后停止新增，已有集合保留 |
-| `always_loaded` | 工具发现开启时直接提供给模型的常驻工具。未配置时回退内置默认集：`tool_search` / `tool_list` / `get_identity` / `list_memories` / `search_web` / `activate_skill` |
+| `always_loaded` | 工具发现开启时直接提供给模型的常驻工具。未配置时回退内置默认集：`tool_search` / `tool_list` / `get_identity` / `list_memories` / `read_memory` / `write_memory` / `delete_memory` / `search_web` / `activate_skill` |
 
 `tool_search` 用于按能力描述搜索工具；`tool_list` 用于列出工具组、工具名、工具摘要，并可用 `mode = "load"` 按精确名称加载工具。
 

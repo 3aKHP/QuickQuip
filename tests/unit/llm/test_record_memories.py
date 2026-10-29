@@ -13,8 +13,8 @@ def test_memory_legacy_matching_scope_and_delete(tmp_path, snapshot):
     store = LLMStore(tmp_path / "llm.db")
     body = legacy("[CQ:at,qq=12345,name=旧名] 的事实")
     member_id = store.add_memory("10001", "", content_parts=body)
-    own = store.add_memory("10001", "个人事实无需出现名字", scope="user", user_id="12345")
-    store.add_memory("10001", "他人的私密事实", scope="user", user_id="23456", content_parts=body)
+    own = store.add_memory("10001", "个人事实无需出现名字", user_id="12345")
+    store.add_memory("10001", "他人的私密事实", user_id="23456", content_parts=body)
     with store._connect() as conn:
         conn.execute(
             "UPDATE memories SET content_parts_json=NULL, "
@@ -25,12 +25,12 @@ def test_memory_legacy_matching_scope_and_delete(tmp_path, snapshot):
     assert rows[-1]["content_display"] == "@标准名 历史"
     assert "[CQ:at" in rows[-1]["content"]
     for query in ("别名", "标准名", "12345", "[CQ:at,name=旧名,qq=12345]"):
-        hits = store.search_memories("10001", user_id="12345", query=query, limit=10)
-        assert {r["id"] for r in hits} == {own, member_id}
+        hits = store.search_memories("10001", query=query, limit=10)
+        assert {r["id"] for r in hits} == {own, member_id, 3}
     assert [
         r["id"]
-        for r in store.search_memories("10001", user_id="12345", query="", limit=1, scope="user")
-    ] == [own]
+        for r in store.search_memories("10001", query="", limit=1)
+    ] == [3]
     assert store.delete_memories("10001", f"#{member_id}") == 1
     with store._connect() as conn:
         assert not conn.execute(
@@ -46,24 +46,23 @@ def test_memory_legacy_matching_scope_and_delete(tmp_path, snapshot):
         assert conn.execute("SELECT COUNT(*) FROM memories_member_refs").fetchone()[0] == 0
 
 
-async def test_memory_tool_does_not_expand_personal_scope(tmp_path, snapshot):
-    from quickquip.llm.service_parts.tools import ToolMixin
-    from quickquip.llm.service_parts.scope import ScopeMixin
+async def test_memory_tool_searches_shared_scope(tmp_path, snapshot):
+    from quickquip.llm.service_parts.memory_tools import MemoryTools
     from quickquip.llm.tools import ToolExecutionContext
-    class Service(ToolMixin, ScopeMixin):
-        pass
-    service = Service()
-    service.store = LLMStore(tmp_path / "llm.db")
+    from types import SimpleNamespace
+    service = SimpleNamespace(store=LLMStore(tmp_path / "llm.db"))
+    tools = MemoryTools(service.store, lambda *args: SimpleNamespace(memory_enabled=True),
+                        lambda: 1000, lambda *args: True)
     service.store.add_memory("10001", "", content_parts=legacy("[CQ:at,qq=12345] 群事实"))
-    service.store.add_memory("10001", "本人事实", scope="user", user_id="23456")
-    service.store.add_memory("10001", "其他成员私密", scope="user", user_id="12345")
+    service.store.add_memory("10001", "本人事实", user_id="23456")
+    service.store.add_memory("10001", "其他成员私密", user_id="12345")
     context = ToolExecutionContext("10001", "23456", "卡", "provider", "model")
-    result = await service._tool_list_memories({"keyword": "12345"}, context)
-    assert "@标准名 群事实" in result
-    assert "其他成员私密" not in result
+    result = await tools.list_entries({"keyword": "12345"}, context)
+    assert "群事实" in result
+    assert "其他成员私密" in result
 
 
-async def test_auto_memory_projection_preserves_history_and_model_strings(
+async def test_model_memory_preserves_history_and_literal_strings(
     llm_service, snapshot, monkeypatch
 ):
     monkeypatch.setattr(llm_service._identity_repository, "snapshot", lambda scope: snapshot)
@@ -79,33 +78,16 @@ async def test_auto_memory_projection_preserves_history_and_model_strings(
         canonical_name="旧标准", sender_name="旧卡",
     )
     before = llm_service.store.list_recent_conversation_messages(scope, 10)
-    prompts = []
-
-    async def judge(prompt, **kwargs):
-        from quickquip.llm.quick_judge import QuickJudgeResult
-
-        prompts.append(prompt)
-        return QuickJudgeResult(
-            text='{"memories": ["模型写出的小明喜欢编程"]}',
-            outcome="ok",
-            provider_id="p",
-            model="m",
-        )
-
-    monkeypatch.setattr(llm_service, "quick_judge_detailed", judge)
-    llm_service._auto_memory_turns[scope] = 9
-    await llm_service._extract_auto_memory(
-        scope_key=scope, user_id="12345", sender_name="旧卡", canonical_name="旧标准",
-        user_text=literal,
-        assistant_text="收到，我会根据当前发言和近期语境判断是否值得记住这些信息。",
-    )
-    assert "标准名（QQ 12345）" in prompts[0]
-    assert "@未登记名片 的历史提及" in prompts[0]
-    assert literal in prompts[0]
+    from quickquip.llm.tools import ToolExecutionContext, LLMToolCall
+    import json
+    context = ToolExecutionContext(scope, '12345', '旧卡', 'p', 'm')
+    result = await llm_service.tool_registry.execute(
+        LLMToolCall('save', 'write_memory', json.dumps({'content': literal})), context)
+    assert not result.is_error, result.content
     record = llm_service.store.list_memories(scope)[0]
-    assert record["user_id"] == "12345" and record["scope"] == "user"
-    assert record["content"] == "模型写出的小明喜欢编程"
-    assert not references(record["content_parts"])
+    assert record['scope'] == 'group'
+    assert record['content'] == literal
+    assert not references(record['content_parts'])
     assert llm_service.store.list_recent_conversation_messages(scope, 10) == before
 
 

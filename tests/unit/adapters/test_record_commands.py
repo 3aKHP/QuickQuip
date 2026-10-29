@@ -51,6 +51,7 @@ def snapshot(monkeypatch):
 async def test_screenshot_remember_and_literal_cq(tmp_path, monkeypatch, snapshot):
     store = LLMStore(tmp_path / "llm.db")
     svc = SimpleNamespace(
+        get_chat_settings=lambda *args: SimpleNamespace(memory_enabled=True),
         remember_memory=lambda group, content, **kw: store.add_memory(
             group, content, content_parts=kw["content_parts"]
         )
@@ -163,3 +164,34 @@ async def test_find_filters_in_worker_and_resolves_author(monkeypatch, snapshot)
     assert worker_threads and worker_threads[0] != main_thread
     text = matcher.sent[-1].data["text"]
     assert "找到 2 条" in text and "标准名: 普通发言" in text and "@标准名" in text
+
+
+async def test_profile_uses_related_shared_memories(llm_service, monkeypatch, snapshot):
+    llm_service.store.add_memory('10001', '目标喜欢登山', user_id='12345')
+    llm_service.store.add_memory('10001', '他人喜欢唱歌', user_id='23456')
+    llm_service.store.add_memory('10001', '周六全群活动')
+    monkeypatch.setattr(history, '_ensure_llm_bindings', lambda: None)
+    monkeypatch.setattr(history, 'get_llm_service', lambda: llm_service)
+    monkeypatch.setattr(history, 'stats_tracker', SimpleNamespace(
+        get_stats=lambda *args: SimpleNamespace(user_messages={'12345': 3})))
+    monkeypatch.setattr(history, 'chat_archive', SimpleNamespace(read_window=lambda *args: []))
+    captured = []
+
+    async def generate(**kwargs):
+        captured.append(kwargs)
+        return '完成人物志', 'model'
+
+    async def send(*args, **kwargs):
+        pass
+
+    monkeypatch.setattr(history, 'generate_profile', generate)
+    monkeypatch.setattr(history, 'send_long_group_message', send)
+    matchers = register(history.register_history_commands)
+    matchers['profile'].send = send
+    message = Message([MessageSegment.text('/profile '), MessageSegment.at('12345')])
+    event = SimpleNamespace(group_id=10001, user_id=99999, message_type='group',
+                            get_message=lambda: message)
+    await matchers['profile'].handlers[0](None, event)
+    assert len(captured) == 1
+    assert captured[0]['memories'] == ['历史关联成员 QQ 12345：目标喜欢登山']
+    assert llm_service.store.count_memories('10001') == 3

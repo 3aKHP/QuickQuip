@@ -12,6 +12,7 @@ from quickquip.llm.store import LLMStore
 
 @pytest.fixture
 def client(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory, "_capacity", lambda: 1000)
     monkeypatch.setattr(memory, "_DB", tmp_path / "llm.db")
     path = tmp_path / "identities.yaml"
     path.write_text(
@@ -34,7 +35,8 @@ def test_reference_edit_metadata_and_plain_client(client):
     row = client.get("/api/memory/10001?keyword=别名").json()[0]
     assert row["content_display"] == "@标准名 的事实"
     assert row["content"] == "@旧名 的事实"
-    result = client.put(f"/api/memory/10001/{ident}", json={"tags": ["分类"], "confidence": 0.3})
+    result = client.put(
+        f"/api/memory/10001/{ident}", json={"version": 1, "tags": ["分类"], "confidence": 0.3})
     assert result.status_code == 200
     store = LLMStore(memory._DB)
     with store._connect() as conn:
@@ -47,13 +49,15 @@ def test_reference_edit_metadata_and_plain_client(client):
         ).fetchone()[0] == "12345"
     # Old clients submit text; even a literal CQ example must stay text.
     text = "代码 [CQ:at,qq=12345]"
-    assert client.put(f"/api/memory/10001/{ident}", json={"content": text}).status_code == 200
+    assert client.put(
+        f"/api/memory/10001/{ident}", json={"version": 2, "content": text}).status_code == 200
     row = client.get("/api/memory/10001").json()[0]
     assert row["content_display"] == text
     with store._connect() as conn:
         assert not conn.execute("SELECT * FROM memories_member_refs").fetchall()
-    assert client.put(f"/api/memory/10001/{ident}", json={"content_parts": body}).status_code == 200
-    assert client.delete(f"/api/memory/10001/{ident}").status_code == 200
+    assert client.put(
+        f"/api/memory/10001/{ident}", json={"version": 3, "content_parts": body}).status_code == 200
+    assert client.delete(f"/api/memory/10001/{ident}?version=4").status_code == 200
     with store._connect() as conn:
         assert not conn.execute("SELECT * FROM memories_member_refs").fetchall()
 
@@ -98,3 +102,20 @@ def test_member_candidates_can_page_past_first_hundred(client, tmp_path):
     second = client.get("/api/members/10001?query=同名片&offset=100&limit=100").json()
     assert len(first) == 100 and len(second) == 5
     assert {member["qq"] for member in first + second} == set(members)
+
+
+def test_capacity_scope_and_conflicts(client, monkeypatch):
+    monkeypatch.setattr(memory, '_capacity', lambda: 1)
+    assert client.post('/api/memory/10001', json={
+        'scope': 'user', 'content': '旧格式'}).status_code == 422
+    created = client.post('/api/memory/10001', json={'content': '# 周六联机'}).json()
+    ident = created['id']
+    assert client.get('/api/memory/10001/status').json() == {'count': 1, 'capacity': 1}
+    assert client.post('/api/memory/10001', json={'content': '第二条'}).status_code == 422
+    assert client.post('/api/memory/private:10001', json={'content': '私聊约定'}).status_code == 201
+    assert client.put(f'/api/memory/10001/{ident}', json={
+        'version': 1, 'content': '# 周日联机'}).status_code == 200
+    assert client.put(f'/api/memory/10001/{ident}', json={
+        'version': 1, 'content': '过期编辑'}).status_code == 409
+    assert client.delete(f'/api/memory/10001/{ident}?version=1').status_code == 409
+    assert client.get('/api/memory/private:10001').json()[0]['content'] == '私聊约定'

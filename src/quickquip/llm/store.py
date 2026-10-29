@@ -20,7 +20,7 @@ from quickquip.llm.store_parts._base import _utc_now as _utc_now  # noqa: F401
 from quickquip.llm.store_parts.agent_records import AgentRecordsStoreMixin
 from quickquip.llm.store_parts.conversation import ConversationStoreMixin
 from quickquip.llm.store_parts.epoch_events import EpochEventsStoreMixin
-from quickquip.llm.store_parts.memory import MemoryStoreMixin
+from quickquip.llm.store_parts.memory import MemoryConflict as MemoryConflict, MemoryStoreMixin
 from quickquip.llm.store_parts.session_archive import SessionArchiveMixin
 from quickquip.llm.store_parts.session_lifecycle import SessionLifecycleMixin
 

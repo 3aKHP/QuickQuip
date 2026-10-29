@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from quickquip.common.record_content import display
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -416,14 +415,8 @@ def build_turn_envelope_segments(
             parts["mentions"] = "\n".join(profile_lines)
 
     if memories:
-        memory_lines: list[str] = []
-        if chat_type == "private":
-            memory_lines.append("以下是与当前私聊相关的持久记忆，仅在确实相关时参考：")
-        else:
-            memory_lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
-        for index, memory in enumerate(memories, 1):
-            memory_lines.append(f"{index}. {display(memory)}")
-        parts["memories"] = "\n".join(memory_lines)
+        from quickquip.llm.memory_envelope import render_memory_envelope
+        parts["memories"] = render_memory_envelope(memories)
 
     vocab_lines: list[str] = []
     vocab_matches = vocab.find_matches(prompt)
@@ -504,6 +497,8 @@ def history_speaker(item: Mapping[str, object]) -> dict[str, str]:
         "sender_name": str(item.get("sender_name") or ""),
         "canonical_name": str(item.get("canonical_name") or ""),
         "text": str(item.get("raw_content") or item.get("content") or ""),
+        "sender_role": str(item.get("sender_role", "unknown")),
+        "message_id": str(item.get("message_id") or ""),
     }
 
 
@@ -582,6 +577,8 @@ def _build_scene_from_recent_buffer(
             "sender_name": str(sender_name),
             "canonical_name": str(canonical_name),
             "text": str(item["text"]),
+            "sender_role": str(item.get("sender_role", "unknown")),
+            "message_id": str(item.get("message_id") or ""),
         })
 
     return LLMSceneMessage(
@@ -597,6 +594,8 @@ def _build_scene_from_current_message(
     image_urls: list[str],
     sender_name: str,
     user_id: str,
+    sender_role: str = "unknown",
+    message_id: str = "",
     quoted_text: str = "",
     quoted_sender_name: str = "",
     quoted_user_id: str = "",
@@ -683,6 +682,8 @@ def _build_scene_from_current_message(
         "user_id": user_id,
         "sender_name": sender_name,
         "canonical_name": current_canonical,
+        "sender_role": sender_role,
+        "message_id": message_id,
         "text": prompt or "[图片消息]",
     })
 
@@ -725,7 +726,9 @@ def _render_scene_to_text(
             canonical_name=speaker.get("canonical_name", ""),
             include_unregistered_note=True,
         )
-        lines.append(f"{label}：{speaker['text']}")
+        role = speaker.get("sender_role", "unknown")
+        meta = f"〔角色：{role}，消息 ID：{speaker.get('message_id', '未知')}〕"
+        lines.append(f"{label}{meta}：{speaker['text']}")
     return "\n".join(lines)
 
 
@@ -743,6 +746,8 @@ def build_messages(
     identities=None,
     current_sender_name: str = "",
     current_user_id: str = "",
+    current_sender_role: str = "unknown",
+    current_message_id: str = "",
     quoted_text: str = "",
     quoted_sender_name: str = "",
     quoted_user_id: str = "",
@@ -846,6 +851,8 @@ def build_messages(
         image_urls=image_urls,
         sender_name=current_sender_name,
         user_id=current_user_id,
+        sender_role=current_sender_role,
+        message_id=current_message_id,
         quoted_text=quoted_text,
         quoted_sender_name=quoted_sender_name,
         quoted_user_id=quoted_user_id,

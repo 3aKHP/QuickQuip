@@ -16,6 +16,7 @@ class RecentMessage:
     created_at: float
     message_id: str = ""
     image_urls: list[str] = field(default_factory=list)
+    sender_role: str = "unknown"
 
 
 class RecentMessageBuffer:
@@ -47,6 +48,7 @@ class RecentMessageBuffer:
             "text": item.text,
             "message_id": item.message_id,
             "image_urls": list(item.image_urls),
+            "sender_role": item.sender_role,
         }
         if include_created_at:
             row["created_at"] = item.created_at
@@ -78,6 +80,7 @@ class RecentMessageBuffer:
         canonical_name: str,
         text: str,
         *,
+        sender_role: str = "unknown",
         message_id: str = "",
         image_urls: list[str] | None = None,
         now_ts: float | None = None,
@@ -99,6 +102,7 @@ class RecentMessageBuffer:
         queue.append(
             RecentMessage(
                 user_id=str(user_id),
+                sender_role=sender_role,
                 sender_name=sender_name.strip() or str(user_id),
                 canonical_name=canonical_name.strip(),
                 text=normalized,

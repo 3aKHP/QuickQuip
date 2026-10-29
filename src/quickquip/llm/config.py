@@ -65,8 +65,8 @@ class RuntimeConfig:
     default_persona: str | None = None
     history_limit: int = 10
     history_max_messages_per_group: int = 40
-    memory_limit: int = 6
-    memory_max_items_per_group: int = 200
+    memory_limit: int = 5
+    memory_max_items_per_group: int = 1000
     max_prompt_chars: int = 4000
     tool_calling_enabled: bool = False
     tool_max_rounds: int = 8

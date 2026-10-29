@@ -744,7 +744,7 @@ async def test_memory_crud_basic(wired_service):
     assert memories[0]["content"] == "阿桃喜欢薄荷糖。"
 
     matched = wired_service.store.search_memories(
-        1001, user_id=2002, query="阿桃喜欢什么？", limit=3
+        1001, query="阿桃喜欢什么？", limit=3
     )
     assert matched
     assert matched[0]["content"] == "阿桃喜欢薄荷糖。"
@@ -843,7 +843,7 @@ class _AutoMemoryStubClient:
         return LLMResponse(text=text, model=request.model, finish_reason="stop")
 
 
-async def test_auto_memory_extraction_writes_memories_when_enabled(
+async def test_legacy_auto_memory_enabled_does_not_extract(
     llm_service, patch_provider_builder
 ):
     import asyncio
@@ -854,8 +854,6 @@ async def test_auto_memory_extraction_writes_memories_when_enabled(
     ])
     patch_provider_builder(lambda provider: stub)
 
-    # Batch trigger: extract every 10 turns; pre-set counter so the next call hits the batch
-    llm_service._auto_memory_turns["1001"] = 9
     await llm_service.generate_reply(
         group_id=1001,
         user_id=2002,
@@ -867,11 +865,8 @@ async def test_auto_memory_extraction_writes_memories_when_enabled(
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
 
-    assert stub.call_count == 2
-    memories = llm_service.list_group_memories(1001)
-    contents = {m["content"] for m in memories}
-    assert contents == {"小明是程序员", "小明喜欢喝奶茶"}
-    assert all(m["source"] == "auto" for m in memories)
+    assert stub.call_count == 1
+    assert llm_service.list_group_memories(1001) == []
 
 
 async def test_auto_memory_extraction_disabled_does_not_call_judge(
@@ -879,7 +874,6 @@ async def test_auto_memory_extraction_disabled_does_not_call_judge(
 ):
     import asyncio
     # Default auto_memory_enabled == False.
-    llm_service._auto_memory_turns["1002"] = 9
     stub = _AutoMemoryStubClient([
         "这是一条足够长的正常回复，确保自动记忆的文本质量门能够通过。",
         "should-not-be-called",
@@ -901,7 +895,7 @@ async def test_auto_memory_extraction_disabled_does_not_call_judge(
     assert llm_service.list_group_memories(1002) == []
 
 
-async def test_auto_memory_extraction_swallows_judge_errors(
+async def test_retired_extractor_does_not_request_a_judge(
     llm_service, patch_provider_builder
 ):
     import asyncio
@@ -912,8 +906,6 @@ async def test_auto_memory_extraction_swallows_judge_errors(
     ])
     patch_provider_builder(lambda provider: stub)
 
-    # Batch trigger: extract every 10 turns
-    llm_service._auto_memory_turns["1003"] = 9
     # Must not raise despite the judge returning junk.
     result = await llm_service.generate_reply(
         group_id=1003,
@@ -937,7 +929,6 @@ async def test_auto_memory_respects_memory_disabled(
     llm_service.config.runtime.auto_memory_enabled = True
     llm_service.set_group_memory_enabled(1004, False)
 
-    llm_service._auto_memory_turns["1004"] = 9
     stub = _AutoMemoryStubClient(["这是一条足够长的正常回复，确保自动记忆的文本质量门能够通过。"])
     patch_provider_builder(lambda provider: stub)
 
@@ -957,7 +948,7 @@ async def test_auto_memory_respects_memory_disabled(
     assert llm_service.list_group_memories(1004) == []
 
 
-async def test_auto_memory_per_chat_override_beats_global_default(
+async def test_legacy_auto_memory_override_does_not_extract(
     llm_service, patch_provider_builder
 ):
     import asyncio
@@ -970,7 +961,6 @@ async def test_auto_memory_per_chat_override_beats_global_default(
     ])
     patch_provider_builder(lambda provider: stub)
 
-    llm_service._auto_memory_turns["1005"] = 9
     await llm_service.generate_reply(
         group_id=1005,
         user_id=2002,
@@ -982,8 +972,8 @@ async def test_auto_memory_per_chat_override_beats_global_default(
     if pending:
         await asyncio.gather(*pending, return_exceptions=True)
 
-    assert stub.call_count == 2
-    assert [m["content"] for m in llm_service.list_group_memories(1005)] == ["override works"]
+    assert stub.call_count == 1
+    assert llm_service.list_group_memories(1005) == []
 
 
 # ── image preprocessor integration tests ──────────────────────────────
@@ -1773,13 +1763,6 @@ async def test_synthetic_turn_persists_paired_row_without_auto_memory(
     llm_service.config.runtime.auto_memory_enabled = True
     stub = StubProviderClient()
     patch_provider_builder(lambda provider: stub)
-    memory_calls = []
-
-    async def _spy(**kwargs):
-        memory_calls.append(kwargs)
-
-    monkeypatch.setattr(llm_service, "_extract_auto_memory", _spy)
-
     await llm_service.generate_reply(
         group_id=1001,
         user_id="boredom_timer",
@@ -1798,7 +1781,7 @@ async def test_synthetic_turn_persists_paired_row_without_auto_memory(
     assert [r["role"] for r in rows] == ["user", "assistant"]
     assert rows[0]["user_id"] == "boredom_timer"
     assert "【自动唤醒】群内冷场已超过 45 分钟" in (rows[0]["raw_content"] or rows[0]["content"])
-    assert memory_calls == []
+    assert llm_service.store.count_memories("1001") == 0
 
 
 async def test_cron_turn_persists_structured_summary(llm_service, patch_provider_builder):

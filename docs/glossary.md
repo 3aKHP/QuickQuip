@@ -146,7 +146,7 @@ Bot 最近回报已接纳的运行配置版本，通过 `loaded_revision` 等状
 <a id="long-term-memory"></a>
 ### 长期记忆（Long-term memory）
 
-由人工记录或符合资格的自动提取形成的持久事实，用于后续检索与个性化回答。记忆具有自己的归属、检索和删除规则。见[记忆与上下文](dev/llm-module.md#74-记忆与上下文)及[记录身份契约](dev/record-identities.md)。
+由主对话模型工具、群内指令或 Web 管理页维护的持久条目，用于后续检索与个性化回答。群内记忆共享，私聊独立保存；正文使用 Markdown，按会话管理检索与删除。见[记忆与上下文](dev/llm-module.md#74-记忆与上下文)及[记录身份契约](dev/record-identities.md)。
 
 <a id="turn-envelope"></a>
 ### 当轮信封（Turn envelope）

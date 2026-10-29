@@ -194,6 +194,14 @@ def actor_role(event) -> ActorRole:
     return ActorRole.MEMBER
 
 
+def message_actor_role(event) -> ActorRole:
+    """用于消息元数据的角色，私聊也识别全局管理员；不改变命令权限。"""
+    uid = str(getattr(event, "user_id", "") or "")
+    if uid and uid in _registry().snapshot():
+        return ActorRole.GLOBAL_ADMIN
+    return actor_role(event)
+
+
 def has_admin_authority(event) -> bool:
     """纯查询谓词：管理员及以上（群主/群管/全局管理员），无副作用。"""
     return actor_role(event) >= ActorRole.GROUP_ADMIN

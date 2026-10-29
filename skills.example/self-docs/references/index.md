@@ -54,6 +54,7 @@
 - `docs/admin/installation.md` → `references/docs-admin-installation.md` — 安装与部署方式 ｜ 关键词：.env、start.bat、ONEBOT_WS_URLS、3001、ONEBOT_ACCESS_TOKEN、http://127.0.0.1:5104/ops/、WEB_ADMIN_PASSWORD、deploy-v4、Copy-Item .env.example .env、QQ_ACCOUNT
 - `docs/admin/llm-configuration.md` → `references/docs-admin-llm-configuration.md` — LLM 配置数据库操作指南 ｜ 关键词：config/managed/config.db、config/llm.json.example、/ops/api/llm-configuration/metadata、config/personas.example/、config/personas/、quickquip-default、.env、up -d、my-provider、OPENAI_API_KEY
 - `docs/admin/mcp-servers.md` → `references/docs-admin-mcp-servers.md` — MCP Server 接入指南 ｜ 关键词：py、echo_server.py、Uvicorn running on http://127.0.0.1:8017、http://127.0.0.1:8017/mcp、legacy、2025-03-26、127.0.0.1、host.docker.internal、echo_lab、http
+- `docs/admin/memory.md` → `references/docs-admin-memory.md` — 管理长期记忆 ｜ 关键词：/llm memory on、list_memories、read_memory、write_memory、delete_memory、/remember 正文、/remember --id 42 新正文、/memories [关键词]、/memories --page 2 [关键词]、/memories --id 42
 - `docs/admin/migration-napcat-to-llbot.md` → `references/docs-admin-migration-napcat-to-llbot.md` — NapCat → LLBot 迁移指南 ｜ 关键词：mlikiowa/napcat-docker、initialencounter/llonebot:v7.12.14-7.3.2-45758、docker-compose.example.yml、docker-compose.yml、.env、entrypoint、/bin/sh -c、user@server、http://127.0.0.1:3080、ws-reverse
 - `docs/admin/onebot-adapters.md` → `references/docs-admin-onebot-adapters.md` — OneBot 适配器状态与选择 ｜ 关键词：.env、ONEBOT_WS_URLS、DRIVER、~websockets、~fastapi、ws://<bot 地址>:8080/onebot/v11/ws、ONEBOT_ACCESS_TOKEN、message.group、sender.card、nickname
 - `docs/admin/record-identities.md` → `references/docs-admin-record-identities.md` — 记录身份迁移与验收 ｜ 关键词：requirements.txt、--preview-limit 0、--apply、--database、memories、quotes、offline_messages、all、data/llm.db、data/quotes.db
@@ -115,6 +116,7 @@
 - `docs/dev/adr/0023-online-and-offline-configuration-publication.md` → `references/docs-dev-adr-0023-online-and-offline-configuration-publication.md` — ADR-0023：通过不可变快照完成在线与停服发布 ｜ 状态：Accepted ｜ 关键词：.env
 - `docs/dev/adr/0024-directional-configuration-deployment.md` → `references/docs-dev-adr-0024-directional-configuration-deployment.md` — ADR-0024：工作副本与单向配置部署 ｜ 状态：Accepted ｜ 关键词：.qqconf/、.env、QUICKQUIP_DEPLOY_LOCATION=local|cloud、QUICKQUIP_DEPLOY_RUNTIME=source|docker、.config-staging/、refresh、push、pull
 - `docs/dev/adr/0025-tracked-operations-programs.md` → `references/docs-dev-adr-0025-tracked-operations-programs.md` — ADR-0025：统一分发运维程序并分离生产配置 ｜ 状态：Accepted ｜ 关键词：scripts/deploy/、server/、legacy/、scripts/ops/、scripts/maintenance/、prod.example/、prod/、prod/hooks/deployment.sh、docker/Dockerfile.prod、.env
+- `docs/dev/adr/0026-conversation-owned-memory.md` → `references/docs-dev-adr-0026-conversation-owned-memory.md` — ADR-0026：由主对话模型维护会话记忆 ｜ 状态：Accepted
 - `docs/dev/adr/README.md` → `references/docs-dev-adr-readme.md` — 架构决策记录 ｜ 关键词：NNNN-short-title.md、Proposed、Accepted、Rejected、Superseded、status、superseded_by
 - `docs/dev/adr/template.md` → `references/docs-dev-adr-template.md` — ADR 模板 ｜ 关键词：NNNN-short-title.md
 
