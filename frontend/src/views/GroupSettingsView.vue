@@ -121,14 +121,6 @@
                 </select>
               </div>
               <div class="field">
-                <label>自动记忆抽取<UiInfoTip text="开启后自动从该会话的对话中提炼记忆条目，结果可在「记忆」页查看与编辑。" /></label>
-                <select v-model="draftTriState.auto_memory_enabled">
-                  <option :value="null">跟随默认（{{ defaultHint('auto_memory_enabled') }}）</option>
-                  <option :value="true">开</option>
-                  <option :value="false">关</option>
-                </select>
-              </div>
-              <div class="field">
                 <label>中间轮发送<UiInfoTip text="开启后该会话的工具调用多轮回复中，非最终轮的正文照常作为消息发出（如「我先查一下…」这类过程文本）；关闭时中间轮只记录不发送。全局默认在 LLM 配置 的 agent_delivery_intermediate_enabled 配置。" /></label>
                 <select v-model="draftTriState.agent_delivery_intermediate_enabled">
                   <option :value="null">跟随默认（{{ defaultHint('agent_delivery_intermediate_enabled') }}）</option>

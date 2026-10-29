@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from quickquip.common.record_content import display
 
 import logging
 from dataclasses import replace
@@ -120,22 +119,10 @@ class ToolMixin(McpLifecycleMixin):
             keywords=["身份", "人物", "群友", "别名", "qq"],
             always_loaded=True,
         )
-        self.tool_registry.register(
-            LLMToolSpec(
-                name="list_memories",
-                description="查看当前群已存的长期记忆，可选按关键词过滤。",
-                input_schema={
-                    "type": "object",
-                    "properties": {
-                        "keyword": {"type": "string"},
-                    },
-                },
-            ),
-            self._tool_list_memories,
-            category="memory",
-            keywords=["记忆", "长期记忆", "memory"],
-            always_loaded=True,
-        )
+        from quickquip.llm.service_parts.memory_tools import register_memory_tools
+        register_memory_tools(self.tool_registry, lambda: self.store,
+                              lambda chat_id, chat_type: self.get_chat_settings(chat_id, chat_type),
+                              lambda: self.config.runtime.memory_max_items_per_group)
         self.tool_registry.register(
             LLMToolSpec(
                 name=SEARCH_TOOL_NAME,
@@ -571,26 +558,6 @@ class ToolMixin(McpLifecycleMixin):
             return "\n".join(lines)
 
         return "未知 mode。可用 mode：groups、names、summaries、group、load。"
-
-    async def _tool_list_memories(
-        self, arguments: dict[str, object], context: ToolExecutionContext
-    ) -> str:
-        keyword = str(arguments.get("keyword", "")).strip() or None
-        items = self.store.search_memories(
-            self._context_scope_key(context),
-            user_id=context.user_id,
-            query=keyword or "",
-            limit=10,
-        )
-        if not items:
-            if keyword:
-                return f"{self._scope_subject(context.chat_type)}没有包含“{keyword}”的已存记忆。"
-            return f"{self._scope_subject(context.chat_type)}没有已存记忆。"
-
-        lines = [f"{self._memory_label(context.chat_type)}："]
-        for item in items[:10]:
-            lines.append(f"- #{item['id']} {display(item)}")
-        return "\n".join(lines)
 
     async def _tool_search_web(
         self, arguments: dict[str, object], context: ToolExecutionContext

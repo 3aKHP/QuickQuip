@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.common.admins import message_actor_role
+
 from quickquip.adapters.nonebot._llm_reply import (
     build_llm_reply_message,
     make_matcher_sink,
@@ -30,9 +32,11 @@ def _remember_recent_message(
     canonical_name: str,
     rendered_text: str,
     message_id: str = "",
+    sender_role: str = "unknown",
 ) -> None:
     recent_messages.add_message(
-        scope_key, user_id, sender_name, canonical_name, rendered_text, message_id=message_id
+        scope_key, user_id, sender_name, canonical_name, rendered_text, message_id=message_id,
+        sender_role=sender_role
     )
 
 
@@ -103,7 +107,8 @@ def register_private_message_matcher(on_message):
         if llm_input is None:
             return
         _remember_recent_message(
-            scope_key, user_id, sender_name, canonical_name, rendered_text, message_id
+            scope_key, user_id, sender_name, canonical_name, rendered_text, message_id,
+            sender_role=message_actor_role(event).name,
         )
         # 私聊掷骰状态按用户隔离，避免 suppress/pity 跨私聊用户串扰
         if (
@@ -120,6 +125,7 @@ def register_private_message_matcher(on_message):
             interval_ms=reply_interval_ms(svc),
         )
         result = await svc.generate_private_reply(
+            sender_role=message_actor_role(event).name,
             user_id=user_id,
             sender_name=sender_name,
             delivery_sink=delivery_sink,

@@ -48,6 +48,7 @@ class ChatTurnRequest:
     user_id: int | str
     sender_name: str
     prompt: str
+    sender_role: str = "unknown"
     image_urls: list[str] | None = None
     recent_messages: list[dict[str, str]] | None = None
     quoted_text: str = ""

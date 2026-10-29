@@ -1,13 +1,8 @@
 from __future__ import annotations
 
-from quickquip.common.record_content import display
 
 from quickquip.llm.config import REASONING_EFFORT_CHOICES, ProviderConfig
 from quickquip.llm.epoch import EpochKey
-from quickquip.llm.service_parts.constants import (
-    MAX_MEMORY_RETRIEVAL_ITEMS,
-    MAX_STORED_MEMORY_ITEMS,
-)
 from quickquip.llm.settings import DeliveryDomain
 from quickquip.llm.store_parts.agent_records import HistoryMutation
 
@@ -233,18 +228,31 @@ class StateMixin:
         chat_type: str = "group",
         *,
         content_parts: dict | None = None,
+        source_role: str = "unknown",
+        source_user_id: str | None = None,
+        source_message_id: str | None = None,
+        memory_id: int | None = None,
     ) -> int:
         scope_key = self.build_chat_scope_key(chat_id, chat_type)
+        if memory_id is not None:
+            item = self.store.read_memory(scope_key, memory_id)
+            self.store.update_memory(
+                scope_key, memory_id, version=item['version'], content=content,
+                content_parts=content_parts,
+                provenance={'writer': 'command', 'source_role': source_role,
+                            'source_user_id': source_user_id,
+                            'source_message_id': source_message_id})
+            return memory_id
         memory_id = self.store.add_memory(
             scope_key,
             content.strip(),
             scope="group",
             source="manual",
+            source_role=source_role,
+            source_user_id=source_user_id,
+            source_message_id=source_message_id,
             content_parts=content_parts,
-        )
-        self.store.prune_memories(
-            scope_key,
-            min(self.config.runtime.memory_max_items_per_group, MAX_STORED_MEMORY_ITEMS),
+            max_items=self.config.runtime.memory_max_items_per_group,
         )
         return memory_id
 
@@ -263,9 +271,10 @@ class StateMixin:
     ) -> list[dict[str, object]]:
         return self.list_memories(group_id, keyword=keyword, chat_type="group")
 
-    def forget_memories(self, chat_id: int | str, keyword: str, chat_type: str = "group") -> int:
+    def forget_memories(self, chat_id: int | str, keyword: str, chat_type: str = "group",
+                        *, literal: bool = False) -> int:
         return self.store.delete_memories(
-            self.build_chat_scope_key(chat_id, chat_type), keyword.strip()
+            self.build_chat_scope_key(chat_id, chat_type), keyword.strip(), literal=literal
         )
 
     def forget_group_memories(self, group_id: int | str, keyword: str) -> int:
@@ -335,14 +344,20 @@ class StateMixin:
         return "\n".join(lines)
 
     def format_memories(
-        self, group_id: int | str, keyword: str | None = None, chat_type: str = "group"
+        self, group_id: int | str, keyword: str | None = None, chat_type: str = "group",
+        *, page: int = 1,
     ) -> str:
-        memories = self.list_memories(group_id, keyword=keyword, chat_type=chat_type)
+        scope = self.build_chat_scope_key(group_id, chat_type)
+        memories = self.store.list_memories(scope, keyword=keyword, limit=11,
+                                            offset=(max(1, page) - 1) * 10)
         if not memories:
             return f"{self._scope_subject(chat_type)}没有已保存记忆"
-        lines = [f"{self._memory_label(chat_type)}："]
-        for item in memories:
-            lines.append(f"- #{item['id']} {display(item)}")
+        lines = [f"{self._memory_label(chat_type)} · 第 {page} 页："]
+        for item in memories[:10]:
+            lines.append(f"- #{item['id']} {item['title']}：{item['description']}")
+        if len(memories) > 10:
+            lines.append(f"下一页：/memories --page {page + 1} {keyword or ''}")
+        lines.append("全文：/memories --id <编号>")
         return "\n".join(lines)
 
     def format_memory_status(self, group_id: int | str, chat_type: str = "group") -> str:
@@ -352,8 +367,8 @@ class StateMixin:
         lines.append(f"当前会话：{self._scope_label(chat_type)}")
         lines.append(f"记忆注入：{'ON' if settings.memory_enabled else 'OFF'}")
         lines.append(f"已存条数：{total}")
-        lines.append(f"检索上限：{MAX_MEMORY_RETRIEVAL_ITEMS}")
-        lines.append(f"存储上限：{MAX_STORED_MEMORY_ITEMS}")
+        lines.append(f"自动召回上限：{min(5, self.config.runtime.memory_limit)} 条 / 2048 token")
+        lines.append(f"存储上限：{self.config.runtime.memory_max_items_per_group}")
         return "\n".join(lines)
 
     def clear_context(self, group_id: int | str, chat_type: str = "group") -> int:

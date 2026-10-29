@@ -171,8 +171,8 @@ def test_memory_list_with_keyword_filter(store: LLMStore) -> None:
 
 
 def test_memory_search_chinese_tokenization(store: LLMStore) -> None:
-    store.add_memory(2003, "阿桃喜欢画画", user_id="u1", scope="user", confidence=0.9)
-    store.add_memory(2003, "小明喜欢唱歌", user_id="u2", scope="user", confidence=0.5)
+    store.add_memory(2003, "阿桃喜欢画画", user_id="u1", scope="group", confidence=0.9)
+    store.add_memory(2003, "小明喜欢唱歌", user_id="u2", scope="group", confidence=0.5)
     # 搜索"阿桃"应命中第一条
     matched = store.search_memories(2003, user_id="u1", query="阿桃", limit=5)
     assert len(matched) == 1
@@ -187,13 +187,12 @@ def test_memory_delete_and_count(store: LLMStore) -> None:
     assert store.count_memories(2004) == 1
 
 
-def test_memory_prune_and_clear(store: LLMStore) -> None:
+def test_memory_clear(store: LLMStore) -> None:
     for i in range(5):
         store.add_memory(2005, f"记忆{i}")
-    store.prune_memories(2005, keep_last=2)
-    assert store.count_memories(2005) == 2
+    assert store.count_memories(2005) == 5
     deleted = store.clear_memories(2005)
-    assert deleted == 2
+    assert deleted == 5
     assert store.count_memories(2005) == 0
 
 

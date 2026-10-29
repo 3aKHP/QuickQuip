@@ -587,8 +587,8 @@ def _load_llm_config(path: str | Path) -> LLMConfig:
             history_max_messages_per_group=int(
                 runtime_raw.get("history_max_messages_per_group", 40)
             ),
-            memory_limit=int(runtime_raw.get("memory_limit", 6)),
-            memory_max_items_per_group=int(runtime_raw.get("memory_max_items_per_group", 200)),
+            memory_limit=int(runtime_raw.get("memory_limit", 5)),
+            memory_max_items_per_group=int(runtime_raw.get("memory_max_items_per_group", 1000)),
             max_prompt_chars=int(runtime_raw.get("max_prompt_chars", 4000)),
             tool_calling_enabled=as_bool(
                 runtime_raw.get("tool_calling_enabled", False), default=False

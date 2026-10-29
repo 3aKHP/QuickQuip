@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from quickquip.common.record_content import display
 
 from collections.abc import Mapping, Sequence
 from datetime import datetime
@@ -416,14 +415,8 @@ def build_turn_envelope_segments(
             parts["mentions"] = "\n".join(profile_lines)
 
     if memories:
-        memory_lines: list[str] = []
-        if chat_type == "private":
-            memory_lines.append("以下是与当前私聊相关的持久记忆，仅在确实相关时参考：")
-        else:
-            memory_lines.append("以下是与当前群聊相关的持久记忆，仅在确实相关时参考：")
-        for index, memory in enumerate(memories, 1):
-            memory_lines.append(f"{index}. {display(memory)}")
-        parts["memories"] = "\n".join(memory_lines)
+        from quickquip.llm.memory_envelope import render_memory_envelope
+        parts["memories"] = render_memory_envelope(memories)
 
     vocab_lines: list[str] = []
     vocab_matches = vocab.find_matches(prompt)
@@ -504,6 +497,8 @@ def history_speaker(item: Mapping[str, object]) -> dict[str, str]:
         "sender_name": str(item.get("sender_name") or ""),
         "canonical_name": str(item.get("canonical_name") or ""),
         "text": str(item.get("raw_content") or item.get("content") or ""),
+        "sender_role": str(item.get("sender_role", "unknown")),
+        "message_id": str(item.get("message_id") or ""),
     }
 
 
@@ -582,6 +577,8 @@ def _build_scene_from_recent_buffer(
             "sender_name": str(sender_name),
             "canonical_name": str(canonical_name),
             "text": str(item["text"]),
+            "sender_role": str(item.get("sender_role", "unknown")),
+            "message_id": str(item.get("message_id") or ""),
         })
 
     return LLMSceneMessage(
@@ -725,7 +722,9 @@ def _render_scene_to_text(
             canonical_name=speaker.get("canonical_name", ""),
             include_unregistered_note=True,
         )
-        lines.append(f"{label}：{speaker['text']}")
+        role = speaker.get("sender_role", "unknown")
+        meta = f"〔角色：{role}，消息 ID：{speaker.get('message_id', '未知')}〕"
+        lines.append(f"{label}{meta}：{speaker['text']}")
     return "\n".join(lines)
 
 

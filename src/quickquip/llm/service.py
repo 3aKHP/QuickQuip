@@ -99,8 +99,8 @@ from quickquip.llm.reply_chain import (
 from quickquip.llm.reply_types import ChatTurnRequest, ReplyResult
 from quickquip.llm.session import SessionIdentity, SessionInvalidated, SessionStoreError
 from quickquip.llm.service_parts.constants import (
+    MAX_MEMORY_RETRIEVAL_ITEMS as MAX_MEMORY_RETRIEVAL_ITEMS,
     DEFAULT_ENABLED_TOOLS as DEFAULT_ENABLED_TOOLS,  # noqa: F401 — re-exported via plugins/llm_runtime
-    MAX_MEMORY_RETRIEVAL_ITEMS,
     MAX_STORED_CONVERSATION_MESSAGES,
     MAX_STORED_MEMORY_ITEMS as MAX_STORED_MEMORY_ITEMS,  # noqa: F401 — re-exported via plugins/llm_runtime
     MAX_TRIGGER_CONTEXT_MESSAGES,
@@ -113,7 +113,6 @@ from quickquip.llm.service_parts.constants import (
     TOOL_SEARCH_NAME,
 )
 from quickquip.llm.service_parts import (
-    AutoMemoryMixin,
     DrawSvgToolMixin,
     HealthMixin,
     ImagesMixin,
@@ -189,7 +188,6 @@ class LLMService(
     ImagesMixin,
     HealthMixin,
     StateMixin,
-    AutoMemoryMixin,
 ):
     def __init__(
         self,
@@ -224,7 +222,6 @@ class LLMService(
         self._envelope_cache = EnvelopeBreakdownCache()
         # 同 scope 轮次串行闸门（设计 §5.2）：新输入在 Loop 边界取得执行权
         self._scope_gate = ScopeGate()
-        self._init_auto_memory()
         self._init_error: str | None = None
 
         self._register_builtin_tools()
@@ -481,7 +478,7 @@ class LLMService(
     async def quick_judge(self, prompt: str, max_tokens: int | None = None) -> str:
         """
         一次性极速判定的纯文本契约（现存调用方：draw_svg 内容裁决）。
-        结构化判定（awakening、context_rules、auto_memory）走
+        结构化判定（awakening、context_rules）走
         ``quick_judge_detailed``。不走群配置、不注入记忆、不启用工具，
         只发单条 system+user；优先使用 [triggers.quick_judge] 配置的
         provider/model，max_tokens 缺省沿用其 max_tokens。
@@ -657,6 +654,7 @@ class LLMService(
         user_id: int | str,
         sender_name: str,
         stored_prompt: str,
+        sender_role: str = "unknown",
         message_id: str | None,
         store_user_message: bool,
         normalized_quoted_text: str,
@@ -708,6 +706,7 @@ class LLMService(
                 UserTriggerPayload(
                     user_id=str(user_id),
                     sender_name=sender_name,
+                    sender_role=sender_role,
                     canonical_name=current_identity.canonical_name,
                     content=stored_prompt,
                     raw_content=raw_turn,
@@ -809,7 +808,7 @@ class LLMService(
         dict[str, list[LLMConversationMessage]],
     ]:
         # 会话纪元读取：只追加锚点窗口（懒初始化/冷场/触顶/行数兜底的推进判定
-        # 全部在 EpochManager 内），纪元内前缀逐字节稳定。auto_memory 仍走
+        # 全部在 EpochManager 内），纪元内前缀逐字节稳定。相关查询仍走
         # list_recent_conversation_messages 的 DESC LIMIT 尾读——两个消费者
         # 两种读模式，勿在此"统一"。
         epoch_event = self._epochs.maybe_advance(epoch_key, store=self.store, params=epoch_params)
@@ -997,6 +996,7 @@ class LLMService(
             )
             user_message = {
                 "user_id": user_id, "sender_name": sender_name,
+                "sender_role": tool_context.sender_role,
                 "canonical_name": current_identity.canonical_name,
                 "content": stored_prompt, "message_id": str(message_id) if message_id else None,
                 "raw_content": raw_turn,
@@ -1007,21 +1007,6 @@ class LLMService(
             floor_id=self._epochs.oldest_anchor(scope_key),
             keep_last=MAX_STORED_CONVERSATION_MESSAGES,
         )
-
-        if trigger_auto_memory and settings.auto_memory_enabled and settings.memory_enabled:
-            generation_at_schedule = session_generation
-            self.create_configuration_task(
-                self._extract_auto_memory(
-                    scope_key=scope_key,
-                    user_id=user_id,
-                    sender_name=sender_name,
-                    canonical_name=current_identity.canonical_name,
-                    user_text=stored_prompt,
-                    assistant_text=text,
-                    persona_id=settings.persona_id,
-                    expected_generation=generation_at_schedule,
-                )
-            )
 
         # 发送回执按群回填无记录路径的 assistant 行（无 agent_turn_row_id 时
         # record_final_receipt 依赖此键定位）；工具外发图片（base64 PNG）由
@@ -1235,12 +1220,18 @@ class LLMService(
             await self.ensure_mcp_ready()
         memories: list[dict[str, object]] = []
         if settings.memory_enabled:
-            memories = self.store.search_memories(
-                scope_key,
-                user_id=request.user_id,
-                query=turn.analysis_prompt or turn.trimmed_prompt,
-                limit=min(self.config.runtime.memory_limit, MAX_MEMORY_RETRIEVAL_ITEMS),
-            )
+            query = turn.analysis_prompt or turn.trimmed_prompt
+            neighbors = scene_patch or [item for item in history if item.get("role") == "user"]
+            query = "\n".join([str(item.get('text') or item.get('content', ''))[:512]
+                               for item in neighbors[-2:]] + [query])
+            recalled = self.store.search_memories(
+                scope_key, user_id=request.user_id, query=query,
+                limit=min(self.config.runtime.memory_limit, 5))
+            recalled_ids = {item['id'] for item in recalled}
+            directory = self.store.list_memories(scope_key, limit=None)
+            memories = [dict(item, recalled=True, recall_query=query) for item in recalled] + [
+                dict(item, recalled=False) for item in directory
+                if item['id'] not in recalled_ids]
 
         # skills 现扫 + 惰性注册先于 tool specs 计算：新 skill 首次出现的
         # 当轮即进入 spec 广告面；catalog 块与 specs 出自同一次扫描
@@ -1273,6 +1264,7 @@ class LLMService(
             load_history=self._load_scrubbed_history_and_participants,
             collect_mention_profiles=self._collect_mention_profiles,
             build_turn_envelope=self._build_turn_envelope,
+            sender_role=request.sender_role,
             build_messages=self._build_messages,
             chat_id=request.chat_id,
             chat_type=request.chat_type,
@@ -1322,6 +1314,10 @@ class LLMService(
                     "request budget exceeded scope=%s provider=%s model=%s: %s",
                     scope_key, provider.id, llm_request.model, exc,
                 )
+                if assembler.memories:
+                    assembler.memories = []
+                    llm_request = assembler.assemble()
+                    continue
                 if budget_retry_used:
                     return reply_result(
                         BUDGET_EXCEEDED_REPLY,
@@ -1367,6 +1363,19 @@ class LLMService(
             model=llm_request.model,
             chat_scope=scope_key,
             chat_type=request.chat_type,
+            sender_role=request.sender_role,
+            memory_sources={
+                str(item['message_id']): {
+                    'source_message_id': str(item['message_id']),
+                    'source_user_id': str(item.get('user_id') or ''),
+                    'source_role': str(item.get('sender_role') or 'unknown'),
+                }
+                for item in [*assembler.history, *(assembler.scene_patch or []), *([
+                    {'message_id': request.message_id, 'user_id': request.user_id,
+                     'sender_role': request.sender_role}
+                ] if request.store_user_message else [])]
+                if item.get('message_id') and item.get('role', 'user') == 'user'
+            },
         )
 
         recorder: TurnRecorder | None = None
@@ -1383,13 +1392,14 @@ class LLMService(
             # 拿到群级 persona 后把聊天主链路升级为带人格归因的 scope；
             # scope 生命周期与 provider 调用同处一个函数，退出即复位。
             # group_id 用 scope_key（群聊 = str(chat_id)，私聊 = private:{id}），
-            # 与 auto_memory 等派生调用的归因口径一致。
+            # 该作用域也用于工具调用的用量归因。
             recorder = self._begin_agent_recorder(
                 scope_key=scope_key,
                 chat_type=request.chat_type,
                 user_id=request.user_id,
                 sender_name=request.sender_name,
                 stored_prompt=turn.stored_prompt,
+                sender_role=request.sender_role,
                 message_id=request.message_id,
                 store_user_message=request.store_user_message,
                 normalized_quoted_text=turn.quoted_text,
@@ -1559,6 +1569,7 @@ class LLMService(
         user_id: int | str,
         sender_name: str,
         prompt: str,
+        sender_role: str = "unknown",
         delivery_sink=None,
         trigger_kind: TriggerKind | None = None,
         image_urls: list[str] | None = None,
@@ -1585,6 +1596,7 @@ class LLMService(
                 user_id=user_id,
                 sender_name=sender_name,
                 prompt=prompt,
+                sender_role=sender_role,
                 image_urls=image_urls,
                 recent_messages=recent_messages,
                 quoted_text=quoted_text,
@@ -1611,6 +1623,7 @@ class LLMService(
         user_id: int | str,
         sender_name: str,
         prompt: str,
+        sender_role: str = "unknown",
         delivery_sink=None,
         trigger_kind: TriggerKind | None = None,
         image_urls: list[str] | None = None,
@@ -1637,6 +1650,7 @@ class LLMService(
                 user_id=user_id,
                 sender_name=sender_name,
                 prompt=prompt,
+                sender_role=sender_role,
                 image_urls=image_urls,
                 recent_messages=recent_messages,
                 quoted_text=quoted_text,

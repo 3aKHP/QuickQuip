@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from quickquip.common.admins import message_actor_role
+from quickquip.llm.memory_commands import write_arguments, list_arguments
+
 from quickquip.adapters.nonebot.record_content import prepare_body
 from quickquip.app.identities import identities
 from quickquip.common.record_content import QQ, render
@@ -41,13 +44,19 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
         chat_type = _chat_type(event)
         chat_id = _chat_id(event)
         try:
+            memory_id, body = write_arguments(body)
             memory_id = svc.remember_memory(
-                chat_id, content, chat_type=chat_type, content_parts=body
-            )
+                chat_id, render(body), chat_type=chat_type, content_parts=body,
+                memory_id=memory_id, source_role=message_actor_role(event).name,
+                source_user_id=str(event.user_id),
+                source_message_id=str(getattr(event, 'message_id', '') or '') or None)
+
         except ValueError as exc:
             await remember_cmd.finish(MessageSegment.text(str(exc)))
+        notice = ("（当前记忆注入已关闭）"
+                  if not svc.get_chat_settings(chat_id, chat_type).memory_enabled else "")
         await remember_cmd.finish(
-            MessageSegment.text(f"已写入{_chat_label(event)}记忆 #{memory_id}")
+            MessageSegment.text(f"已写入{_chat_label(event)}记忆 #{memory_id}{notice}")
         )
 
     memories_cmd = on_command("memories", priority=10, block=True)
@@ -57,9 +66,18 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
         _ensure_llm_bindings()
         svc = get_llm_service()
         keyword = _strip_command_name(str(event.get_message()).strip(), "memories")
-        reply = svc.format_memories(
-            _chat_id(event), keyword=keyword or None, chat_type=_chat_type(event)
-        )
+        try:
+            memory_id, page, keyword = list_arguments(keyword)
+            if memory_id is not None:
+                item = svc.store.read_memory(
+                    svc.build_chat_scope_key(_chat_id(event), _chat_type(event)), memory_id)
+                reply = f"#{item['id']} {item['title']}\n{item['content_display']}"
+            else:
+                reply = svc.format_memories(
+                    _chat_id(event), keyword=keyword or None,
+                    chat_type=_chat_type(event), page=page)
+        except ValueError as exc:
+            reply = str(exc)
         await memories_cmd.finish(MessageSegment.text(reply))
 
     forget_cmd = on_command("forget", priority=10, block=True)
@@ -74,7 +92,9 @@ def register_memory_commands(on_command, Message, MessageSegment) -> None:
         _ensure_llm_bindings()
         svc = get_llm_service()
         try:
-            deleted = svc.forget_memories(_chat_id(event), keyword, chat_type=_chat_type(event))
+            deleted = svc.forget_memories(
+                _chat_id(event), keyword.removeprefix("-- "), chat_type=_chat_type(event),
+                literal=keyword.startswith("-- "))
         except ValueError as exc:
             await forget_cmd.finish(MessageSegment.text(str(exc)))
         await forget_cmd.finish(

@@ -1,5 +1,3 @@
-from datetime import datetime, timezone
-import json
 import logging
 import re
 
@@ -10,20 +8,33 @@ from typing import Annotated, Literal
 from quickquip.app.web.audit import audit_logger
 from quickquip.common.paths import LLM_DB_PATH
 from quickquip.llm.store import LLMStore
+from quickquip.llm.config_service import get_config_service
+from quickquip.llm.memory_content import DEFAULT_CAPACITY
 from quickquip.app.identities import web_identities
-from quickquip.common.record_content import QQ, plain, render, validate
-from quickquip.common.record_storage import save_parts
+from quickquip.common.record_content import QQ, render, validate
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _DB = LLM_DB_PATH
 
-_GROUP_ID_RE = re.compile(r"^\d{5,12}$")
+_GROUP_ID_RE = re.compile(r"^(?:private:)?\d{5,12}$")
 
 
 def _store() -> LLMStore:
     return LLMStore(_DB, identity_repository=web_identities)
+
+
+def _capacity() -> int:
+    published = get_config_service().read('published')['document']
+    return int(published['settings']['runtime'].get(
+        'memory_max_items_per_group', DEFAULT_CAPACITY))
+
+
+@router.get('/memory/{group_id}/status')
+def memory_status(group_id: str):
+    _validate_group_id(group_id)
+    return {'count': _store().count_memories(group_id), 'capacity': _capacity()}
 
 
 def _validate_group_id(group_id: str) -> None:
@@ -34,8 +45,10 @@ def _validate_group_id(group_id: str) -> None:
 class MemoryCreate(BaseModel):
     content: str = Field(default="", max_length=4096)
     content_parts: dict | None = None
-    scope: Literal["group", "user"] = "group"
-    user_id: str | None = None
+    scope: Literal["group"] = "group"
+    user_id: None = None
+    title: str | None = Field(default=None, max_length=64)
+    description: str | None = Field(default=None, max_length=160)
     tags: list[Annotated[str, Field(max_length=64)]] = Field(default=[], max_length=32)
     confidence: float = Field(default=1.0, ge=0.0, le=1.0)
 
@@ -47,6 +60,9 @@ class MemoryCreate(BaseModel):
 
 
 class MemoryUpdate(BaseModel):
+    version: int = Field(ge=1)
+    title: str | None = Field(default=None, max_length=64)
+    description: str | None = Field(default=None, max_length=160)
     content: str | None = Field(default=None, max_length=4096)
     content_parts: dict | None = None
     tags: list[Annotated[str, Field(max_length=64)]] | None = Field(default=None, max_length=32)
@@ -57,11 +73,12 @@ class MemoryUpdate(BaseModel):
 def list_memories(
     group_id: str,
     keyword: str | None = Query(default=None, max_length=256),
-    limit: int = Query(default=200, ge=1, le=500),
+    limit: int = Query(default=50, ge=1, le=500),
+    offset: int = Query(default=0, ge=0),
 ):
     _validate_group_id(group_id)
     store = _store()
-    return store.list_memories(group_id, keyword=keyword, limit=limit)
+    return store.list_memories(group_id, keyword=keyword, limit=limit, offset=offset)
 
 
 @router.post("/memory/{group_id}", status_code=201)
@@ -69,16 +86,23 @@ def create_memory(group_id: str, body: MemoryCreate, request: Request):
     _validate_group_id(group_id)
     store = _store()
     parts = _validated_parts(body.content_parts)
-    mem_id = store.add_memory(
-        group_id,
-        body.content,
-        scope=body.scope,
-        user_id=body.user_id,
-        tags=body.tags,
-        source="manual",
-        confidence=body.confidence,
-        content_parts=parts,
-    )
+    try:
+        mem_id = store.add_memory(
+            group_id,
+            body.content,
+            max_items=_capacity(),
+            writer="web",
+            title=body.title,
+            description=body.description,
+            scope=body.scope,
+            user_id=body.user_id,
+            tags=body.tags,
+            source="manual",
+            confidence=body.confidence,
+            content_parts=parts,
+        )
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     logger.info("memory created: group=%s id=%d scope=%s", group_id, mem_id, body.scope)
     audit_logger.log(
         request,
@@ -97,80 +121,31 @@ def create_memory(group_id: str, body: MemoryCreate, request: Request):
 def update_memory(group_id: str, mem_id: int, body: MemoryUpdate, request: Request):
     _validate_group_id(group_id)
     store = _store()
-    with store._connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            "SELECT * FROM memories WHERE id = ? AND group_id = ?",
-            (mem_id, group_id),
-        ).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="memory not found")
-        old_content = row["content"]
-        old_tags = row["tags_json"]
-        old_conf = row["confidence"]
-        parts = _validated_parts(body.content_parts)
-        new_content = (
-            render(parts)
-            if parts is not None
-            else body.content
-            if body.content is not None
-            else old_content
-        )
-        new_tags = json.dumps(body.tags, ensure_ascii=False) if body.tags is not None else old_tags
-        new_conf = body.confidence if body.confidence is not None else old_conf
-        now = datetime.now(timezone.utc).isoformat()
-        conn.execute(
-            "UPDATE memories SET content=?, tags_json=?, confidence=?, updated_at=? WHERE id=?",
-            (new_content, new_tags, new_conf, now, mem_id),
-        )
-        if parts is not None or body.content is not None:
-            save_parts(
-                conn, "memories", mem_id, group_id,
-                parts if parts is not None else plain(new_content),
-            )
-    logger.info("memory updated: group=%s id=%d", group_id, mem_id)
-    audit_logger.log(
-        request,
-        action="update",
-        target_type="memory",
-        target_id=f"{group_id}:{mem_id}",
-        summary_before={"content": old_content[:100], "tags": old_tags, "confidence": old_conf},
-        summary_after={"content": new_content[:100], "tags": new_tags, "confidence": new_conf},
-    )
-    return {"ok": True}
+    try:
+        result = store.update_memory(
+            group_id, mem_id, version=body.version, content=body.content,
+            content_parts=_validated_parts(body.content_parts), title=body.title,
+            description=body.description, tags=body.tags, confidence=body.confidence,
+            provenance={"writer": "web"})
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    audit_logger.log(request, action="update", target_type="memory",
+                     target_id=f"{group_id}:{mem_id}",
+                     summary_after={"content": result['content'][:100]})
+    return result
 
 
 @router.delete("/memory/{group_id}/{mem_id}")
-def delete_memory(group_id: str, mem_id: int, request: Request):
+def delete_memory(group_id: str, mem_id: int, request: Request,
+                  version: int = Query(ge=1)):
     _validate_group_id(group_id)
     store = _store()
-    with store._connect() as conn:
-        conn.execute("BEGIN IMMEDIATE")
-        row = conn.execute(
-            "SELECT * FROM memories WHERE id = ? AND group_id = ?",
-            (mem_id, group_id),
-        ).fetchone()
-        if not row:
-            raise HTTPException(status_code=404, detail="memory not found")
-        summary_before = {
-            "content": row["content"][:100],
-            "tags": row["tags_json"],
-            "confidence": row["confidence"],
-        }
-        cur = conn.execute(
-            "DELETE FROM memories WHERE id = ? AND group_id = ?",
-            (mem_id, group_id),
-        )
-        if cur.rowcount == 0:
-            raise HTTPException(status_code=404, detail="memory not found")
-    logger.warning("memory deleted: group=%s id=%d", group_id, mem_id)
-    audit_logger.log(
-        request,
-        action="delete",
-        target_type="memory",
-        target_id=f"{group_id}:{mem_id}",
-        summary_before=summary_before,
-    )
+    try:
+        store.delete_memory(group_id, mem_id, version=version)
+    except ValueError as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
+    audit_logger.log(request, action="delete", target_type="memory",
+                     target_id=f"{group_id}:{mem_id}")
     return {"ok": True}
 
 

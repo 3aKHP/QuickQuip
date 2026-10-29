@@ -265,6 +265,7 @@ class TurnRequestAssembler:
     scene_patch: list[dict[str, str]] | None = None
     projected_segments: dict[str, list["LLMConversationMessage"]] = field(default_factory=dict)
     envelope_parts: dict[str, str] = field(default_factory=dict)
+    sender_role: str = "unknown"
     turn_envelope: str = ""
     messages: list["LLMConversationMessage"] = field(default_factory=list)
 
@@ -310,6 +311,10 @@ class TurnRequestAssembler:
             participants=self.participants,
             mention_profiles=mention_profiles,
         )
+        self.envelope_parts['participants'] = (
+            self.envelope_parts.get('participants', '')
+            + f"\n当前发言者 QQ={self.user_id}，角色={self.sender_role}，"
+            f"消息 ID={self.message_id or '未知'}")
         self.turn_envelope = "\n".join(self.envelope_parts.values())
         self.messages = self.build_messages(
             prompt=self.trimmed_prompt,

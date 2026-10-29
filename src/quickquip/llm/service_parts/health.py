@@ -53,7 +53,7 @@ _MCP_FAILURE_FALLBACK_LABEL = "连接失败"
 class HealthMixin:
     # MRO contract: HealthMixin calls self._get_enabled_tool_names (ToolMixin),
     # self.build_chat_scope_key / self._scope_label
-    # (ScopeMixin), and self._auto_memory_* (AutoMemoryMixin). All three must
+    # (ScopeMixin), and the bound runtime integrations. These must
     # precede HealthMixin in the LLMService base list.
     def _get_mcp_statuses(self) -> list[MCPServerStatus]:
         return self.mcp_manager.get_statuses()
@@ -336,13 +336,6 @@ class HealthMixin:
             stats_bound=self.stats_tracker is not None,
             rule_switch_bound=self.rule_switch is not None,
             probe_provider=probe_provider,
-            auto_memory_stats={
-                # _auto_memory_* attributes are initialised by AutoMemoryMixin._init_auto_memory();
-                # AutoMemoryMixin must be in the MRO and _init_auto_memory() called in __init__.
-                "successes": self._auto_memory_successes,
-                "failures": self._auto_memory_failures,
-                "active_scopes": len(self._auto_memory_turns),
-            },
             image_preprocessor_bound=self.image_preprocessor is not None,
             sensitive_filter=_get_sensitive_filter(),
         )

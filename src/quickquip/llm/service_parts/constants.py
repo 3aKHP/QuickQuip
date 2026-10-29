@@ -10,7 +10,7 @@ from quickquip.llm.skills import (
 # ── scope / history limits ──────────────────────────────────────────
 MAX_TRIGGER_CONTEXT_MESSAGES = 20
 MAX_MEMORY_RETRIEVAL_ITEMS = 8
-MAX_STORED_MEMORY_ITEMS = 200
+MAX_STORED_MEMORY_ITEMS = 1000
 # 会话消息统一存储硬上限（群聊/私聊同值）：纪元裁剪以锚点为主键，此值仅为
 # 锚点全部缺失（进程重启后）或单 scope 行数失控时的兜底。64k token 纪元
 # ≈1.3k 行，2048 留约 1.5× 余量。
@@ -33,6 +33,9 @@ DEFAULT_ALWAYS_LOADED_TOOLS = [
     TOOL_LIST_NAME,
     "get_identity",
     "list_memories",
+    "read_memory",
+    "write_memory",
+    "delete_memory",
     SEARCH_TOOL_NAME,
     ACTIVATE_SKILL_TOOL_NAME,
 ]
@@ -41,6 +44,9 @@ DEFAULT_ENABLED_TOOLS = [
     TOOL_LIST_NAME,
     "get_identity",
     "list_memories",
+    "read_memory",
+    "write_memory",
+    "delete_memory",
     SEARCH_TOOL_NAME,
     "get_group_stats",
     "get_rule_status",

@@ -51,6 +51,7 @@ def snapshot(monkeypatch):
 async def test_screenshot_remember_and_literal_cq(tmp_path, monkeypatch, snapshot):
     store = LLMStore(tmp_path / "llm.db")
     svc = SimpleNamespace(
+        get_chat_settings=lambda *args: SimpleNamespace(memory_enabled=True),
         remember_memory=lambda group, content, **kw: store.add_memory(
             group, content, content_parts=kw["content_parts"]
         )

@@ -42,6 +42,10 @@ def test_input_schema_descriptions_are_strings(llm_service):
     def _walk(node):
         if isinstance(node, dict):
             for key, value in node.items():
+                if key == "properties":
+                    for schema in value.values():
+                        _walk(schema)
+                    continue
                 if key in ("description", "type", "enum") and not isinstance(value, (str, list)):
                     raise AssertionError(
                         f"schema {key} is {type(value).__name__}, expected str/list"

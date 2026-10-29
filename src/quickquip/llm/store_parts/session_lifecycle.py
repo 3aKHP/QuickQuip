@@ -296,11 +296,13 @@ class SessionLifecycleMixin:
             if user_message is not None:
                 conn.execute(
                     "INSERT INTO conversation_messages (group_id, user_id, sender_name, "
-                    "canonical_name, role, content, created_at, message_id, raw_content) "
-                    "VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?)",
+                    "canonical_name, role, content, created_at, message_id, "
+                    "raw_content, sender_role) "
+                    "VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?)",
                     (scope, str(user_message["user_id"]), user_message["sender_name"],
                      user_message["canonical_name"], user_message["content"], _utc_now(),
-                     user_message["message_id"], user_message["raw_content"]),
+                     user_message["message_id"], user_message["raw_content"],
+                     user_message.get("sender_role", "unknown")),
                 )
             if assistant_text is not None:
                 conn.execute(

@@ -165,7 +165,7 @@ async def run_quick_judge(
 ) -> str:
     """
     一次性极速判定的纯文本契约（现存调用方：draw_svg 内容裁决）。
-    结构化判定（awakening、context_rules、auto_memory）走
+    结构化判定（awakening、context_rules）走
     ``run_quick_judge_detailed``。不走群配置、不注入记忆、不启用工具，
     只发单条 system+user；优先使用 [triggers.quick_judge] 配置的
     provider/model。

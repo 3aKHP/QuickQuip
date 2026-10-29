@@ -11,6 +11,7 @@ def _normalize_conversation_row(row) -> dict[str, str]:
         "user_id": "" if row["user_id"] is None else str(row["user_id"]),
         "sender_name": "" if row["sender_name"] is None else str(row["sender_name"]),
         "canonical_name": "" if row["canonical_name"] is None else str(row["canonical_name"]),
+        "sender_role": row["sender_role"],
         "role": row["role"],
         "content": row["content"],
         "raw_content": "" if row["raw_content"] is None else str(row["raw_content"]),
@@ -28,6 +29,7 @@ class ConversationStoreMixin:
         content: str,
         *,
         sender_name: str = "",
+        sender_role: str = "unknown",
         canonical_name: str = "",
         message_id: str | None = None,
         raw_content: str = "",
@@ -38,8 +40,9 @@ class ConversationStoreMixin:
             conn.execute(
                 "\n"
                 "                INSERT INTO conversation_messages (group_id, user_id, "
-                "sender_name, canonical_name, role, content, message_id, raw_content, created_at)\n"
-                "                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)\n"
+                "sender_name, canonical_name, role, content, message_id, raw_content, "
+                "created_at, sender_role)\n"
+                "                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)\n"
                 "                ",
                 (
                     str(group_id),
@@ -51,6 +54,7 @@ class ConversationStoreMixin:
                     message_id,
                     raw_content or None,
                     _utc_now(),
+                    sender_role,
                 ),
             )
 
@@ -64,7 +68,7 @@ class ConversationStoreMixin:
         with self._connect() as conn:
             rows = conn.execute(
                 """
-                SELECT user_id, sender_name, canonical_name, role, content, raw_content
+                SELECT user_id, sender_name, canonical_name, sender_role, role, content, raw_content
                 FROM conversation_messages
                 WHERE group_id = ?
                 ORDER BY id DESC
@@ -90,7 +94,8 @@ class ConversationStoreMixin:
         with self._connect() as conn:
             rows = conn.execute(
                 "\n"
-                "                SELECT id, user_id, sender_name, canonical_name, role, content, "
+                "                SELECT id, user_id, sender_name, canonical_name, "
+                "sender_role, role, content, "
                 "message_id, raw_content, agent_loop_id\n"
                 "                FROM conversation_messages\n"
                 "                WHERE group_id = ? AND id >= ?\n"

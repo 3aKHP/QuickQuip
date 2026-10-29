@@ -309,6 +309,7 @@ class UserTriggerPayload:
     content: str = ""
     raw_content: str = ""
     message_id: str | None = None
+    sender_role: str = "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -541,7 +542,7 @@ class AgentRecordsStoreMixin:
             )
             rows = conn.execute(
                 """
-                SELECT id, user_id, sender_name, canonical_name, role, content,
+                SELECT id, user_id, sender_name, canonical_name, sender_role, role, content,
                        message_id, raw_content, created_at
                 FROM conversation_messages
                 WHERE group_id = ?
@@ -826,8 +827,8 @@ class AgentRecordsStoreMixin:
             """
             INSERT INTO conversation_messages
                 (group_id, user_id, sender_name, canonical_name, role, content,
-                 message_id, raw_content, created_at, agent_loop_id)
-            VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?)
+                 message_id, raw_content, created_at, agent_loop_id, sender_role)
+            VALUES (?, ?, ?, ?, 'user', ?, ?, ?, ?, ?, ?)
             """,
             (
                 scope_key,
@@ -839,6 +840,7 @@ class AgentRecordsStoreMixin:
                 user.raw_content or None,
                 _utc_now(),
                 loop_id,
+                user.sender_role,
             ),
         )
         return int(cursor.lastrowid)
@@ -1580,7 +1582,7 @@ class AgentRecordsStoreMixin:
         if loop["anchor_row_id"] is not None:
             anchor = conn.execute(
                 """
-                SELECT id, user_id, sender_name, canonical_name, role, content,
+                SELECT id, user_id, sender_name, canonical_name, sender_role, role, content,
                        message_id, raw_content, created_at
                 FROM conversation_messages WHERE id = ?
                 """,
