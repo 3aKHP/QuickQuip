@@ -31,6 +31,8 @@
 | [`config-workspace.md`](config-workspace.md) | qqconf 工作副本格式、字段合并、候选与恢复事务 |
 | [`llm-configuration-api.md`](llm-configuration-api.md) | LLM 配置修订、结构化交换、参数 metadata 与控制任务的 API 契约 |
 | [`llm-configuration-frontend.md`](llm-configuration-frontend.md) | LLM 配置前端交付契约、用户操作、字段语义、运行状态与验收场景 |
+| [`client-fingerprints.md`](client-fingerprints.md) | 请求指纹的身份派生、Header 与 Body 转换契约 |
+| [`web-admin.md`](web-admin.md) | 后台会话鉴权、跨进程任务与 Trace 存储机制 |
 | [`llm-module.md`](llm-module.md) | LLM 触发、上下文、记忆、provider、配置和运行时边界 |
 | [`mcp-integration.md`](mcp-integration.md) | MCP 接入、协议协商、工具结果和安全边界 |
 | [`mcp-tutorial.md`](mcp-tutorial.md) | MCP 概念、四种 transport 与首次接入练习导航 |

@@ -34,7 +34,7 @@ LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每�
 
 `client_fingerprints` 模块负责 TOML Profile 解析、启动目录快照、安装身份持久化和请求投影。Provider 固定字段 `client_fingerprint` 选择模板，编译时绑定全局 cluster 和数据目录；模型覆盖保留绑定。四协议在各自认证与 Body 映射边界调用共享 Header/Body 投影接口。OpenCode 2 的 Chat Body 和物理尝试追踪在实际 URL、流式模式确定后进行最终投影；其他 Profile 的早期 Body 接口保留载荷原样。Codex 的可选 body_bindings 在实际 HTTP 尝试边界投影业务 Session，只补充缓存键，保留适配器的其他 Body 字段与序列化策略。模板、字段顺序和端点兼容条件随 TOML 分发。Header 布局作用于 HTTPX 请求对象；HTTP/1.1 的 h11 序列化将 Host 移至首位，真实 socket 验证覆盖该边界和其余字段的排布。
 
-`LLMRequest.session` 是业务 Session，`epoch_id` 是不可变的请求纪元快照。EpochManager 拥有聊天窗口 UUID，TurnRequestAssembler 在历史加载及预算重组后取值；独立任务入口创建临时纪元，工具和识图按调用链传递。底层自有 Profile 请求必须提供 UUIDv4。动态投影头不参与 Responses 内容兼容指纹。管理员配置与文件格式见[请求指纹 Profile](../admin/client-fingerprints.md)。
+`LLMRequest.session` 是业务 Session，`epoch_id` 是不可变的请求纪元快照。EpochManager 拥有聊天窗口 UUID，TurnRequestAssembler 在历史加载及预算重组后取值；独立任务入口创建临时纪元，工具和识图按调用链传递。底层自有 Profile 请求必须提供 UUIDv4。动态投影头不参与 Responses 内容兼容指纹。管理员配置与文件格式见[请求指纹 Profile](../admin/client-fingerprints.md)，各协议的 Header、Body 与身份派生细节见[实现参考](client-fingerprints.md)。
 
 OpenCode 的 Session ID 是业务 Session 的纯派生，恢复后稳定，纪元推进不旋转。Codex 的 session-id、thread-id、x-client-request-id 和 prompt_cache_key 共用业务 UUID 投影；绑定字段由 Profile 拥有，Provider／Model 手工覆盖在配置及运行时拒绝。请求级 ContextVar 保存冻结请求和逻辑 parent span；HTTP 尝试生成新 span 并在 trace 记录前完成 Header/Body 投影，重试和备用地址各自生成。取消、异常和嵌套调用退出时恢复上下文。HTTP 适配器保留鉴权、代理、超时、SSE 解析和计量职责；Profile 不访问业务存储或替换人格与工具策略。
 
@@ -583,6 +583,20 @@ LLM 侧的联网搜索有两条互斥路径：
 - **配置与群覆盖**：LLM 任务持有开始时的配置和资源快照；已经进入生成的任务继续使用捕获的群设置，群覆盖修改后的新请求读取新设置。群覆盖、人格文件与 Skill 内容分别管理，配置修订号只覆盖配置库。检查群设置时同时核对实际请求的渠道、模型和人格。
 - **Session、纪元与追踪**：业务 Session 表示持续互动，纪元表示当前上下文窗口；重试和工具续轮沿用所属业务身份。请求追踪按逻辑调用和实际 HTTP 尝试分别建立标识。各 Profile 的字段与生命周期见本页“请求指纹与身份投影”和 Profile 文档。
 - **当前工具回合与已关闭历史**：当前回合的原生块、签名、调用 ID 和结果配对须完整。已关闭历史按 owner、完整性及预算决定原生回放或通用投影。Responses 收到上游 HTTP 400 且存在可剥离的历史 reasoning 时重试一次，保留当前回合内容；网络、鉴权、非 400 和协议终态错误使用各自错误处理路径。
+
+### 历史回放的协议约束
+
+已关闭的工具对话轮按 owner（渠道、协议、模型、Profile、端点）判断能否使用原生历史。档位不属于 owner，切换档位后可保留不同档位生成的 reasoning，估算按各条记录的生成档位计量。owner 变化、签名或结构缺失、敏感内容清洗及预算精简会使历史采用通用文本表达。无工具调用的普通对话轮使用文本历史。
+
+Claude 的无签名 thinking 块会降级为文本；协议适配器没有在上游拒绝历史 thinking 后剥离重试的路径。Gemini 保留有序 parts 和 thoughtSignature，functionCall/functionResponse 必须形成完整批次；工具结果图片放在完整结果批次后的独立 user turn。超过单轮工具数量上限时整批拒绝，避免发送不完整工具历史。
+
+Responses 使用 `store: false` 与客户端完整 input 回放。当前工具轮保留 reasoning 密文和 output items 的原顺序。上游 HTTP 400 且存在可剥离的历史 reasoning 时，仅移除历史推理后重试一次；保留当前工具轮内容。网络、鉴权、非 400 与终态错误按各自错误路径处理。部署排障入口见[配置参考](../admin/configuration.md#图片预算与多轮对话排障)。
+
+### 预算参数与历史收缩
+
+请求输入预算先取有效渠道／模型覆盖，再按已知模型容量减输出预留推导，最后回退全局默认。普通请求超限时先将可见窗口缩到热水位；锚点不能再前移时收紧历史回放，重组重试一次，仍超限则拒绝发起。工具续轮超限时中止当前轮。
+
+历史 Loop 的预算从请求输入预算中扣除纪元可见窗口、system/工具预留及当前 Loop 比例预留，`agent_replay_loop_tokens` 提供推导下限；显式渠道／模型覆盖直接指定该预算。历史超过预算时，以 `epoch_hot_target_tokens / epoch_cap_tokens` 为收缩比例选择完整后缀；最新单个 Loop 仍过大时，按精简阶梯冻结表达。纪元锚点、最小保留单元与记录裁剪的共同约束见[上下文边界](#42-llm-短期会话)。
 
 ### 核对顺序与证据
 
