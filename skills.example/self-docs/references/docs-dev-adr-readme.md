@@ -45,6 +45,7 @@
 | 编号 | 决策 | 状态 | 替代记录 |
 |---|---|---|---|
 | [ADR-0004](0004-agent-execution-replay-delivery.md) | 分离执行记录、历史投影与消息交付 | Accepted | — |
+| [ADR-0026](0026-conversation-owned-memory.md) | 由主对话模型维护会话记忆 | Accepted | — |
 | [ADR-0005](0005-tool-result-retention.md) | 区分临时查询结果与可保留工具事实 | Accepted | — |
 | [ADR-0015](0015-progressive-skill-loading.md) | 通过工具调用渐进加载 Skill 内容 | Accepted | — |
 | [ADR-0016](0016-trusted-skill-execution.md) | 由部署者管理受信任 Skill 并约束脚本执行 | Accepted | — |

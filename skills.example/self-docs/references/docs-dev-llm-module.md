@@ -79,7 +79,7 @@ LLM 维护入口按职责列在下表：
 
 ### 请求组装与协议处理
 
-服务实现按 scope、MCP 生命周期、内置工具、SVG、定时消息、Skill、独立生成、图像预处理、健康检查、状态、自动记忆和 Agent Loop 拆分，模块清单见 `service_parts/__init__.py`。`reply_chain.py` 中的 `TurnRequestAssembler` 共用首轮与预算降级装配，输入和输出分别由 `normalize_turn_input`、`finalize_reply_text` 处理，`reply_result` 构造返回结果与触发行正文；该模块接收显式参数，与服务门面单向依赖。
+服务实现按 scope、MCP 生命周期、内置工具、SVG、定时消息、Skill、独立生成、图像预处理、健康检查、状态、记忆工具和 Agent Loop 拆分，模块清单见 `service_parts/__init__.py`。`reply_chain.py` 中的 `TurnRequestAssembler` 共用首轮与预算降级装配，输入和输出分别由 `normalize_turn_input`、`finalize_reply_text` 处理，`reply_result` 构造返回结果与触发行正文；该模块接收显式参数，与服务门面单向依赖。
 
 报告输入经 `chat/period_serializer.py` 压缩：按日分节、按分钟分块，同身份连续消息用斜杠合并，复读折叠为 ×N，URL 保留域名，机器人标记为 (bot)。日报和周报将整个周期交给序列化器；月报由 `build_monthly_chat_input` 按周分配 `input_char_budget`，保留平静日，高活跃日使用剩余额度并按需等距抽稀，输出包含周节标题。
 
@@ -184,7 +184,7 @@ LLM 默认只在以下场景触发：
 
 ### 4.1 临时上下文
 
-`RecentMessageBuffer` 在内存中保存当前群最近 20 条消息，默认 TTL 为 1800 秒。LLM 触发时按增量补丁规则选取需要补充的现场消息；具体游标、保底时间窗和 token 预算见下一节。缓冲内容用于当轮请求，LLM 对话历史与自动记忆由各自写入流程管理。
+`RecentMessageBuffer` 在内存中保存当前群最近 20 条消息，默认 TTL 为 1800 秒。LLM 触发时按增量补丁规则选取需要补充的现场消息；具体游标、保底时间窗和 token 预算见下一节。缓冲内容用于当轮请求，LLM 对话历史与长期记忆由各自写入流程管理。
 
 ### 4.2 LLM 短期会话
 
@@ -240,7 +240,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续。读取窗口由
 - 连续的多人发言归入同一 `role="user"` 场景块（bot 回复打断场景）
 - 所有发言者使用统一格式：`身份（QQ 号）：内容`
 - 场景以 `【上文】`（历史）或 `【当前提问】`（最后一轮提问）标记；现场补丁独立成 `【现场】` 段（说明这些消息作为聊天氛围使用），消息尾部顺序为 `【轮次上下文】→【上文】→【现场】→【当前提问】`
-- 无聊唤醒与定时任务是合成触发源：落库结构化配对行（`【自动唤醒】<诱因>` / `【定时消息】按 <cron> 发送：<摘要>`）消除 history 的 assistant 孤行，但不从合成内容抽取自动记忆（`store_user_message` 与 `trigger_auto_memory` 双开关）；合成 user_id（`boredom_timer`/`scheduled_timer`）既不进信封参与者，渲染时也直接以名字呈现
+- 无聊唤醒与定时任务是合成触发源：落库结构化配对行（`【自动唤醒】<诱因>` / `【定时消息】按 <cron> 发送：<摘要>`）消除 history 的 assistant 孤行，合成触发的来源角色记为未知；合成 user_id（`boredom_timer`/`scheduled_timer`）既不进信封参与者，渲染时也直接以名字呈现
 - 格式化仅在 `build_messages()` 组装时做一次，DB 存储原始文本（`raw_content` 列）
 - 引用消息会同时保留“当前提问者”和“引用发送者”，并显式区分机器人自己，避免 A 引用 B 时被误读成 B 在发言
 - 合并转发会递归展开多层节点，并保留每层的文字和图片信息；组合文本总长封顶 4000 字符，超出在最外层出口硬切并追加「…（合并转发内容过长，已截断）」
@@ -280,7 +280,13 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 
 ### 4.5 长期记忆
 
-长期记忆由人工 `/remember` 和自动事实抽取写入。自动抽取开启时，从已触发的 LLM 会话提取稳定事实；普通群聊归档由聊天记录系统维护。
+长期记忆按群／私聊隔离，由主对话模型工具、群指令和 Web Admin 共同维护。条目正文使用 Markdown，保存标题、描述、版本及来源。新群内条目共享，旧成员限定条目随存储初始化迁移为群共享。
+
+`list_memories` 提供目录搜索和分页，`read_memory` 读取正文与版本，`write_memory` 新增或覆写，`delete_memory` 删除指定版本。来源消息 ID 必须属于本轮可见的真实消息，角色取自程序记录。新消息角色随历史保存，纪元回放复用原表达。
+
+请求前使用 BM25 检索标题、描述和正文，中文采用连续双字片段，保留身份查询支持。目录与相关正文通过 envelope 注入，总预算约 2048 个估算 token，其中目录最多 512，正文最多 5 条。输入超限时先移除自动记忆材料，再执行已有历史预算降级。同一 Loop 使用最终快照，修改通过工具结果追加。
+
+容量、命令和升级方式见[记忆管理](../admin/memory.md)，设计依据见 [ADR-0026](adr/0026-conversation-owned-memory.md)。
 
 ---
 
@@ -471,7 +477,7 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `/llm current`
   - 查看当前群实际生效的 provider、model、persona、记忆开关、短期会话条数和长期记忆条数
 - `/llm health [verbose|detail|full]`
-  - 运行 LLM 健康检查（llm_config、provider、database、knowledge_files、persona、tools、mcp、search、sensitive_filter、generation、image_preprocessing、runtime_bindings、auto_memory 共 13 项）
+  - 运行 LLM 健康检查（llm_config、provider、database、knowledge_files、persona、tools、mcp、search、sensitive_filter、generation、image_preprocessing、runtime_bindings 共 12 项）
 - `/llm reload`
   - 仅管理员。重载已发布 LLM 配置，并探活当前会话实际生效的 provider/model；草稿通过管理后台或 CLI 单独应用
   - reload 后探活会发一条 max_tokens=1 的真实请求，可能产生 provider 计费；api_key 未设置时自动跳过
@@ -498,7 +504,6 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 - `/llm memory status`
 - `/llm memory on`
 - `/llm memory off`
-- `/llm auto_memory status|on|off|reset`
 - `/llm context_limit <n>` — 把本会话上下文改为固定保留最新 n 行（1-1024），持久化，不受 clear_context 影响；默认由会话纪元自动管理
 - `/llm context_limit reset` — 恢复纪元自动管理
 - `/llm clear_context`
@@ -558,7 +563,7 @@ LLM 侧的联网搜索有两条互斥路径：
 
 ## 9. 数据作用域与安全处理
 
-群聊和私聊以各自 scope 管理会话状态与记忆。自动记忆从已触发会话抽取，群资料按人格设计和词表命中使用。工具来源按第 6 节的配置与注册职责接入。
+群聊和私聊以各自 scope 管理会话状态与记忆。主模型通过工具维护记忆，群资料按人格设计和词表命中使用。工具来源按第 6 节的配置与注册职责接入。
 
 历史消息在读取时按当前敏感词表清洗，持久化原文保持不变；过滤结果变化会改变本轮请求字节，从而影响前缀缓存。完整 Loop 的敏感内容与原生回放规则见第 4.2 节。
 

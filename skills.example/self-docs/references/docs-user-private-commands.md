@@ -67,7 +67,6 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/llm trigger prefix <前缀>` | 修改触发前缀（默认 `/ai`） |
 | `/llm trigger prefix_mode on / off` | 开关前缀触发 |
 | `/llm memory on / off` | 开关记忆注入 |
-| `/llm auto_memory on / off / reset / status` | 自动记忆抽取的开关、重置为全局默认、查看 |
 | `/llm effort <档位>`（`default` / `clear` 恢复跟随渠道配置） | 本会话思考档位覆盖，六档：`low / medium / high / xhigh / max / ultra`；回复会给出实际下发结果（部分模型词表较窄会自动调整）；不配置时模型用自身默认档。切换后若回复出现 400 等 4xx 错误，说明该渠道或模型不支持此档位，用 `default` 恢复即可 |
 | `/llm delivery intermediate / final / all <on / off / reset>` | 设置回复发送方式：`intermediate` 控制是否发送多轮工具调用中的过程正文，`final` 控制是否把最终长回复按自然段拆成多条，`all` 同时设置这两项；`/llm delivery status`（或带域）查看当前值与全局默认，默认两域关闭 |
 | `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本会话改为固定保留最新 n 条（上限 1024；默认由会话纪元自动管理） |
@@ -90,6 +89,9 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | 命令 | 说明 |
 |------|------|
 | `/remember <内容>` | 添加一条长期记忆 |
+| `/remember --id 42 新正文` | 覆写指定记忆 |
+| `/memories --page 2 [关键词]` | 分页浏览目录 |
+| `/memories --id 42` | 读取完整正文 |
 | `/memories [关键词]` | 列出，或按关键词筛选记忆 |
 | `/forget <关键词>` | 删除所有匹配关键词的记忆 |
 | `/forget #编号` | 精确删除指定编号的记忆（编号用 `/memories` 查看） |
@@ -131,3 +133,5 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 **发消息 AI 不理我？** 先 `/llm status` 确认会话已开启；未开启则 `/start_session`。
 
 **回复很怪、像“串台”了？** 用 `/llm current` 检查当前配置；引用有问题的消息并发送 `/llm delete_msg`，可定点删除。需要重新开始对话时，用 `/llm clear_context` 清空短期上下文。
+
+长期记忆支持 Markdown 正文，群内条目由全群共享，私聊独立保存。模型自主维护需要同时开启记忆和工具调用；直接管理指令不调用模型。容量、管理页和升级方式见[记忆管理](../admin/memory.md)。

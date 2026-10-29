@@ -149,7 +149,6 @@ QuickQuip 在群里有两类能力：规则回复（复读、接龙、时区猜�
 | `/llm trigger prefix_mode on / off` | 开关前缀触发 |
 | `/llm trigger at on / off` | 开关艾特触发（仅群聊有此命令） |
 | `/llm memory on / off` | 开关记忆注入 |
-| `/llm auto_memory on / off / reset / status` | 自动记忆抽取的开关、跟随全局默认、查看 |
 | `/llm effort <档位>`（`default` / `clear` 恢复跟随渠道配置） | 本群思考档位覆盖，六档：`low / medium / high / xhigh / max / ultra`；改完回复会给出实际生效档（部分模型词表较窄会自动降档，如 ultra 落到 max）。模型默认档由上游决定；希望控制思考成本时，请显式选择适合当前模型的档位。切换后若回复出现 400 等 4xx 错误，说明该渠道或模型不支持此档位，用 `default` 恢复即可 |
 | `/llm delivery intermediate / final / all <on / off / reset>` | 按群设置回复发送方式：`intermediate` 控制是否发送多轮工具调用中的过程正文，`final` 控制是否把最终长回复按自然段拆成多条，`all` 同时设置这两项；`/llm delivery status`（或带域）查看当前值与全局默认，默认两域关闭 |
 | `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本群上下文改为固定保留最新 n 条（上限 1024；默认由会话纪元自动管理，窗口随对话增长、冷场后收缩）；重启和 `/llm clear_context` 不影响此设置 |
@@ -166,6 +165,9 @@ QuickQuip 在群里有两类能力：规则回复（复读、接龙、时区猜�
 | 命令 | 说明 |
 |------|------|
 | `/remember 内容` | 写入本群长期记忆 |
+| `/remember --id 42 新正文` | 覆写指定记忆 |
+| `/memories --page 2 [关键词]` | 分页浏览目录 |
+| `/memories --id 42` | 读取完整正文 |
 | `/forget 关键词` | 删除匹配的记忆；成员同名时提示候选，需使用 QQ 或编号 |
 | `/forget #编号` | 精确删除本群指定记忆 |
 | `/forget_all` | 清空本群全部长期记忆 |
@@ -254,7 +256,7 @@ AI 聊天自带两个行为开关（默认开启）：
 
 ## 6. 记忆与隐私
 
-AI 的“记忆”分两层：短期上下文是最近几轮对话，可用 `/llm clear_context` 清掉；长期记忆包括手动 `/remember` 存入的内容，以及开启自动记忆抽取后保存的内容，用 `/memories` 查看、`/forget` 删除。
+AI 的“记忆”分两层：短期上下文是最近几轮对话，可用 `/llm clear_context` 清掉；长期记忆包括手动 `/remember` 存入的内容，以及主模型通过工具保存的内容，用 `/memories` 查看、`/forget` 删除。
 
 被艾特的成员如果有已登记的群内档案，AI 会参考该档案，即使对方近期没有发言。当前提及使用已登记的身份名称，对话历史保留写入时的发言人名称。
 
@@ -271,3 +273,5 @@ AI 的短期上下文由会话纪元自动管理，默认随对话增长、冷�
 **AI 没记住我手动加的记忆？** 先 `/llm memory status` 看“记忆注入”是否开启，再 `/memories` 确认记忆确实存进去了。
 
 **AI 回得很怪？** `/llm current` 检查当前模型是否是想要的那个；怀疑上下文串了就让管理员执行 `/llm clear_context`，个别消息的问题可用 `/llm delete_msg` 定点移除。
+
+长期记忆支持 Markdown 正文，群内条目由全群共享，私聊独立保存。模型自主维护需要同时开启记忆和工具调用；直接管理指令不调用模型。容量、管理页和升级方式见[记忆管理](../admin/memory.md)。
