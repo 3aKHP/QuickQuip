@@ -28,8 +28,11 @@ def excerpt(text: str, query: str, budget: int) -> str:
     # 按空行划分 Markdown 段落，优先保留命中段，再按原文顺序展示。
     paragraphs = text.split("\n\n")
     terms = set(tokens(query))
+    literal = query.strip().casefold()
     ordered = sorted(
-        range(len(paragraphs)), key=lambda i: (-len(terms & set(tokens(paragraphs[i]))), i)
+        range(len(paragraphs)), key=lambda i: (
+            -len(terms & set(tokens(paragraphs[i])))
+            - int(bool(literal and literal in paragraphs[i].casefold())), i)
     )
     available = budget - estimate_tokens(_TRUNCATED)
     selected = {}
@@ -41,7 +44,8 @@ def excerpt(text: str, query: str, budget: int) -> str:
             available -= cost
         elif not selected:
             # 单一长段落围绕第一个命中位置截取，避免永远只读到开头。
-            positions = [candidate.casefold().find(t) for t in terms if t in candidate.casefold()]
+            needles = terms | ({literal} if literal else set())
+            positions = [candidate.casefold().find(t) for t in needles if t in candidate.casefold()]
             start = max(0, min(positions) - 100) if positions else 0
             selected[i] = _fit(candidate[start:], max(0, available - 2))
             break
