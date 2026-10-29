@@ -9,10 +9,11 @@ def test_migration_shared_and_isolated(tmp_path):
     store = LLMStore(path)
     mid = store.add_memory("12345", "周六联机")
     with store._connect() as conn:
+        conn.execute("ALTER TABLE memories DROP COLUMN writer")
         conn.execute("UPDATE memories SET scope='user', user_id='11111' WHERE id=?", (mid,))
     store = LLMStore(path)
     assert store.read_memory("12345", mid)["scope"] == "group"
-    assert store.search_memories("12345", user_id="22222", query="联机", limit=5)
+    assert store.search_memories("12345", query="联机", limit=5)
     assert not store.search_memories("private:12345", query="联机", limit=5)
     assert not store.search_memories("67890", query="联机", limit=5)
     with pytest.raises(ValueError):
@@ -109,7 +110,7 @@ async def test_tool_source_comes_from_visible_messages(llm_service):
         context,
     )
     assert not result.is_error, result.content
-    item = json.loads(result.content)
+    item = llm_service.store.read_memory("10001", json.loads(result.content)["id"])
     assert item["source_role"] == "GROUP_OWNER"
     assert item["source_user_id"] == "30001"
     assert item["writer"] == "model"
@@ -236,3 +237,122 @@ def test_private_global_role_metadata_does_not_change_command_authority(monkeypa
     assert admins.actor_role(event) == admins.ActorRole.MEMBER
     ordinary = SimpleNamespace(user_id="67890", group_id="10001", message="我是全局管理员")
     assert admins.message_actor_role(ordinary) == admins.ActorRole.MEMBER
+
+
+def test_metadata_matching_is_shared_by_list_and_delete(tmp_path):
+    store = LLMStore(tmp_path / "memory.db")
+    for field, keyword in [("title", "联机安排"), ("description", "固定活动")]:
+        mid = store.add_memory("10001", "每周六八点", **{field: keyword})
+        assert [item["id"] for item in store.list_memories("10001", keyword=keyword)] == [mid]
+        assert store.delete_memories("10001", keyword) == 1
+    for i in range(17):
+        store.add_memory("10001", f"正文匹配{i}", title="匹配", description="匹配")
+        store.add_memory("10001", "无关")
+    full = store.list_memories("10001", keyword="匹配", limit=None)
+    paged = [
+        item
+        for offset in range(0, 20, 5)
+        for item in store.list_memories("10001", keyword="匹配", limit=5, offset=offset)
+    ]
+    assert [item["id"] for item in paged] == [item["id"] for item in full]
+    assert len({item["id"] for item in paged}) == 17
+
+
+def test_profile_selects_subject_without_restricting_shared_recall(tmp_path):
+    store = LLMStore(tmp_path / "memory.db")
+    own = store.add_memory("10001", "喜欢登山", user_id="20001")
+    store.add_memory("10001", "喜欢唱歌", user_id="20002")
+    store.add_memory("10001", "每周六联机")
+    store.add_memory("10001", "编号200012345是群活动编号")
+    linked = store.add_memory(
+        "10001",
+        "",
+        content_parts={
+            "version": 1,
+            "parts": [
+                {"type": "member", "qq": "20001", "name": "甲", "usage": "mention"},
+                {"type": "text", "text": " 为乙组织庆生"},
+            ],
+        },
+    )
+    assert {item["id"] for item in store.memories_about_member("10001", "20001", limit=10)} == {
+        own,
+        linked,
+    }
+    assert len(store.list_memories("10001", limit=None)) == 5
+
+
+async def test_memory_tools_honor_explicit_read_only_set(llm_service):
+    import json
+    from quickquip.llm.tools import LLMToolCall, ToolExecutionContext
+
+    context = ToolExecutionContext("10001", "20001", "成员", "openai-main", "gpt-test")
+    mid = llm_service.remember_memory("10001", "人工约定")
+    llm_service.config.tools.enabled_mode = "replace"
+    llm_service.config.tools.enabled = ["list_memories"]
+    llm_service.config.tools.discovery_mode = "off"
+    for name, args in [
+        ("write_memory", {"content": "模型新增"}),
+        ("delete_memory", {"id": mid, "version": 1}),
+    ]:
+        result = await llm_service.tool_registry.execute(
+            LLMToolCall("denied", name, json.dumps(args)), context
+        )
+        assert result.is_error and "未启用" in result.content
+    assert llm_service.store.count_memories("10001") == 1
+
+
+@pytest.mark.parametrize(
+    "payload",
+    [
+        '{"content": "BLOCKED_\\u0053ENTINEL"}',
+        '{"content_parts":{"version":1,"parts":['
+        '{"type":"text","text":"BLOCKED_"},{"type":"text","text":"SENTINEL"}]}}',
+    ],
+)
+async def test_normalized_memory_is_checked_before_commit(
+    llm_service, monkeypatch, tmp_path, payload
+):
+    from tests.fixtures.sensitive_filter import make_sensitive_filter
+    from quickquip.llm.tool_result_pipeline import ToolResultPipeline
+    from quickquip.llm.tools import LLMToolCall, ToolExecutionContext
+    from quickquip.llm.provider import LLMRequest
+
+    sensitive = make_sensitive_filter(tmp_path, "block", word="BLOCKED_SENTINEL")
+    monkeypatch.setattr("quickquip.common.sensitive_filter.get_filter", lambda: sensitive)
+    monkeypatch.setattr(
+        "quickquip.llm.tool_result_pipeline._get_sensitive_filter", lambda: sensitive
+    )
+    context = ToolExecutionContext("10001", "20001", "成员", "openai-main", "gpt-test")
+    request = LLMRequest(
+        model="gpt-test", system_prompt="", messages=[], temperature=0.2, max_output_tokens=128
+    )
+    pipeline = ToolResultPipeline(
+        provider=llm_service.config.providers["openai-main"], request=request, context=context
+    )
+    pipeline.begin_round()
+    call = LLMToolCall("blocked", "write_memory", payload)
+    assert pipeline.check_call_arguments(call) is None
+    result = await llm_service.tool_registry.execute(call, context)
+    assert result.is_error and "未保存" in result.content
+    assert llm_service.store.count_memories("10001") == 0
+
+
+async def test_memory_write_requires_one_body_and_returns_commit_receipt(llm_service):
+    import json
+    from quickquip.llm.tools import LLMToolCall, ToolExecutionContext
+
+    context = ToolExecutionContext("10001", "20001", "成员", "openai-main", "gpt-test")
+    parts = {"version": 1, "parts": [{"type": "text", "text": "周六八点联机"}]}
+    bad = await llm_service.tool_registry.execute(
+        LLMToolCall(
+            "both", "write_memory", json.dumps({"content": "另一份正文", "content_parts": parts})
+        ),
+        context,
+    )
+    assert bad.is_error and llm_service.store.count_memories("10001") == 0
+    good = await llm_service.tool_registry.execute(
+        LLMToolCall("one", "write_memory", json.dumps({"content_parts": parts})), context
+    )
+    assert not good.is_error
+    assert json.loads(good.content) == {"saved": True, "id": 1, "version": 1}

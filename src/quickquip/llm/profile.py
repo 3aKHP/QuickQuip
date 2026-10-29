@@ -140,7 +140,7 @@ async def generate_profile(
         ])
     if memories:
         sections.append(
-            "\n长期记忆（关于 TA 的已知信息）：\n"
+            "\n与 TA 相关的群记忆（按正文明确主语判断归属）：\n"
             + "\n".join(f"- {m}" for m in memories[:profile_mode.memory_limit])
         )
     fitted_samples, samples_truncated = _fit_recent_samples(

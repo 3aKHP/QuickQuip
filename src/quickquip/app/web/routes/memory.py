@@ -7,7 +7,7 @@ from typing import Annotated, Literal
 
 from quickquip.app.web.audit import audit_logger
 from quickquip.common.paths import LLM_DB_PATH
-from quickquip.llm.store import LLMStore
+from quickquip.llm.store import LLMStore, MemoryConflict
 from quickquip.llm.config_service import get_config_service
 from quickquip.llm.memory_content import DEFAULT_CAPACITY
 from quickquip.app.identities import web_identities
@@ -127,8 +127,10 @@ def update_memory(group_id: str, mem_id: int, body: MemoryUpdate, request: Reque
             content_parts=_validated_parts(body.content_parts), title=body.title,
             description=body.description, tags=body.tags, confidence=body.confidence,
             provenance={"writer": "web"})
-    except ValueError as exc:
+    except MemoryConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     audit_logger.log(request, action="update", target_type="memory",
                      target_id=f"{group_id}:{mem_id}",
                      summary_after={"content": result['content'][:100]})
@@ -142,8 +144,10 @@ def delete_memory(group_id: str, mem_id: int, request: Request,
     store = _store()
     try:
         store.delete_memory(group_id, mem_id, version=version)
-    except ValueError as exc:
+    except MemoryConflict as exc:
         raise HTTPException(status_code=409, detail=str(exc)) from exc
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     audit_logger.log(request, action="delete", target_type="memory",
                      target_id=f"{group_id}:{mem_id}")
     return {"ok": True}
@@ -153,9 +157,7 @@ def delete_memory(group_id: str, mem_id: int, request: Request,
 def clear_memories(group_id: str, request: Request):
     _validate_group_id(group_id)
     store = _store()
-    with store._connect() as conn:
-        cur = conn.execute("DELETE FROM memories WHERE group_id = ?", (group_id,))
-        count = cur.rowcount
+    count = store.clear_memories(group_id)
     logger.warning("memory cleared: group=%s deleted=%d", group_id, count)
     audit_logger.log(
         request,

@@ -744,7 +744,7 @@ async def test_memory_crud_basic(wired_service):
     assert memories[0]["content"] == "阿桃喜欢薄荷糖。"
 
     matched = wired_service.store.search_memories(
-        1001, user_id=2002, query="阿桃喜欢什么？", limit=3
+        1001, query="阿桃喜欢什么？", limit=3
     )
     assert matched
     assert matched[0]["content"] == "阿桃喜欢薄荷糖。"

@@ -1,12 +1,19 @@
 """记忆条目增量迁移；保留旧正文、ID 和成员关联。"""
 
+import logging
+
 from quickquip.llm.memory_content import derive_metadata
+
+logger = logging.getLogger(__name__)
 
 
 def migrate_memory_entries(conn) -> None:
     if not conn.in_transaction:
         conn.execute("BEGIN IMMEDIATE")
     columns = {row[1] for row in conn.execute("PRAGMA table_info(memories)")}
+    # writer 与本次数据转换在同一事务提交，存在即表示此代迁移已完成。
+    if "writer" in columns:
+        return
     definitions = {
         "title": "TEXT NOT NULL DEFAULT ''",
         "description": "TEXT NOT NULL DEFAULT ''",
@@ -24,4 +31,6 @@ def migrate_memory_entries(conn) -> None:
         conn.execute(
             "UPDATE memories SET title=?, description=? WHERE id=?", (title, description, row["id"])
         )
-    conn.execute("UPDATE memories SET scope='group' WHERE scope='user'")
+    migrated = conn.execute("UPDATE memories SET scope='group' WHERE scope='user'").rowcount
+    if migrated:
+        logger.info("迁移 %d 条成员记忆为会话共享", migrated)

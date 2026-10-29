@@ -136,12 +136,10 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         try:
             memories_raw, all_msgs = await asyncio.gather(
                 asyncio.to_thread(
-                    svc.store.search_memories,
+                    svc.store.memories_about_member,
                     str(group_id),
-                    user_id=str(target_user_id),
-                    query="",
+                    str(target_user_id),
                     limit=profile_mode.memory_limit,
-                    scope="user",
                 ),
                 asyncio.to_thread(chat_archive.read_all, group_id)
                 if profile_mode.full_records
@@ -161,7 +159,9 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
             await profile_cmd.finish(MessageSegment.text("收集用户数据时出错，请稍后重试"))
 
         memories = [
-            m.get("content_display", m["content"]) for m in memories_raw if m.get("content")
+            (f"历史关联成员 QQ {m['user_id']}：" if m.get("user_id") else "")
+            + m.get("content_display", m["content"])
+            for m in memories_raw if m.get("content")
         ]
         samples = _select_profile_samples(
             all_msgs,

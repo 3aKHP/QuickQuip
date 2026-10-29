@@ -14,7 +14,7 @@ DEFAULT_CAPACITY = 1000
 def derive_metadata(content: str) -> tuple[str, str]:
     lines = [line.strip().lstrip("#").strip() for line in content.splitlines() if line.strip()]
     return (
-        (next((line for line in lines if line), "记忆"))[:TITLE_LIMIT],
+        (next((line for line in lines if any(c.isalnum() for c in line)), "记忆"))[:TITLE_LIMIT],
         " ".join(lines)[:DESCRIPTION_LIMIT],
     )
 

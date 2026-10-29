@@ -76,7 +76,9 @@ async def test_recall_changes_only_tail_and_loop_reuses_snapshot(protocol, llm_s
                 messages=messages,
                 temperature=0.2,
                 max_output_tokens=128,
-                tools=llm_service.tool_registry.get_specs(["read_memory"]),
+                tools=llm_service.tool_registry.get_specs(
+                    ["list_memories", "read_memory", "write_memory", "delete_memory"]
+                ),
                 allow_tool_calls=True,
             )
         )

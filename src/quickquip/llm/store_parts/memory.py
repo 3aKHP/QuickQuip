@@ -4,12 +4,22 @@ from __future__ import annotations
 
 import json
 
-from quickquip.common.record_content import plain, project, render, validate
+from quickquip.common.record_content import plain, project, render, validate, references
 from quickquip.common.record_storage import save_parts
 from quickquip.common.record_search import RecordQuery
 
 from quickquip.llm.store_parts._base import _utc_now
 from quickquip.llm.memory_content import metadata, rank
+
+
+class MemoryConflict(ValueError):
+    """条目已被其他写入修改或删除，需要重新读取版本。"""
+
+
+def _matches_entry(row, matcher, keyword):
+    return (matcher.matches(dict(row), include_owner=True)
+            or bool(keyword and keyword.casefold() in
+                    (row['title'] + ' ' + row['description']).casefold()))
 
 
 class MemoryStoreMixin:
@@ -97,9 +107,7 @@ class MemoryStoreMixin:
             rows = conn.execute(sql, params)
             result = []
             for row in rows:
-                if (matcher.matches(dict(row), include_owner=True)
-                        or (keyword and keyword.casefold() in
-                            (row["title"] + " " + row["description"]).casefold())):
+                if _matches_entry(row, matcher, keyword):
                     if keyword and offset > 0:
                         offset -= 1
                         continue
@@ -133,7 +141,7 @@ class MemoryStoreMixin:
             row = conn.execute("SELECT * FROM memories WHERE group_id=? AND id=?",
                                (str(group_id), memory_id)).fetchone()
             if row is None or row['version'] != version:
-                raise ValueError("记忆已修改或删除，请重新读取")
+                raise MemoryConflict("记忆已修改或删除，请重新读取")
             changed = content is not None or content_parts is not None
             body = validate(content_parts) if content_parts is not None else None
             content = render(body) if body is not None else (
@@ -169,10 +177,10 @@ class MemoryStoreMixin:
             cursor = conn.execute("DELETE FROM memories WHERE group_id=? AND id=? AND version=?",
                                   (str(group_id), memory_id, version))
             if not cursor.rowcount:
-                raise ValueError("记忆已修改或删除，请重新读取")
+                raise MemoryConflict("记忆已修改或删除，请重新读取")
         return 1
 
-    def search_memories(self, group_id, *, user_id=None, query, limit, scope=None):
+    def search_memories(self, group_id, *, query, limit):
         items = self.list_memories(group_id, limit=None)
         if not query.strip():
             return items[:limit]
@@ -183,6 +191,20 @@ class MemoryStoreMixin:
         ranked.extend(item for item in items if item['id'] not in ids
                       and matcher.matches(item, True))
         return ranked[:limit]
+
+    def memories_about_member(self, group_id, member_id, *, limit):
+        """人物志材料：从共享记忆中选择旧主体关联或明确成员引用。"""
+        if limit <= 0:
+            return []
+        member = str(member_id)
+        selected = []
+        for item in self.list_memories(group_id, limit=None):
+            if (str(item.get('user_id') or '') == member
+                    or member in references(item['content_parts'])):
+                selected.append(item)
+                if len(selected) >= limit:
+                    break
+        return selected
 
     def delete_memories(self, group_id, keyword, *, literal=False):
         if self._unavailable:
@@ -205,7 +227,7 @@ class MemoryStoreMixin:
             rows = conn.execute("SELECT * FROM memories WHERE group_id=?", (str(group_id),))
             ids = [row["id"] for row in rows if (
                 keyword.casefold() in row['content'].casefold() if literal
-                else matcher.matches(dict(row), True))]
+                else _matches_entry(row, matcher, keyword))]
             conn.executemany("DELETE FROM memories WHERE id=?", [(i,) for i in ids])
             return len(ids)
 

@@ -43,7 +43,7 @@ def test_private_memory_isolated_from_group(configured_service):
 
     scope_key = configured_service.build_chat_scope_key(3003, chat_type="private")
     matched = configured_service.store.search_memories(
-        scope_key, user_id=3003, query="私聊时你会怎么回复？", limit=3
+        scope_key, query="私聊时你会怎么回复？", limit=3
     )
     assert matched
     assert matched[0]["content"] == "阿桃在私聊里更愿意长篇回复。"

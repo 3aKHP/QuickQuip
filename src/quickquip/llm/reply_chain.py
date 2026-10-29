@@ -326,6 +326,8 @@ class TurnRequestAssembler:
             group_id=str(self.chat_id),
             current_sender_name=self.sender_name,
             current_user_id=str(self.user_id),
+            current_sender_role=self.sender_role,
+            current_message_id=self.message_id or "",
             quoted_text=self.quoted_prompt,
             quoted_sender_name=self.quoted_sender_name,
             quoted_user_id=self.quoted_user_id,

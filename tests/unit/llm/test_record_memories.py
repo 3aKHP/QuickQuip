@@ -25,11 +25,11 @@ def test_memory_legacy_matching_scope_and_delete(tmp_path, snapshot):
     assert rows[-1]["content_display"] == "@标准名 历史"
     assert "[CQ:at" in rows[-1]["content"]
     for query in ("别名", "标准名", "12345", "[CQ:at,name=旧名,qq=12345]"):
-        hits = store.search_memories("10001", user_id="12345", query=query, limit=10)
+        hits = store.search_memories("10001", query=query, limit=10)
         assert {r["id"] for r in hits} == {own, member_id, 3}
     assert [
         r["id"]
-        for r in store.search_memories("10001", user_id="12345", query="", limit=1, scope="user")
+        for r in store.search_memories("10001", query="", limit=1)
     ] == [3]
     assert store.delete_memories("10001", f"#{member_id}") == 1
     with store._connect() as conn:
@@ -52,7 +52,7 @@ async def test_memory_tool_searches_shared_scope(tmp_path, snapshot):
     from types import SimpleNamespace
     service = SimpleNamespace(store=LLMStore(tmp_path / "llm.db"))
     tools = MemoryTools(service.store, lambda *args: SimpleNamespace(memory_enabled=True),
-                        lambda: 1000)
+                        lambda: 1000, lambda *args: True)
     service.store.add_memory("10001", "", content_parts=legacy("[CQ:at,qq=12345] 群事实"))
     service.store.add_memory("10001", "本人事实", user_id="23456")
     service.store.add_memory("10001", "其他成员私密", user_id="12345")

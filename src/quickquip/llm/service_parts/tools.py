@@ -122,7 +122,10 @@ class ToolMixin(McpLifecycleMixin):
         from quickquip.llm.service_parts.memory_tools import register_memory_tools
         register_memory_tools(self.tool_registry, lambda: self.store,
                               lambda chat_id, chat_type: self.get_chat_settings(chat_id, chat_type),
-                              lambda: self.config.runtime.memory_max_items_per_group)
+                              lambda: self.config.runtime.memory_max_items_per_group,
+                              lambda name, context: self.config.runtime.tool_calling_enabled
+                              and name in self._get_enabled_tool_names(
+                                  context.chat_type, provider_id=context.provider_id))
         self.tool_registry.register(
             LLMToolSpec(
                 name=SEARCH_TOOL_NAME,

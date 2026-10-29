@@ -587,6 +587,8 @@ class LLMService(
         group_id: str = "",
         current_sender_name: str = "",
         current_user_id: str = "",
+        current_sender_role: str = "unknown",
+        current_message_id: str = "",
         quoted_text: str = "",
         quoted_sender_name: str = "",
         quoted_user_id: str = "",
@@ -611,6 +613,8 @@ class LLMService(
             identities=self._resolve_identities(group_id),
             current_sender_name=current_sender_name,
             current_user_id=current_user_id,
+            current_sender_role=current_sender_role,
+            current_message_id=current_message_id,
             quoted_text=quoted_text,
             quoted_sender_name=quoted_sender_name,
             quoted_user_id=quoted_user_id,
@@ -1222,10 +1226,12 @@ class LLMService(
         if settings.memory_enabled:
             query = turn.analysis_prompt or turn.trimmed_prompt
             neighbors = scene_patch or [item for item in history if item.get("role") == "user"]
-            query = "\n".join([str(item.get('text') or item.get('content', ''))[:512]
-                               for item in neighbors[-2:]] + [query])
+            query = "\n".join([query] + [
+                str(item.get("text") or item.get("content", ""))[:512]
+                for item in neighbors[-2:]
+            ])[:4096]
             recalled = self.store.search_memories(
-                scope_key, user_id=request.user_id, query=query,
+                scope_key, query=query,
                 limit=min(self.config.runtime.memory_limit, 5))
             recalled_ids = {item['id'] for item in recalled}
             directory = self.store.list_memories(scope_key, limit=None)
