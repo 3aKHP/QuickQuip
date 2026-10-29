@@ -250,7 +250,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 | `../web_api.py` | `/app/web_api.py` | 只读 |
 | `../src` | `/app/src` | 只读（hybrid 源码热更新） |
 
-> 注意：`quickquip` 容器的 `config`、`llm_about` 与共享 `skills/` 挂载保持只读（`:ro`），只有 `web-admin` 需要写权限。
+> `quickquip` 容器的文本配置、`llm_about` 与共享 `skills/` 挂载保持只读（`:ro`）；`config/managed/` 由 Bot/Web 共享可写。Web Admin 的配置与 Skill 管理使用对应读写挂载。
 > `config/sensitive_words.toml` 即使位于同一挂载目录，也不会通过 Web Admin 配置编辑器读取或写入。
 
 ## 自动部署与版本回滚
@@ -259,7 +259,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 
 执行前，`prod/` 已从 `prod.example/` 复制，根 `.env` 和所选功能配置已填写，`quickquip-prod` 已替换为自己的 SSH 连接名称。首次准备见第 3 步；日常命令位于[自动部署操作](#自动部署操作)。
 
-已有平铺部署首次使用 `--migrate --config-sync off`：先保存服务器上的旧代码与运行镜像作为基线，再部署候选版本。新服务器首次尚未扫码时可显式使用 `--config-sync off --env local --skip-health`，之后完成扫码与健康核验。PowerShell 使用同名参数，指定回滚版本时使用 `-Rollback -ReleaseId <id>`；完整接口见 `bash scripts/deploy/deploy-v4.sh --help`。
+已有平铺部署若仍使用 `data/llm_config.db`，首次升级使用 `--migrate --migrate-storage`，按[存储迁移](storage-migration.md)保存基线、停止 Bot/Web 并迁移。已完成存储迁移的平铺安装使用 `--migrate --config-sync off`。新服务器首次尚未扫码时可显式使用 `--config-sync off --env local --skip-health`，之后完成扫码与健康核验。PowerShell 对应 `-Migrate -MigrateStorage` 或 `-Migrate -ConfigSync off`；指定回滚版本时使用 `-Rollback -ReleaseId <id>`，完整接口见 `bash scripts/deploy/deploy-v4.sh --help`。
 
 每次发布携带一个版本标识：部署的 `pyproject.toml` 版本加上服务器镜像构建完成时刻（如 `1.15.3-dev.2+build.20260909.065235`），出现在事务日志的 `image built` 与 `release complete` 行中，便于将线上 release 目录与代码版本对上号。
 
@@ -271,7 +271,7 @@ WEB_ADMIN_COOKIE_SECURE=auto
 
 运行态位于部署根目录的 `data/`、`skills/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../scripts/deploy/README.md#manual-compose-access) 导出部署根目录和版本标识。手动平铺安装按上方 1–7 步进行，版本目录部署由脚本管理。
 
-部署默认保留服务器根 `.env`，需要更新凭据时使用 `--env local`（PowerShell：`-EnvSource local`）。新版配置同步需要先完成一次保留线上配置的能力升级并建立基线，操作见[配置同步](config-sync.md)。
+日常部署默认推送配置，包含根 `.env`。存储迁移及显式 `--config-sync off` 保留服务器配置；仅在关闭同步时使用 `--env local`（PowerShell：`-EnvSource local`）选择本地凭据。首次升级先保留线上配置，再明确初始同步方向，操作见[配置同步](config-sync.md)。
 
 ### 自动部署操作
 
