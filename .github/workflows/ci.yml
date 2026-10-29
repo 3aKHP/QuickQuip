@@ -57,6 +57,7 @@ jobs:
       - name: Verify tracked deployment client and private connection settings
         run: >-
           python -m pytest tests/unit/scripts/test_deployment_clients.py
+          tests/unit/scripts/test_release_acceptance.py
           --basetemp "${{ runner.temp }}/pytest-deployment-clients"
       - name: Smoke packaged maintenance tools
         shell: pwsh

@@ -26,7 +26,7 @@ def main():
     )
     if output := os.getenv("GITHUB_OUTPUT"):
         with Path(output).open("a", encoding="utf-8") as stream:
-            stream.write(f"label={label}\n")
+            stream.write(f"label={label}\nversion={version}\nsha={sha}\n")
     print(f"{label}: {sha}")
 
 

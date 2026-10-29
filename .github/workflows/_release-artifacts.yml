@@ -281,6 +281,16 @@ jobs:
         with:
           ref: ${{ inputs.ref || github.sha }}
 
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+
+      - name: Record candidate identity
+        id: identity
+        env:
+          RELEASE_TAG: ${{ inputs.release-tag }}
+        run: python scripts/ci/release_identity.py
+
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v4
 
@@ -291,6 +301,10 @@ jobs:
           file: ./Dockerfile
           load: true
           tags: quickquip:smoke
+          labels: |
+            org.opencontainers.image.source=https://github.com/3aKHP/QuickQuip
+            org.opencontainers.image.revision=${{ steps.identity.outputs.sha }}
+            org.opencontainers.image.version=${{ steps.identity.outputs.version }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -304,15 +318,6 @@ jobs:
           docker run --rm quickquip:smoke sh -c 'timeout -k 5 15 python -u bot.py; [ $? -eq 124 ]'
           docker run --rm --shm-size=1g quickquip:smoke python -c "from playwright.sync_api import sync_playwright; p = sync_playwright().start(); browser = p.chromium.launch(headless=True, args=['--no-sandbox']); browser.close(); p.stop()"
 
-      - uses: actions/setup-python@v7
-        with:
-          python-version: '3.12'
-
-      - name: Record candidate identity
-        env:
-          RELEASE_TAG: ${{ inputs.release-tag }}
-        run: python scripts/ci/release_identity.py
-
       - name: Checkout upgrade baseline
         uses: actions/checkout@v7
         with:
@@ -324,6 +329,23 @@ jobs:
           python scripts/ci/verify_release_upgrade.py --baseline baseline --installation upgrade-install --image quickquip:smoke
           docker image inspect quickquip:smoke > release-image.json
           docker run --rm quickquip:smoke python -m pip freeze > release-dependencies.txt
+
+      - name: Export verified image
+        run: |
+          docker save quickquip:smoke | zstd -T0 -3 -o release-image.tar.zst
+          sha256sum release-image.tar.zst > release-image.sha256
+
+      - name: Retain verified image
+        uses: actions/upload-artifact@v7
+        with:
+          name: verified-release-image
+          compression-level: 0
+          retention-days: 3
+          path: |
+            release-image.tar.zst
+            release-image.sha256
+            release-image.json
+            release-identity.json
 
       - name: Retain Docker acceptance evidence
         if: always()

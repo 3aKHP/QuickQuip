@@ -53,16 +53,26 @@ jobs:
             type=semver,pattern={{major}},enable=${{ !contains(github.ref_name, '-') }}
             type=raw,value=latest,enable=${{ !contains(github.ref_name, '-') }}
 
-      - name: Build and push
-        uses: docker/build-push-action@v7
+      - name: Download verified image
+        uses: actions/download-artifact@v8
         with:
-          context: .
-          file: ./Dockerfile
-          push: true
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          name: verified-release-image
+          digest-mismatch: error
+
+      - name: Verify and load accepted image
+        run: |
+          sha256sum --check release-image.sha256
+          zstd -dc release-image.tar.zst | docker load
+          python3 scripts/ci/verify_release_image.py
+
+      - name: Publish accepted image
+        env:
+          PUBLISH_TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          while IFS= read -r tag; do
+            docker tag quickquip:smoke "$tag"
+            docker push "$tag"
+          done <<< "$PUBLISH_TAGS"
 
   release:
     name: Create Release

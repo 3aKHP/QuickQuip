@@ -8,13 +8,83 @@ import argparse
 import json
 import os
 from pathlib import Path
+import signal
 import subprocess
 import sys
+import uuid
 
 
 def clean_environment():
     allowed = {"PATH", "SYSTEMROOT", "WINDIR", "COMSPEC", "TEMP", "TMP", "USERPROFILE"}
     return {key: value for key, value in os.environ.items() if key.upper() in allowed}
+
+
+def stop_tree(process):
+    if os.name == "nt":
+        subprocess.run(
+            ["taskkill", "/PID", str(process.pid), "/T", "/F"],
+            capture_output=True,
+            timeout=30,
+        )
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGINT)
+        except ProcessLookupError:
+            return
+    try:
+        process.wait(timeout=45)
+    except subprocess.TimeoutExpired:
+        if os.name == "nt":
+            process.kill()
+        else:
+            os.killpg(process.pid, signal.SIGKILL)
+        process.wait(timeout=10)
+    finally:
+        if os.name != "nt":
+            # A runner can exit before its descendants release inherited pipes.
+            try:
+                os.killpg(process.pid, signal.SIGKILL)
+            except ProcessLookupError:
+                pass
+
+
+def run_stage(command, *, root, log_path, container=None, timeout=240):
+    options = (
+        {"creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+        if os.name == "nt"
+        else {"start_new_session": True}
+    )
+    process = subprocess.Popen(
+        command,
+        cwd=root,
+        env=clean_environment(),
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        encoding="utf-8",
+        errors="replace",
+        **options,
+    )
+    output = ""
+    try:
+        output, _ = process.communicate(timeout=timeout)
+        return process.returncode
+    except BaseException:
+        stop_tree(process)
+        output, _ = process.communicate(timeout=10)
+        raise
+    finally:
+        log_path.write_text(output or "", encoding="utf-8")
+        print(output or "", end="", flush=True)
+        if container:
+            cleanup = subprocess.run(
+                ["docker", "rm", "--force", container],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            if cleanup.returncode and "No such container" not in cleanup.stderr:
+                raise RuntimeError(f"Could not remove acceptance container {container}")
 
 
 def main():
@@ -54,11 +124,14 @@ def main():
     ):
         old = stage in ("seed", "old_read", "business_seed")
         script = scenario if stage != "live" else scenario.with_name("live_candidate.py")
+        container = "quickquip-upgrade-" + uuid.uuid4().hex if args.image else None
         if args.image:
             command = [
                 "docker",
                 "run",
                 "--rm",
+                "--name",
+                container,
                 "--network",
                 "none",
                 "-e",
@@ -92,21 +165,14 @@ def main():
                 str(root),
                 str(source),
             ]
-        result = subprocess.run(
+        code = run_stage(
             command,
-            cwd=root,
-            env=clean_environment(),
-            capture_output=True,
-            text=True,
-            encoding="utf-8",
-            errors="replace",
-            timeout=240,
+            root=root,
+            log_path=root / "data" / f"release-{stage}.log",
+            container=container,
         )
-        log = result.stdout + result.stderr
-        (root / "data" / f"release-{stage}.log").write_text(log, encoding="utf-8")
-        print(log, end="", flush=True)
-        if result.returncode:
-            raise SystemExit(result.returncode)
+        if code:
+            raise SystemExit(code)
         completed.append(stage)
     report = {"baseline": "v1.16.3", "stages": completed, "result": "passed"}
     (root / "data/release-upgrade.json").write_text(json.dumps(report, indent=2) + "\n")
