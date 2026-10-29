@@ -87,6 +87,13 @@ async def test_recall_changes_only_tail_and_loop_reuses_snapshot(protocol, llm_s
         )
 
     first = await send(history + [current])
+    if protocol == "openai_responses":
+        # Responses may make optional fields required when strict is omitted.
+        for tool in first["tools"]:
+            assert tool["strict"] is False
+        write = next(tool for tool in first["tools"] if tool["name"] == "write_memory")
+        assert "content_parts" not in write["parameters"].get("required", [])
+        assert "id" not in write["parameters"].get("required", [])
     llm_service.store.update_memory("10001", mid, version=1, content="每周日联机")
     changed = render_memory_envelope([llm_service.store.read_memory("10001", mid)])
     second = await send(history + [LLMConversationMessage("user", changed + "\n什么时候联机？")])

@@ -101,7 +101,7 @@ async def test_identity_and_business_payload_survive_dispatch(tmp_path, capture,
     assert body["instructions"] == "business prompt"
     assert body["max_output_tokens"] == 128 and body["temperature"] == 0.2
     assert body["tools"] == [{"type": "function", "name": "lookup", "description": "desc",
-                              "parameters": {"type": "object"}}]
+                              "parameters": {"type": "object"}, "strict": False}]
     assert body["tool_choice"] == "required" and body["parallel_tool_calls"] is True
     assert body["reasoning"] == {"effort": "high", "summary": "auto"}
     assert body["include"] == ["reasoning.encrypted_content"]

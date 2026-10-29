@@ -150,6 +150,7 @@ def test_payload_tools_declaration():
             "name": "get_identity",
             "description": "身份查询",
             "parameters": _tool_spec().input_schema,
+            "strict": False,
         }
     ]
     assert payload["tool_choice"] == "auto"
