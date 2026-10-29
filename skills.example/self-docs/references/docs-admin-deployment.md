@@ -2,102 +2,130 @@
 
 # QuickQuip 云端 Docker 部署指南
 
-本文面向 Linux 服务器上的 Docker Compose 部署，介绍自动发布与手动安装、首次登录及日常维护。部署位置与运行方式的定义，以及本地、源码安装入口见[安装与部署方式](installation.md)。LLM 配置与升级见[配置管理](llm-configuration.md)，外部工具接入见[MCP 接入指南](mcp-servers.md)。
+本文面向 Linux 服务器上的 Docker Compose 部署，介绍**手动安装、自动发布脚本（`deploy-v4`）、首次登录协议端与后台，以及日常维护**。
 
-## 前提条件
+> **相关文档导航**：
+> - 部署位置（`local`/`cloud`）与运行方式（`source`/`docker`）的定义，以及本地/源码安装入口：见[安装与部署方式](installation.md)
+> - LLM 配置的详细操作与版本升级：见[配置管理](llm-configuration.md)
+> - 外部 MCP 工具服务接入：见[MCP 接入指南](mcp-servers.md)
 
-- 一台 Linux 服务器，建议从 2 核／2G 内存及 2G swap 起步。v1.12.2 全栈验收在此规格下稳态约 0.7G RSS，后续按并发量与启用功能观察内存
-- 已安装 Docker 和 Docker Compose
-- Node.js + pnpm（手动部署构建前端用；deploy 脚本路径本机需有）
-- QQ 账号（用于 OneBot 协议端登录；当前部署模板默认适配器为 LLBot，各适配器状态见 [onebot-adapters.md](onebot-adapters.md)）
+---
 
-## 选择服务器
+## 前提条件与服务器选择
 
-按所需架构、资源容量及网络条件选择服务器。部署主机需要访问镜像源、QQ 协议端、所用模型 API 和搜索服务；先确认这些连接可用，再准备完整部署。费用按服务商当前报价核对。
+### 1. 硬件与软件前提
+- **Linux 服务器**：建议从 **2 核 / 2G 内存 + 2G swap** 起步（v1.12.2 全栈验收在此规格下稳态内存占用约 0.7G RSS；后续可根据并发量与启用功能观察内存水位）。
+- **容器环境**：已安装 Docker 和 Docker Compose。
+- **Node.js + pnpm**：用于构建 Web Admin 前端（如果走手动部署，需安装在服务器上；如果使用 `deploy-v4` 自动部署脚本，只需安装在你执行脚本的本地电脑上）。
+- **QQ 账号**：用于登录 OneBot 协议端（当前部署模板默认适配器为 **LLBot**，各适配器支持状态见 [onebot-adapters.md](onebot-adapters.md)）。
+
+### 2. 网络与服务器连通性
+请按所需的 CPU 架构、资源容量及网络条件选择服务器（费用按服务商当前报价核对）。在正式开始完整部署前，请先确认服务器能够正常访问以下目标：
+- Docker 镜像源与 Python 包镜像源
+- QQ 协议端连接
+- 所选用的 LLM 模型 API 接口
+- 搜索服务（SearXNG）
+
+---
 
 ## 部署步骤
 
-首次手动安装按下方 1–7 步进行，先准备配置并启动服务，再登录后台启用 LLM。选择部署脚本时，先在本地准备第 3 步所列的模板、配置与资产，并按[部署工具的 SSH 设置](../../scripts/deploy/README.md#ssh-connection)配置服务器连接；搜索服务需先在服务器上准备。准备完成后使用本文后面的[自动部署与版本回滚](#自动部署与版本回滚)。
+> **手动安装 vs 自动部署脚本怎么选？**
+> - **首次手动平铺安装**：请直接按下方 **第 1～7 步** 依次操作（先准备配置并启动服务，再登录后台启用 LLM）。
+> - **使用 `deploy-v4` 自动部署脚本**：
+>   1. 先在**本地项目**准备好下方 **第 3 步** 所列的模板、配置与资产；
+>   2. 按[部署工具的 SSH 设置](../../scripts/deploy/README.md#ssh-connection)配置好本地到服务器的 SSH 连接；
+>   3. **搜索服务（SearXNG）需先在服务器上单独准备就绪**；
+>   4. 准备完成后，直接跳到后文的[自动部署与版本回滚](#自动部署与版本回滚)章节，首次部署按场景表选择参数；日常部署使用其后的操作示例。
+
+---
 
 ### 1. 服务器上安装 Docker
 
 ```bash
-# Ubuntu/Debian
+# Ubuntu / Debian 一键安装 Docker
 curl -fsSL https://get.docker.com | sh
 sudo usermod -aG docker $USER
-# 重新登录使 docker 组生效
+# 注意：执行后请重新登录 SSH 会话，使 docker 用户组权限生效
 ```
+
+---
 
 ### 2. 上传项目
 
-生产 Compose 和通知配置示例放在 `prod.example/`，真实配置与协议端登录状态放在私有 `prod/`。通用部署程序位于 `scripts/deploy/`，巡检程序位于 `scripts/ops/`，随仓库版本更新。
+在项目结构中：
+- `prod.example/`：存放生产环境 Compose 编排与通知配置的公开示例。
+- `prod/`（私有目录）：存放服务器真实生效的 Compose 编排、运维通知密钥与协议端登录状态。
+- `scripts/deploy/` 与 `scripts/ops/`：分别存放通用部署程序与巡检程序，随代码仓库版本更新。
+
+如果采用手动安装，推荐从本地准备好的私有工作目录将完整项目上传至服务器：
 
 ```bash
-# 推荐：从本地私有工作目录上传完整项目
 scp -r /path/to/QuickQuip user@server:/path/to/QuickQuip
 ```
 
+---
+
 ### 3. 准备生产运维目录和环境变量
+
+手动安装在服务器项目根目录准备这些文件；使用自动部署脚本时，在本地项目准备同样的文件。自建搜索服务的命令仍在服务器执行：
 
 ```bash
 cd /path/to/QuickQuip
 cp .env.example .env
-nano .env  # 按下表填写；QUICKQUIP_SEARXNG_BASE_URL 需取消注释
+nano .env  # 按下表填写必填项；注意 QUICKQUIP_SEARXNG_BASE_URL 需要取消注释
 mkdir -p prod
 cp prod.example/docker-compose.yml prod/docker-compose.yml
 ```
 
-启动前在根 `.env` 填写：
+#### 3.1 根目录 `.env` 必填配置项
 
-| 配置 | 填写方法 |
+根目录 `.env` 是 QuickQuip 应用唯一的涉密凭证来源。启动前请填写以下核心变量：
+
+| 环境变量 | 填写说明 |
 |---|---|
 | `QQ_ACCOUNT` | 用于机器人登录的 QQ 号 |
-| `ONEBOT_ACCESS_TOKEN` | 自己设置的连接口令；第 5 步在 LLBot 填入同一值 |
-| `DRIVER` | 正向 WebSocket 使用示例值 `~fastapi+~websockets` |
-| `WEB_ADMIN_PASSWORD` | 自己设置的后台登录口令，替换示例占位值 |
-| `QUICKQUIP_SEARXNG_BASE_URL` | 从 Bot 容器可访问的 SearXNG 地址，生产模板启动时必填 |
-| 所选渠道的 API key | 启用 LLM 时填写该渠道使用的变量，例如 `OPENAI_API_KEY` |
+| `ONEBOT_ACCESS_TOKEN` | 自定义的 OneBot 连接口令（在第 5 步配置 LLBot 时需填入同一个值） |
+| `DRIVER` | 使用正向 WebSocket 连接时，保持示例值 `~fastapi+~websockets` |
+| `WEB_ADMIN_PASSWORD` | 自定义的 Web Admin 后台登录密码（请替换掉示例占位值） |
+| `QUICKQUIP_SEARXNG_BASE_URL` | 从 Bot 容器内部可访问的 SearXNG 搜索服务地址（生产模板启动时**必填**，需取消注释） |
+| 所选模型渠道的 API Key | 启用 LLM 时填写对应渠道的变量（例如 `OPENAI_API_KEY`） |
 
-已有 SearXNG 时填写它的地址。首次自建可以在**服务器项目根目录**用仓库根模板单独启动搜索服务：在 `.env` 中把 `SEARXNG_SECRET` 改成自己的随机字符串，保留示例的 `SEARXNG_BIND_PORT=8888`，执行下面的 Bash 命令。
+#### 3.2 准备 SearXNG 搜索服务
 
-```bash
-SEARXNG_BIND_ADDRESS="$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')" \
-  docker compose -p quickquip-search -f docker-compose.example.yml up -d searxng
-docker network inspect bridge --format 'QUICKQUIP_SEARXNG_BASE_URL=http://{{(index .IPAM.Config 0).Gateway}}:8888'
-```
+- **如果已有可用的 SearXNG 服务**：直接将其可达地址填入 `.env` 的 `QUICKQUIP_SEARXNG_BASE_URL` 即可。
+- **如果首次在服务器本机自建 SearXNG**：
+  1. 在**服务器项目根目录**的 `.env` 中，把 `SEARXNG_SECRET` 改成你自己的随机字符串，并保留示例的 `SEARXNG_BIND_PORT=8888`。
+  2. 执行以下 Bash 命令，利用仓库根模板单独启动名为 `quickquip-search` 的搜索容器，并输出对应的网桥地址配置：
+     ```bash
+     SEARXNG_BIND_ADDRESS="$(docker network inspect bridge --format '{{(index .IPAM.Config 0).Gateway}}')" \
+       docker compose -p quickquip-search -f docker-compose.example.yml up -d searxng
+     docker network inspect bridge --format 'QUICKQUIP_SEARXNG_BASE_URL=http://{{(index .IPAM.Config 0).Gateway}}:8888'
+     ```
+  3. 将最后一行命令输出的 `QUICKQUIP_SEARXNG_BASE_URL=http://...` 复制写入根目录 `.env`（替换掉原本被注释的那一行）。
 
-将最后一行输出写入根 `.env`，替换注释中的 `QUICKQUIP_SEARXNG_BASE_URL`。这条 Linux Docker 路线将搜索端口绑定在默认 Docker 网桥地址，供 Bot 容器访问；[Docker 的端口映射说明](https://docs.docker.com/engine/network/port-publishing/)解释了跨网桥访问已发布端口的方式。`quickquip-search` 使用独立 Compose 项目名，后续应用发布会保留这个搜索服务。已有搜索服务的部署直接填写其可达地址即可。
+> **原理解析**：这条 Linux Docker 路线会将 SearXNG 端口绑定在默认的 Docker 网桥网关地址上，专供同宿主机的 Bot 容器跨网桥访问（关于跨网桥访问已发布端口的原理，详见 [Docker 端口映射说明](https://docs.docker.com/engine/network/port-publishing/)）。因为使用了独立的 Compose 项目名 `quickquip-search`，后续 QuickQuip 应用发布或重启时，这个搜索服务会一直保留运行。
 
-LLM 初次使用将 `config/personas.example/` 复制为 `config/personas/`；服务启动后按第 7 步添加渠道并应用配置。其他功能按需准备：
+#### 3.3 准备人格与运维配置
 
-- 如启用 MCP sidecar，再按你的私有 `prod/` 编排补充对应 API key
-- 已有部署升级时按[配置管理](llm-configuration.md#初始化与升级)完成数据库迁移，保留迁移前配置与资产备份
-- 如启用图片、语音、音乐或 ASR，`config/generation.toml` 已存在并填入对应 provider 与模型
-- 如启用低频唤醒，`config/awakening.toml` 已存在并填入阈值、兴趣话题和按群覆盖
-- 如启用敏感词过滤，`config/sensitive_words.toml` 已存在并填入部署侧词表
-- 如启用 Skill 系统，`skills/` 目录已放置技能包（预置包从 `skills.example/` 复制，Windows 懒人包首启自动完成；目录为空或不存在时 Skill 工具不注册，详见 [skills.md](skills.md)）
-- `prod/docker-compose.yml` 已从模板建立，并按服务器环境调整编排
-- 如需 ServerChan 等运维通知，在 `prod/sendkey.env` 中维护；该文件不被 QuickQuip 应用读取
+- **LLM 默认人格（初次使用必做）**：将 `config/personas.example/` 复制为 `config/personas/`（服务启动后按第 7 步在后台添加渠道并应用配置）。
+- **已有部署升级**：请先按[配置管理：初始化与升级](llm-configuration.md#初始化与升级)完成数据库迁移，并保留迁移前的配置与资产备份。
+- **生产编排与运维通知**：确认 `prod/docker-compose.yml` 已从模板建立并按服务器环境调整；如需配置 ServerChan 等运维通知，请在 `prod/sendkey.env` 中维护（该文件仅用于运维脚本，不会被 QuickQuip 应用读取）。
 
-自动部署会把：
-
-- 根 `.env`
-- `config/` 目录下的运行配置（如 `generation.toml`、`awakening.toml`、`sensitive_words.toml`、`games.toml`）
-- `skills/` 目录（Skill 系统技能包，从 `skills.example/` 复制预置包或自建；每次部署把其中新增的 Skill 非破坏性合并进服务器部署根共享 `skills/`：已存在文件不被覆盖、删除不传播，已安装 Skill 的更新与删除经 Web 管理页或服务器手动维护）
-- `llm_about/vocab.yaml`
-- `llm_about/identities.yaml`
-- `llm_about/{群号}/vocab.yaml`
-- `llm_about/{群号}/identities.yaml`
-
-一并用于容器运行。
-
-若存在 `data/tieba/storage_state.json`，部署脚本还会把它单独上传到云端，供贴吧功能复用本地导出的登录态。
-
-根目录 `.env` 是 QuickQuip 应用的唯一涉密凭证来源。`prod/` 保存 Compose 编排、运维通知密钥与协议端登录目录。通用程序直接使用 `scripts/` 中的版本。
+其他功能可以在基本部署完成后按[可选配置](#可选功能配置)添加。
 
 ### 4. 启动服务
 
-启动前需先构建 Web Admin 前端（`cd frontend && pnpm install --frozen-lockfile && pnpm build`），产物 `frontend/dist` 会被 web-admin 容器只读挂载。手动部署路径需在服务器安装 Node.js + pnpm 后构建；使用 `scripts/deploy/deploy-v4.sh` / `scripts/deploy/deploy-v4.ps1` 部署脚本则在本机自动完成。
+#### 构建前端并启动容器
+
+在启动容器前，需要先构建 Web Admin 前端静态产物（`frontend/dist`，会被 `web-admin` 容器只读挂载）：
+- **若使用 `deploy-v4` 部署脚本**：脚本会在你本地电脑上自动构建前端并打包上传，无需在服务器操作。
+- **若在服务器手动部署**：需先在服务器上安装 Node.js 和 pnpm，并在项目根目录执行：
+  ```bash
+  cd frontend && pnpm install --frozen-lockfile && pnpm build
+  ```
+
+随后进入 `prod/` 目录，依次执行构建镜像、初始化配置库、后台启动服务：
 
 ```bash
 cd /path/to/QuickQuip/prod
@@ -106,129 +134,89 @@ docker compose --env-file ../.env run --rm --no-deps web-admin python -m quickqu
 docker compose --env-file ../.env up -d
 ```
 
-中间的初始化命令借用 Web 容器的可写配置挂载，建立空配置库或迁移旧 TOML，完成后退出。新安装保持 LLM 关闭，在第 7 步通过后台启用；已有配置库的升级按[初始化与升级](llm-configuration.md#初始化与升级)的停服和备份要求执行。
+> **关于中间那条 `init` 初始化命令**：
+> 该命令借用了 `web-admin` 容器的可写配置挂载，用于创建初始的空配置库（或将旧版 `llm.toml` 迁移入库），执行完成后容器即自动退出。全新安装完成后 LLM 功能默认保持关闭状态，稍后在第 7 步通过 Web 后台启用；如果是已有配置库的老版本升级，请务必按[初始化与升级](llm-configuration.md#初始化与升级)或[存储迁移步骤](storage-migration.md)的停服和备份要求执行。
 
-当前 compose 会：
+### 5. 首次登录 OneBot 协议端（LLBot）
 
-- 通过第 3 步设置的 `QUICKQUIP_SEARXNG_BASE_URL` 连接独立 SearXNG 服务
-- 通过 `../.env` 向 bot 和 Web Admin 提供应用环境变量
-- 把 `../config` 只读挂载到容器内 `/app/config`
-- 把部署根共享 `skills/` 挂载到容器内 `/app/skills`（Skill 技能包目录，与 `data/` 同级：`quickquip` 只读、`web-admin` 读写以支撑 Skill 页在线管理；扁平安装时即项目根 `skills/`；目录为空或不存在时 Skill 工具不注册，详见 [skills.md](skills.md)）
-- 把 `../llm_about` 挂载到容器内 `/app/llm_about`
-  - 其中包含全局 `vocab.yaml` / `identities.yaml` 与可选群级覆盖目录
-- 把 `../data` 挂载到容器内 `/app/data`，用于持久化统计、规则开关、LLM 数据库
-- 让贴吧运行时从 `/app/data/tieba/storage_state.json` 读取跨平台登录态
-- 直接基于 Playwright Python 镜像运行贴吧采集，镜像内已预装浏览器与系统依赖
-- 通过构建参数把 Python 包安装源切到国内镜像，减少云端拉取超时
-- 可通过 `PLAYWRIGHT_BASE_IMAGE` 指定适合当前网络环境的 Playwright 基础镜像
+协议端容器首次启动后需要用手机 QQ 扫码登录。以下以当前默认适配器 **LLBot 7.3.2** 为例（完整 Profile、固定版本号 `initialencounter/llonebot:v7.12.14-7.3.2-45758` 的 pin 原因及其他适配器状态见 [onebot-adapters.md](onebot-adapters.md)）：
 
-补充说明：
-
-- **`DRIVER` 以 `.env` 为最终生效值**：compose 的 `environment:` 插值与 `env_file:` 都会读到同一份 `.env`，在其中写 `DRIVER=~fastapi` 会同时穿透两层覆盖模板默认。要让 QuickQuip 正向 WebSocket 连接协议端（`ONEBOT_WS_URLS` 指向适配器的 WS 服务端，当前默认模板为 `ws://llbot:3001/`），`DRIVER` 必须是 `~fastapi+~websockets`（纯 `~fastapi` 无 WS client 能力，`ONEBOT_WS_URLS` 会被忽略并告警）。替代拓扑：在适配器管理界面启用反向 WS 指向 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧不需要 WS client（连接拓扑详见 [onebot-adapters.md](onebot-adapters.md)）。deploy 脚本在 `prod/llbot-data` 存在时会自动把 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 反向 WS 配置，正反拓扑可并存。
-- Bot 和 Web 共享本机 `config/managed/config.db`。手动安装使用上面的初始化命令准备配置与独立资产；已有部署升级按[存储迁移步骤](storage-migration.md)执行。部署脚本保留生产库，本地配置库和旧 TOML 由各自的配置运维流程管理。Bot 重启读取已发布快照，草稿通过后台单独应用。Bot 每 30 秒检查 `awakening.toml` 的修改时间并重载。
-- 部署脚本在切换发行目录后强制重建应用容器一次，使源码和配置挂载指向本次发行目录
-- 在线调整 LLM 配置通过 Web Admin“LLM 配置”保存草稿并应用，等待任务完成及 Bot 实际版本确认。修改价格等无关字段保持 MCP 连接；MCP 改动的连接状态独立回报。`/llm reload` 重载已发布配置及相关独立资产，并探活当前模型，可能计费。
-
-### 4.1 首次准备贴吧登录态
-
-贴吧登录态建议先在本地机器生成，再通过部署脚本同步到云端：
+#### 方式一：直接看容器日志扫码
 
 ```bash
-python -m quickquip.tieba.login
-```
-
-成功后会生成：
-
-```text
-data/tieba/storage_state.json
-```
-
-后续执行 `scripts/deploy/deploy-v4.ps1`（Windows）或 `bash scripts/deploy/deploy-v4.sh`（Linux）时，该文件会自动单独上传到云端。
-
-### 4.2 CJK 字体文件（词云与 SVG 画图）
-
-词云与 SVG 画图（`draw_svg` 工具）共用同一个 CJK 字体文件，不随代码仓库分发，需手动放置：
-
-1. 从 [Google Fonts](https://fonts.google.com/noto/specimen/Noto+Sans+SC) 下载 `NotoSansSC-Regular.ttf`
-2. 放置到 `data/fonts/NotoSansSC-Regular.ttf`
-
-容器化部署时，`data/fonts/` 目录应通过 `data/` bind mount 挂载到容器内，字体文件上传一次后即可持久使用。若字体文件缺失，执行 `/wordcloud` 时 bot 会回复明确的错误提示；SVG 画图则回退系统字体，精简系统上中文可能渲染为方框，建议同样放置该文件。
-
-SVG 画图的依赖与平台差异：
-
-- 渲染引擎 resvg 以 pip 依赖随 `requirements.txt` 安装，Docker 镜像与 Windows 懒人包均随依赖安装自动获得，无需额外系统依赖或构建步骤。
-- 文本渲染优先使用上述 NotoSansSC 字体；emoji 等字符依赖系统字体回退。官方 Playwright 基础镜像自带常用字体（含彩色 emoji），Docker 部署一般无需处理；裸机源码部署在精简系统上可能缺少 emoji 字体，图中 emoji 会显示为方框；Windows 使用系统字体（微软雅黑、Segoe UI Emoji），一般无需处理。
-- 渲染子进程的资源硬限制（地址空间 / CPU 时间）依赖 POSIX `rlimit`，在 Linux 等 POSIX 平台生效；Windows 保留 8 秒墙钟超时兜底。
-
-### 5. 首次登录 OneBot 协议端
-
-协议端首次启动需要扫码登录。以下以当前默认适配器 **LLBot 7.3.2** 为例（完整 profile、版本 pin 原因与其他适配器状态见 [onebot-adapters.md](onebot-adapters.md)）：
-
-```bash
-# 查看协议端日志，找到登录二维码
+cd /path/to/QuickQuip/prod
 docker compose --env-file ../.env logs -f llbot
 ```
+日志中会打印出二维码或登录链接，使用手机 QQ 扫码确认即可。
 
-日志中会出现二维码或登录链接，用手机 QQ 扫码确认。模板的 WebUI 端口绑定服务器本机；需要浏览器操作时，在本地终端建立 SSH 隧道，将 `user@server` 替换为服务器账号与地址：
+#### 方式二：通过 SSH 隧道访问 LLBot WebUI 扫码并配置对接（推荐）
+
+模板中 LLBot 的 WebUI 端口（`3080`）仅绑定在服务器本机 `127.0.0.1`。请在**你自己的本地电脑终端**建立一条 SSH 隧道（将 `user@server` 替换为你的服务器账号与 IP）：
 
 ```bash
 ssh -N -L 3080:127.0.0.1:3080 user@server
 ```
 
-保持隧道运行，在本地浏览器打开 `http://127.0.0.1:3080` 扫码。登录态持久化在 `prod/llbot-qq/`，配置在 `prod/llbot-data/`。
+保持该终端窗口不关闭，在本地浏览器打开 `http://127.0.0.1:3080` 扫码登录（登录态持久化保存在 `prod/llbot-qq/`，LLBot 配置保存在 `prod/llbot-data/`）。
 
-**镜像版本与 pin**：compose 模板固定使用 `initialencounter/llonebot:v7.12.14-7.3.2-45758`，版本选择与升级事项见 [onebot-adapters.md](onebot-adapters.md) 的 LLBot profile。
+- **必做：在 WebUI 中启用 OneBot 网络对接**：
+  新部署的 LLBot 默认将四种网络对接方式（正向 WS / 反向 WS / HTTP / HTTP 上报）**全部关闭**。请在 WebUI 中开启你需要的对接方式——若使用默认的正向 WebSocket（服务端），**Token 为必填项，且必须与根目录 `.env` 中的 `ONEBOT_ACCESS_TOKEN` 完全一致**，否则 QuickQuip 无法连上协议端。
+- **容器重启后的快速登录与异常处理**：
+  只要 `prod/llbot-qq/` 登录态目录完好，重启容器后 LLBot 通常会触发快速登录（`QUICK_LOGIN_QQ` 生效，免扫码），但快速登录有时效性，过期后仍需重新扫码。
+  - 若遇到登录异常，请先执行 `docker compose --env-file ../.env restart llbot` 重启容器（切勿随意删除 `llbot-qq/`）。
+  - 如果刚扫码成功后发现发消息无响应，且日志里出现 `getSelfNick` 等 `TypeError` 报错，只需执行一次 `restart llbot` 触发快速登录即可恢复正常。
 
-**WebUI 启用 OneBot 对接**：新部署的 LLBot 四种网络对接方式（正向 WS / 反向 WS / HTTP / HTTP 上报）默认全部关闭。在上述 WebUI 中启用所需方式——正向 WebSocket（服务端）的 token 为必填项，须与根目录 `.env` 的 `ONEBOT_ACCESS_TOKEN` 同值，QuickQuip 侧才连得上。
+---
 
-**重启与快速登录**：`llbot-qq/` 登录态目录完好时，容器重启后 LLBot 可能走快速登录（`QUICK_LOGIN_QQ` 生效，免扫码），也可能要求重新扫码——快速登录存在时效性（验收中两种情况都出现过）。登录异常时先用 `docker compose --env-file ../.env restart llbot` 重启，保留 `llbot-qq/` 登录态；扫码后若消息无响应且日志出现 `getSelfNick` 等 TypeError，restart 一次触发快速登录即可恢复。
-
-### 6. 验证运行
+### 6. 验证基础运行
 
 ```bash
-# 查看两个容器是否正常运行
+# 确认容器均处于正常运行状态
 docker compose --env-file ../.env ps
 
-# 查看 QuickQuip 日志
+# 实时查看 QuickQuip 运行日志
 docker compose --env-file ../.env logs -f quickquip
 ```
 
-在群里发送“早安”，收到时区猜测回复即确认基本群消息收发与规则响应可用。启用的 LLM 和其他功能按下方检查。
+1. **验证基础收发**：在机器人所在的 QQ 群里发送一句“**早安**”，如果收到机器人的时区猜测回复，说明群消息收发与基础规则响应已打通。
+2. **验证贴吧功能（如已启用）**：在群内发送 `/tieba status` 和 `/tieba refresh` 进行验证。
 
-如果还启用了贴吧功能，可以继续验证：
+---
 
-```text
-/tieba status
-/tieba refresh
-```
+<a id="7-web-管理后台"></a>
 
-### 7. Web 管理后台
+### 7. 登录 Web 管理后台与首次启用 LLM
 
-compose 会同时启动 `web-admin` 容器（`python web_api.py`，容器内监听 `0.0.0.0:5104`，宿主侧绑定 `127.0.0.1:5104`）。首次管理在**自己电脑的另一个终端**建立隧道，将 `user@server` 替换为服务器账号与地址：
+Compose 启动时会同时运行 `web-admin` 容器（内部运行 `python web_api.py` 监听 `0.0.0.0:5104`，宿主机侧仅绑定在 `127.0.0.1:5104`）。
+
+#### 7.1 建立 SSH 隧道并登录后台
+
+在**自己电脑的另一个终端窗口**建立 SSH 隧道（将 `user@server` 替换为服务器账号与地址）：
 
 ```bash
 ssh -N -L 5104:127.0.0.1:5104 user@server
 ```
 
-保持隧道窗口运行，在自己电脑的浏览器打开 `http://127.0.0.1:5104/ops/`，输入第 3 步设置的 `WEB_ADMIN_PASSWORD`。进入概览后，按[首次启用 LLM](llm-configuration.md#首次启用-llm)添加一个渠道和模型、保存并应用，等待 Bot 加载，再在测试群开启 AI 并收到第一条回复。
+保持隧道运行，在本地浏览器打开 `http://127.0.0.1:5104/ops/`，输入第 3 步在 `.env` 中设置的 `WEB_ADMIN_PASSWORD` 登录。
 
-后台提供：
+进入后台概览页后，请按照[首次启用 LLM](llm-configuration.md#首次启用-llm)的步骤：添加一个模型渠道和模型 $\rightarrow$ 保存草稿并应用到 Bot $\rightarrow$ 等待 Bot 加载完成 $\rightarrow$ 在测试群开启 AI 并收到第一条回复。
 
-- 消息统计（各群消息数、活跃用户、规则触发次数）
-- 群级规则开关（toggle 开关，实时生效）
-- 每日总结 / 每日播报群组管理
-- LLM 结构化配置、保存／应用、JSON 导入预览、实际 Bot 状态和配置任务
-- `config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml` 在线编辑（保存前校验 TOML 语法）
-- 敏感词过滤器只读状态查看；`config/sensitive_words.toml` 只通过服务器本地文件或部署流程维护，不在 Web Admin 中回显或编辑
-- 记忆、对话、人格、资料、唤醒、LLM 用量、MCP、贴吧、词云、语录、调度器监控、审计、金币经济和牛牛面板
-- 实时日志 / LLM Trace / 日志归档面板（日志读取 `../data/logs`，LLM HTTP 调用索引和正文读取 `../data/llm_trace.db`）
+#### 7.2 Web Admin 后台功能一览
 
-长期通过 HTTPS 反向代理访问时，按 [Web Admin 的代理说明](web-admin.md#反向代理注意事项)配置站点。配置 nginx `auth_basic` 的部署有两层门：
+- **统计与群管**：各群消息统计、活跃用户、规则触发次数；群级规则实时 Toggle 开关；每日总结 / 每日播报群组管理。
+- **LLM 工坊与配置**：LLM 结构化配置、保存草稿／应用到 Bot、JSON 导入预览、Bot 实际加载状态监控与配置任务追踪。
+- **独立 TOML 配置在线编辑**：支持在线编辑 `config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml`（保存前会自动校验 TOML 语法）。
+- **敏感词状态查看（只读）**：后台仅提供敏感词过滤器的只读状态查看；`config/sensitive_words.toml` 词表文件只能通过服务器本地文件或部署流程维护，**不会**在 Web Admin 中回显或允许编辑。
+- **业务与监控面板**：记忆、对话、人格、群资料、低频唤醒、LLM 用量统计、MCP 状态、贴吧、词云、群语录、调度器监控、操作审计、金币经济与牛牛游戏面板。
+- **日志与 Trace 观测**：实时日志、历史日志归档（读取 `../data/logs`），以及 LLM HTTP 调用索引与请求/响应正文追踪（读取 `../data/llm_trace.db`）。
 
-- nginx `auth_basic`：外层站点访问控制，密码文件位置由你的反代配置决定
-- QuickQuip Web Admin session：应用层登录，会读取 `WEB_ADMIN_PASSWORD` 并在浏览器里建立 `HttpOnly` session cookie
+#### 7.3 配置 HTTPS 反向代理与 Session 参数（可选）
 
-后台登录口令已在第 3 步设置，其他登录参数可在根 `.env` 调整：
+如果需要长期通过域名和 HTTPS 反向代理访问后台，请参考 [Web Admin 反向代理注意事项](web-admin.md#反向代理注意事项)。若你在 Nginx 层额外配置了 `auth_basic`，访问时会有两层认证：
+1. **外层 Nginx `auth_basic`**：站点级访问控制，密码文件由你的 Nginx 配置决定。
+2. **内层 QuickQuip Web Admin Session**：应用层登录，校验 `.env` 中的 `WEB_ADMIN_PASSWORD` 并在浏览器建立 `HttpOnly` Session Cookie。
+
+你可以在根目录 `.env` 中调整后台 Session 与部署环境参数：
 
 ```env
 WEB_ADMIN_SESSION_TTL_HOURS=168
@@ -237,164 +225,259 @@ QUICKQUIP_DEPLOY_LOCATION=cloud
 QUICKQUIP_DEPLOY_RUNTIME=docker
 WEB_ADMIN_COOKIE_SECURE=auto
 ```
+> **提示**：`WEB_ADMIN_COOKIE_SECURE=auto` 依赖反向代理传递 `X-Forwarded-Proto` 请求头；如果你的 Nginx 没有传递该 Header，但站点确实运行在 HTTPS 下，请将其显式改为 `true`。
 
-`WEB_ADMIN_COOKIE_SECURE=auto` 依赖反代传递 `X-Forwarded-Proto`；若你的 nginx 未传该 header，但站点本身跑在 HTTPS 下，则把它显式设为 `true`。
+## 可选功能配置
 
-`web-admin` 容器挂载：
+- **多模态生成（图片 / 语音 / 音乐 / ASR）**：确保 `config/generation.toml` 已存在，并填入对应的 provider 与模型。
+- **低频唤醒**：确保 `config/awakening.toml` 已存在，并填入唤醒阈值、兴趣话题和按群覆盖规则。
+- **敏感词过滤**：确保 `config/sensitive_words.toml` 已存在，并填入部署侧词表。
+- **Skill 技能系统**：确保 `skills/` 目录下已放置技能包（预置技能包可从 `skills.example/` 复制，Windows 懒人包首次启动会自动完成复制；若 `skills/` 目录为空或不存在，Skill 工具不会注册，详见 [skills.md](skills.md)）。
+- **MCP 外部工具 Sidecar**：如启用 MCP sidecar，需按你的私有 `prod/` 编排补充对应的 API Key。
 
-| 宿主路径 | 容器路径 | 权限 |
-|---|---|---|
-| `../data` | `/app/data` | 读写 |
-| `../config` | `/app/config` | **读写**（独立配置在线编辑与首次迁移资产提取） |
-| `../llm_about` | `/app/llm_about` | **读写**（资料页在线编辑需要） |
-| `${QUICKQUIP_ROOT:-..}/skills`（扁平安装即 `../skills`） | `/app/skills` | **读写**（Skill 页在线安装/编辑/预置同步落盘） |
-| `../frontend/dist` | `/app/frontend/dist` | 只读 |
-| `../web_api.py` | `/app/web_api.py` | 只读 |
-| `../src` | `/app/src` | 只读（hybrid 源码热更新） |
+<a id="41-首次准备贴吧登录态"></a>
 
-> 注意：`quickquip` 容器的 `config`、`llm_about` 与共享 `skills/` 挂载保持只读（`:ro`），只有 `web-admin` 需要写权限。
-> `config/sensitive_words.toml` 即使位于同一挂载目录，也不会通过 Web Admin 配置编辑器读取或写入。
+<a id="41-首次准备贴吧登录态可选"></a>
+
+### 首次准备贴吧登录态
+
+如果需要使用贴吧相关功能，建议先在有图形界面的**本地电脑**上运行登录命令生成登录态，再通过部署脚本同步到云端：
+
+```bash
+python -m quickquip.tieba.login
+```
+
+登录成功后会在本地生成 `data/tieba/storage_state.json`。后续在本地执行 `scripts/deploy/deploy-v4.ps1`（Windows）或 `bash scripts/deploy/deploy-v4.sh`（Linux）时，该文件会被自动单独上传到服务器。
+
+---
+
+<a id="42-cjk-字体文件词云与-svg-画图"></a>
+
+<a id="42-准备-cjk-中文字体文件词云与-svg-画图"></a>
+
+### 准备 CJK 中文字体文件（词云与 SVG 画图）
+
+词云（`/wordcloud`）与 SVG 画图（`draw_svg` 工具）共用同一个中文字体文件。该文件不随代码仓库分发，需手动下载放置：
+
+1. 从 [Google Fonts](https://fonts.google.com/noto/specimen/Noto+Sans+SC) 下载 `NotoSansSC-Regular.ttf`。
+2. 将其放入项目的 `data/fonts/NotoSansSC-Regular.ttf`（容器化部署时，`data/fonts/` 会随 `data/` 目录自动挂载进容器，上传一次即可持久生效）。
+
+> **缺少字体文件及不同平台的渲染差异**：
+> - **若缺失 `NotoSansSC-Regular.ttf`**：执行 `/wordcloud` 时 Bot 会直接回复明确的错误提示；而 `draw_svg` 会回退使用系统字体（在精简版 Linux 系统上中文可能会渲染成方框，因此强烈建议放置该字体）。
+> - **渲染引擎与 Emoji 字体**：SVG 渲染引擎 `resvg` 已包含在 `requirements.txt` 中，随 pip 依赖自动安装，无需额外系统构建步骤。文字优先使用上述 NotoSansSC 字体，Emoji 等字符则通过系统字体回退——官方 Playwright 基础镜像和 Windows 系统（微软雅黑 / Segoe UI Emoji）均自带彩色 Emoji 字体，无需额外处理；仅在精简 Linux 宿主机上裸机源码部署时，可能因缺少系统 Emoji 字体导致 Emoji 显示为方框。
+> - **渲染子进程资源保护**：渲染子进程的内存地址空间与 CPU 时间硬限制依赖 POSIX `rlimit`，在 Linux 等 POSIX 平台自动生效；Windows 平台则保留 8 秒墙钟超时（wall-clock timeout）兜底。
+
+---
 
 ## 自动部署与版本回滚
 
-日常部署推荐使用 `scripts/deploy/deploy-v4.sh`（Bash）或 `scripts/deploy/deploy-v4.ps1`（PowerShell）。两端共享远端事务执行器，按清单上传应用文件，预检和构建成功后切换版本目录，并验证容器、OneBot 连接与 Web Admin HTTP。完整前提、参数与目录结构见[部署工具指南](../../scripts/deploy/README.md)。服务器需具备 rsync、flock、Python ≥ 3.11.8 和 Docker Compose ≥ 2.27。
+日常代码发布与配置同步推荐使用仓库自带的 `scripts/deploy/deploy-v4.sh`（Bash）或 `scripts/deploy/deploy-v4.ps1`（PowerShell）。
 
-执行前，`prod/` 已从 `prod.example/` 复制，根 `.env` 和所选功能配置已填写，`quickquip-prod` 已替换为自己的 SSH 连接名称。首次准备见第 3 步；日常命令位于[自动部署操作](#自动部署操作)。
+- **工作原理**：两端脚本共享同一套远端事务执行器，按受控清单上传应用文件，在服务器完成预检和镜像构建后原子切换版本目录（`releases/<id>/`），并自动验证容器状态、OneBot 连接与 Web Admin HTTP 健康检查（完整的参数与目录结构说明见[部署工具指南](../../scripts/deploy/README.md)）。
+- **服务器环境要求**：服务器需具备 `rsync`、`flock`、Python ≥ 3.11.8 以及 Docker Compose ≥ 2.27。
+- **执行前确认**：本地 `prod/` 已从 `prod.example/` 复制并配好，根目录 `.env` 及所选功能配置已填写完毕，且已在本地 SSH 配置中配好服务器别名（默认为 `quickquip-prod`）。
 
-已有平铺部署首次使用 `--migrate --config-sync off`：先保存服务器上的旧代码与运行镜像作为基线，再部署候选版本。新服务器首次尚未扫码时可显式使用 `--config-sync off --env local --skip-health`，之后完成扫码与健康核验。PowerShell 使用同名参数，指定回滚版本时使用 `-Rollback -ReleaseId <id>`；完整接口见 `bash scripts/deploy/deploy-v4.sh --help`。
+### 1. 版本目录结构与构建标识
+使用 `deploy-v4` 部署的服务器采用版本化目录布局：
+- **持久化运行态**：位于部署根目录下的 `data/`、`skills/` 和 `prod/`。
+- **代码发行版**：位于 `releases/<id>/`，并通过 `current` 和 `previous` 软链接分别指向当前运行版本与上一个版本（如需在服务器上手动执行 `docker compose` 命令，需先按[模板中的手动访问步骤](../../scripts/deploy/README.md#manual-compose-access)导出部署根目录和版本标识环境变量）。
+- **版本追踪标识**：每次发布都会生成一个唯一版本标识（格式为 `pyproject.toml 版本号 + 服务器镜像构建完成时刻`，例如 `1.15.3-dev.2+build.20260909.065235`），记录在事务日志的 `image built` 与 `release complete` 行中，方便将线上 `releases/` 目录与代码提交精确对应。
 
-每次发布携带一个版本标识：部署的 `pyproject.toml` 版本加上服务器镜像构建完成时刻（如 `1.15.3-dev.2+build.20260909.065235`），出现在事务日志的 `image built` 与 `release complete` 行中，便于将线上 release 目录与代码版本对上号。
+### 2. 配置同步策略与特殊升级参数
+日常直接运行 `deploy-v4` 时，**默认会将本地配置（包含根 `.env`）单向推送到服务器**（但排除本地数据库和旧版 LLM TOML 的原始文件上传）。针对首次部署或老服务器升级，请按场景选用参数（详见[配置同步指南](config-sync.md)与[存储迁移指南](storage-migration.md)）：
 
-部署失败时自动恢复本次修改的共享文件并验证旧版本健康；手动回滚保留当前根 `.env`、数据库与部署根共享 `skills/`（Skill 安装成果不随代码版本回退；目标 compose 使用共享目录时，回滚把目标 release 中新增的 Skill 非破坏性合并进共享目录）。回滚到挂载 release 自带 `skills/` 副本的历史版本时，该版本继续使用其目录内副本。数据迁移与外部副作用不随代码回滚，部署前应核对版本升级说明。`--dry-run` 会本地构建前端，PowerShell 还会临时打包，两者均不连接远端。
+| 服务器场景 | Bash 参数 | PowerShell 参数 | 行为说明 |
+|---|---|---|---|
+| **平铺部署老服务器，且仍在使用 `data/llm_config.db`** | `--migrate --migrate-storage` | `-Migrate -MigrateStorage` | 将平铺目录迁为 release 结构，同时保存基线、停止服务并完成存储拆分迁移（保留服务器现有配置，自动关闭本次配置同步） |
+| **平铺部署老服务器，但已完成存储迁移** | `--migrate --config-sync off` | `-Migrate -ConfigSync off` | 仅做目录结构迁移，关闭本次配置同步以保留服务器配置 |
+| **全新服务器首次部署（尚未扫码登录协议端）** | `--config-sync off --env local --skip-health` | `-ConfigSync off -EnvSource local -SkipHealth` | 使用本地 `.env` 初始化服务器，并跳过首次健康检查；部署完后按第 5、7 步扫码登录，再按[生产模板首次健康检查](../../scripts/deploy/README.md#commands)核验 |
+| **回滚到上一版本 / 指定历史版本** | `--rollback`（可加 `--release-id <id>`） | `-Rollback`（可加 `-ReleaseId <id>`） | 回滚代码版本（完整接口见 `bash scripts/deploy/deploy-v4.sh --help`） |
 
-配置备份使用 `python -m quickquip.llm.config_cli backup data/llm-config-backup.db` 的 SQLite backup 接口。恢复数据库前停止 Bot 和 Web，先备份当前库，再运行 `restore --file <备份路径> --services-stopped`；恢复会清除旧运行租约与心跳。配置回流、导入预览、应用及备份恢复可使用模板的 Bash／PowerShell 配置运维驱动，完整命令见 [LLM 配置管理](llm-configuration.md)。
+> **注**：`--env local`（PowerShell：`-EnvSource local`）仅在关闭配置同步（`--config-sync off` 或 `--migrate-storage`）时用于显式指定上传本地 `.env`；普通日常部署已包含 `.env`。首次升级建议先保留线上配置，随后再明确初始同步方向。
 
-回退至 1.16.1 使用首次迁移前的 TOML 及人格／多模态资产备份；升级后新增的配置不会反向转换成 TOML。新库保留供再次升级，回退应同时核对运行代码与迁移前配置资产。升级与回退前还需备份会话库和追踪库；旧代码运行后再次升级的 Session 身份维护步骤见[回退旧版本后再次升级](llm-configuration.md#回退旧版本后再次升级)。
+### 3. 自动回滚、手动回滚与旧版回退规则
+- **部署失败自动恢复**：如果部署中途失败，脚本会自动恢复本次修改的共享文件，并验证旧版本服务依然健康运行。
+- **手动执行 `--rollback` 的保留范围**：
+  - 手动回滚代码版本时，会保留当前的根 `.env`、数据库以及部署根目录下的共享 `skills/`（即在线安装的 Skill 成果不会随代码回退而丢失；若目标版本的 Compose 同样使用共享 `skills/` 目录，回滚时会将目标 release 中新增的 Skill 非破坏性合并进共享目录；若回滚到使用 release 内部自带 `skills/` 副本的早期历史版本，则该版本继续使用其目录内副本）。
+  - **注意**：数据库 schema 迁移与外部副作用不会随代码回滚自动撤销，部署前请核对版本升级说明。
+- **配置库的备份与恢复命令**：
+  - 备份配置库：`python -m quickquip.llm.config_cli backup data/llm-config-backup.db`（调用 SQLite backup 接口）。
+  - 恢复配置库：先停止 Bot 和 Web，备份当前库后运行 `restore --file <备份路径> --services-stopped`（恢复时会自动清除旧的运行租约与心跳）。更多配置回流、导入预览与备份恢复驱动用法见 [LLM 配置管理](llm-configuration.md)。
+- **跨大版本回退至 1.16.1 的特别说明**：
+  - 如果需要彻底回退到 1.16.1，需使用首次迁移前备份的 TOML 及人格／多模态资产（升级到新版数据库后新增的配置不会反向转换成旧 TOML；新版数据库会保留在原处供日后再次升级）。
+  - 升级与回退前请同时备份业务会话库（`data/llm.db`）和追踪库（`data/llm_trace.db`）。如果回退运行过旧版代码后又要再次升级，需执行 Session 身份重置步骤，详见[回退旧版本后再次升级](llm-configuration.md#回退旧版本后再次升级)。
 
-运行态位于部署根目录的 `data/`、`skills/` 和 `prod/`，版本内容位于 `releases/<id>/`，`current` 与 `previous` 指向当前和前一版本。运维命令需按 [模板中的手动访问步骤](../../scripts/deploy/README.md#manual-compose-access) 导出部署根目录和版本标识。手动平铺安装按上方 1–7 步进行，版本目录部署由脚本管理。
-
-部署默认保留服务器根 `.env`，需要更新凭据时使用 `--env local`（PowerShell：`-EnvSource local`）。新版配置同步需要先完成一次保留线上配置的能力升级并建立基线，操作见[配置同步](config-sync.md)。
+---
 
 ### 自动部署操作
 
-以下命令在**本地项目根目录**执行。首次准备见第 3 步及[SSH 设置](../../scripts/deploy/README.md#ssh-connection)；`quickquip-prod` 使用自己的连接名称。先单独运行预览，确认上传内容，再执行部署：
+以下日常部署命令均在**你本地电脑的项目根目录**下执行（请将示例中的 `quickquip-prod` 替换为你自己配置的 SSH 主机别名）：
 
 ```bash
+# 1. 本地预演（会在本地构建前端，PowerShell 还会临时打包，但均不会连接远端服务器）
 bash scripts/deploy/deploy-v4.sh --dry-run
-```
 
-```bash
+# 2. 正式执行自动部署
 bash scripts/deploy/deploy-v4.sh --host-alias quickquip-prod
+
+# 3. 查看远端服务器当前的发布状态
 bash scripts/deploy/deploy-v4.sh --status --host-alias quickquip-prod
 ```
 
-新服务器首次需要扫码时，首次部署使用 `--config-sync off --env local --skip-health`，之后按第 5、7 步登录，并按[生产模板的首次健康检查](../../scripts/deploy/README.md#commands)核验。版本目录服务器执行 Compose 命令前，按[手动访问说明](../../scripts/deploy/README.md#manual-compose-access)设置路径与版本变量；上面的手动安装命令使用平铺目录。
-
-回滚由需要恢复上一版本的部署单独执行：
+需要恢复上一个发行版本时，单独执行回滚：
 
 ```bash
 bash scripts/deploy/deploy-v4.sh --rollback --host-alias quickquip-prod
 ```
 
-## 代码更新
+---
 
-项目采用 **hybrid 混合模式**部署：
+## 部署布局与配置挂载
 
-- **镜像构建时** `pip install --no-deps .` 将 `src/` 下的 `quickquip` 和 `plugins` 安装至 site-packages，作为 baked fallback。
-- **运行时** docker-compose 将 `../src` 挂载到 `/app/src` 并通过 `PYTHONPATH=/app/src` 使其优先于 site-packages，实现**源码热更新**。
+### 当前 Compose 编排做了什么？
 
-因此：
+`prod/docker-compose.yml` 启动时会完成以下挂载与环境配置：
+- **搜索与环境变量**：通过 `../.env` 向 Bot 和 Web Admin 注入应用环境变量，并使用第 3 步配置的 `QUICKQUIP_SEARXNG_BASE_URL` 连接独立 SearXNG 服务。
+- **配置文件挂载**：将 `../config` 只读挂载到 Bot 容器内的 `/app/config`（注：`config/managed/` 由 Bot 和 Web 共享可写）。
+- **Skill 目录挂载**：将部署根目录共享的 `skills/`（扁平安装时即项目根 `skills/`，与 `data/` 同级）挂载到容器内 `/app/skills`——其中 `quickquip` 容器为**只读**，`web-admin` 容器为**读写**（以支持在 Web 后台 Skill 页在线管理）。
+- **群资料与词表挂载**：将 `../llm_about`（含全局与按群覆盖的 `vocab.yaml` / `identities.yaml`）挂载到 `/app/llm_about`。
+- **持久化数据挂载**：将 `../data` 挂载到 `/app/data`（存放统计数据、规则开关、运行期数据库等）。
+- **贴吧采集与基础镜像**：直接基于预装了浏览器与系统依赖的 Playwright Python 镜像运行贴吧采集，从 `/app/data/tieba/storage_state.json` 读取跨平台登录态；构建时通过构建参数将 pip 源切到国内镜像以减少云端拉取超时，也可通过 `PLAYWRIGHT_BASE_IMAGE` 自定义适合当前网络环境的 Playwright 基础镜像。
 
-- 改了 `src/quickquip/` 或 `src/plugins/` 下的 Python 代码后，**重启容器即可生效**，无需重建镜像：
+### OneBot 连接与配置重载
 
-  ```bash
-  cd /path/to/QuickQuip/prod
-  docker compose --env-file ../.env restart quickquip web-admin
-  ```
+- **`DRIVER` 环境变量与 OneBot 正/反向连接拓扑**：
+  - Compose 文件中的 `environment:` 插值与 `env_file:` 都会读取同一份 `.env`，因此在 `.env` 中设置 `DRIVER` 会同时穿透两层并作为**最终生效值**。
+  - **正向 WebSocket（默认模板）**：QuickQuip 作为 WS 客户端主动连接协议端（`ONEBOT_WS_URLS` 指向适配器的 WS 服务端，默认模板为 `ws://llbot:3001/`）。此时 `.env` 中的 `DRIVER` **必须填写 `~fastapi+~websockets`**（如果只写 `~fastapi` 则没有 WS 客户端能力，`ONEBOT_WS_URLS` 会被忽略并打出告警）。
+  - **反向 WebSocket（替代拓扑）**：在适配器管理界面启用反向 WS，让适配器主动连接 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`（此时 QuickQuip 侧无需 WS client，详见 [onebot-adapters.md](onebot-adapters.md)）。当 `prod/llbot-data` 存在时，`deploy-v4` 脚本会自动把 `.env` 中的 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 的反向 WS 配置中，正、反向拓扑可以并存。
+- **配置库共享与在线热重载机制**：
+  - Bot 和 Web 共享本机的 `config/managed/config.db`。自动部署脚本会保留生产环境数据库（本地配置库和旧 TOML 由各自的配置运维流程管理），并在切换发行版目录（release）后强制重建一次应用容器，确保源码和配置挂载指向最新发行目录。
+  - **LLM 配置生效方式**：Bot 启动或重启时只读取**已发布快照（Published）**；在 Web Admin“LLM 配置”页修改配置后，需点击“保存草稿”并“应用”，等待配置任务完成及 Bot 确认实际加载版本。修改模型价格等无关字段时不会断开现有的 MCP 连接；若修改了 MCP 配置，其连接状态会独立回报。
+  - **手动命令重载与探活**：在群内发送 `/llm reload` 会重新加载已发布配置及相关独立资产，并向当前模型发起一次探活请求（可能按渠道计费）。此外，Bot 每 30 秒会自动检查一次 `awakening.toml` 的文件修改时间并自动热重载。
 
-- 改动了 `pyproject.toml`、`requirements.txt`、`Dockerfile` 或 `src/` 下新增/删除了文件时，**需重建镜像**：
+---
 
-  ```bash
-  cd /path/to/QuickQuip/prod
-  docker compose --env-file ../.env build quickquip
-  docker compose --env-file ../.env up -d quickquip web-admin
-  ```
+### Bot 与 Web 的挂载权限
 
-- 只改了 `frontend/dist`（前端静态文件）时，`docker restart quickquip-web-admin` 即可，无需重建。
+| 宿主机路径 | 容器内路径 | `web-admin` 权限 | 用途说明 |
+|---|---|---|---|
+| `../data` | `/app/data` | **读写** | 业务库、日志、Trace 库等运行期数据 |
+| `../config` | `/app/config` | **读写** | 支撑独立 TOML 在线编辑与首次迁移资产提取（注：即使同处该目录，`sensitive_words.toml` 也不通过 Web 编辑器读写） |
+| `../llm_about` | `/app/llm_about` | **读写** | 支撑后台“资料”页在线编辑群词表与身份 |
+| `${QUICKQUIP_ROOT:-..}/skills`（扁平安装即 `../skills`） | `/app/skills` | **读写** | 支撑后台“Skill”页在线安装、编辑与预置包同步落盘 |
+| `../frontend/dist` | `/app/frontend/dist` | 只读 | 前端静态构建产物 |
+| `../web_api.py` | `/app/web_api.py` | 只读 | Web 后端入口脚本 |
+| `../src` | `/app/src` | 只读 | 支撑 Hybrid 模式源码热更新 |
 
-**历史数据回灌（可选）**：`scripts/maintenance/` 随镜像分发两个数据回灌脚本——`backfill_record_identities.py` 为存量记忆、语录和留言补齐正文片段与成员引用索引（专文见 [record-identities.md](record-identities.md)）；`backfill_chat_archive.py` 把 1.15.2 之前退役的旧每日消息 / 词云 JSONL（`data/daily_msgs/`、`data/wordcloud_msgs/`）导入聊天记录归档库 `data/chat_archive.db`（导入完成后旧 JSONL 目录方可清理）。服务器容器内运行：
+> **安全边界**：与 `web-admin` 不同，`quickquip`（Bot 主容器）对文本配置目录、`llm_about` 以及共享 `skills/` 均保持**只读挂载（`:ro`）**；只有 `config/managed/` 目录是由 Bot 和 Web 共享可写的。
+
+---
+
+### 自动部署脚本会同步哪些文件？
+
+当你使用自动部署脚本发布时，以下文件会被一并同步并用于容器运行：
+- 根目录 `.env`
+- `config/` 目录下的运行配置（如 `generation.toml`、`awakening.toml`、`sensitive_words.toml`、`games.toml` 等）
+- `skills/` 目录：每次部署会将本地 `skills/` 中**新增**的 Skill **非破坏性合并**进服务器部署根目录的共享 `skills/` 中（即：服务器上已存在的同名文件不会被覆盖、本地删除不会传播到线上；已安装 Skill 的更新与删除请通过 Web Admin 管理页或在服务器上手动维护）
+- `llm_about/vocab.yaml`、`llm_about/identities.yaml` 以及群级目录 `llm_about/{群号}/vocab.yaml`、`llm_about/{群号}/identities.yaml`
+- `data/tieba/storage_state.json`（如果本地存在该文件，部署脚本会将其单独上传到云端，供贴吧功能复用本地导出的登录态）
+
+---
+
+## 代码更新与历史数据回灌
+
+### 1. Hybrid 混合模式的代码更新策略
+
+本项目容器采用 **Hybrid（构建烘焙 + 源码挂载）混合模式**：
+- **镜像构建时**：`pip install --no-deps .` 会将 `src/` 下的 `quickquip` 和 `plugins` 安装到容器内的 `site-packages` 中作为兜底（baked fallback）。
+- **容器运行时**：`docker-compose` 将宿主机的 `../src` 挂载到 `/app/src`，并通过 `PYTHONPATH=/app/src` 使其优先级高于 `site-packages`，从而支持**源码热更新**。
+
+因此，手动维护时可根据改动范围选择最快生效方式：
+
+| 你修改了什么内容？ | 需要执行的生效命令（在 `prod/` 目录下） | 是否需要重建镜像？ |
+|---|---|---|
+| **仅修改了 `src/quickquip/` 或 `src/plugins/` 下的现有 Python 代码** | `docker compose --env-file ../.env restart quickquip web-admin` | **不需要**（重启即生效） |
+| **仅重新构建了 `frontend/dist` 前端静态文件** | `docker restart quickquip-web-admin` | **不需要** |
+| **修改了 `pyproject.toml`、`requirements.txt`、`Dockerfile`，或在 `src/` 下新增/删除了文件** | `docker compose --env-file ../.env build quickquip`<br>`docker compose --env-file ../.env up -d quickquip web-admin` | **需要重建镜像** |
+
+---
+
+### 2. 历史数据回灌脚本（可选）
+
+`scripts/maintenance/` 目录下随镜像分发了两个历史数据迁移回灌脚本：
+1. `backfill_record_identities.py`：为存量的记忆、语录和留言补齐正文片段与群成员引用索引（详细说明见 [record-identities.md](record-identities.md)）。
+2. `backfill_chat_archive.py`：将 v1.15.2 之前退役的旧版每日消息 / 词云 JSONL 文件（位于 `data/daily_msgs/`、`data/wordcloud_msgs/`）导入到统一的聊天记录归档库 `data/chat_archive.db` 中（导入完成且零失败后，即可安全清理旧的 JSONL 目录；Windows 懒人包用法见 [README.md](../../README.md)）。
+
+在服务器容器内运行聊天归档回灌的命令如下：
 
 ```bash
+# 第一步：加 --dry-run 仅预览统计结果（新增、归因回填、已存在、跳过与写入失败数）
 docker compose --env-file ../.env exec -T quickquip python scripts/maintenance/backfill_chat_archive.py --dry-run
+
+# 第二步：确认预览结果符合预期后，去掉 --dry-run 正式执行（若有写入失败会返回非零退出码；确认失败数为 0 后再删除旧 JSONL）
+docker compose --env-file ../.env exec -T quickquip python scripts/maintenance/backfill_chat_archive.py
 ```
 
-`--dry-run` 仅预览；确认统计符合预期后去掉该参数正式执行。脚本统计新增、归因回填、已存在、跳过与写入失败，存在写入失败时返回非零——确认失败为零后再清理旧 JSONL。Windows 懒人包的对应说明见 [README.md](../../README.md)。
+---
 
 ## 日常维护
 
-修改根 `.env` 或 Compose 配置后，在实际 Compose 所在目录重新创建服务，使新环境变量和挂载生效。平铺生产部署执行：
+当你手动修改了根目录 `.env` 或 Compose 编排文件后，需要在实际 Compose 所在目录重新 `up -d` 创建服务，才能让新的环境变量或卷挂载进入容器（如果只是修改了 `WEB_ADMIN_PASSWORD` 后台口令，可以只更新 `web-admin` 容器）。
+
+> **提示**：如果是通过 `deploy-v4` 部署的版本目录（release）结构，在服务器手动执行以下命令前，请先按[手动访问步骤](../../scripts/deploy/README.md#manual-compose-access)导出环境变量，并将下方命令中的 `--env-file ../.env` 替换为 `--env-file "$QUICKQUIP_ENV_FILE"`。
+
+### 常用维护命令速查（平铺生产部署）
+
+先进入 `prod/`，按这次要做的事情选择一项。版本目录部署使用上面的环境变量与路径。
+
+| 任务 | 命令 |
+|---|---|
+| 修改 `.env` 或 Compose 后重新创建服务 | `docker compose --env-file ../.env up -d quickquip web-admin` |
+| 修改已挂载 Python 源码后重启 | `docker compose --env-file ../.env restart quickquip web-admin` |
+| 查看实时日志（Ctrl+C 退出查看） | `docker compose --env-file ../.env logs -f` |
+| 停止并移除容器，保留挂载的数据目录 | `docker compose --env-file ../.env down` |
+
+依赖、Dockerfile 或 pyproject 修改后，需要先构建再启动：
 
 ```bash
-docker compose --env-file ../.env up -d quickquip web-admin
-```
-
-版本目录部署先按[手动访问步骤](../../scripts/deploy/README.md#manual-compose-access)设置变量，沿用 `--env-file "$QUICKQUIP_ENV_FILE"`。使用根模板或自定义 Compose 的部署沿用启动时的 `-f` 等参数；仅改后台口令时可只更新 `web-admin`。下面的 `restart` 用于重新加载已挂载的 Python 源码。
-
-```bash
-# 更新 Python 源码后重启（hybrid 模式下无需重建）
-cd /path/to/QuickQuip/prod
-docker compose --env-file ../.env restart quickquip web-admin
-
-# 更新依赖/Dockerfile/pyproject 后重建
-cd /path/to/QuickQuip/prod
 docker compose --env-file ../.env build quickquip
 docker compose --env-file ../.env up -d quickquip web-admin
-
-# 查看日志
-docker compose --env-file ../.env logs -f
-
-# 停止
-docker compose --env-file ../.env down
 ```
 
-## 常见问题
+---
 
-### 是否需要在云端安装 Codex
+## 常见问题 (FAQ)
 
-不需要。
+### 1. 是否需要在云端服务器上安装 Codex？
+**不需要。**
+QuickQuip 直接通过模型 API 提供对话能力，并通过 MCP 协议接入外部工具服务：
+- 内置网页搜索（`search_web`）由 SearXNG 提供；
+- Tavily 等外部扩展工具通过 MCP 接入（只需在后台将 MCP 服务配置到 `settings.mcp.servers` 后保存并应用；相关 API 凭据写入根 `.env`，宿主机路径与 sidecar 容器编排在私有 `prod/` 中维护即可，详见 [MCP 集成约定](../../docs/dev/mcp-integration.md)）。
 
-QuickQuip 通过模型 API 提供对话，通过 MCP 接入外部工具服务。将 MCP 服务配置到 `settings.mcp.servers` 后保存并应用；凭据写入根 `.env`，宿主路径和 sidecar 编排在私有 `prod/` 中维护。
-
-当前项目通过 SearXNG 提供内置 `search_web` 搜索，通过 MCP 扩展接入 Tavily 等外部工具。MCP 集成的正式约定见 [docs/dev/mcp-integration.md](../../docs/dev/mcp-integration.md)。
-
-### LLBot 登录态过期
-
-换 IP 或长时间未活动后可能需要重新扫码：
+### 2. LLBot 登录态过期了怎么办？
+服务器更换 IP 或账号长时间未活动后，LLBot 可能会掉线并要求重新扫码：
 
 ```bash
 docker compose --env-file ../.env restart llbot
-docker compose --env-file ../.env logs -f llbot  # 找新的二维码
+docker compose --env-file ../.env logs -f llbot  # 在日志中查看新的登录二维码
 ```
 
-### QQ 风控/冻结
+### 3. 如何降低 QQ 账号被风控/冻结的概率？
+- 避免使用刚注册的新号，建议使用有一定正常使用历史的 QQ 号。
+- 当登录地点、服务器 IP 或设备环境发生变化后，注意观察账号状态，必要时按手机 QQ 弹窗提示完成安全验证恢复登录。
+- 避免在短时间内高频、大量地群发消息。
 
-- 新注册的 QQ 号容易被风控，建议用有一定使用历史的号
-- 登录地点、IP 或设备变化后观察账号状态，必要时按 QQ 提示恢复登录
-- 避免短时间内大量发消息
+### 4. 宿主机端口冲突怎么办？
+- 如果服务器上的协议端端口（LLBot 默认使用 `3001` / `3080`）或 Web Admin 端口（`5104`）已被其他程序占用，直接修改 `prod/docker-compose.yml` 中对应端口映射的**宿主机侧端口号**即可（`8888` 端口仅在同机自建 SearXNG 时才会用到）。
+- QuickQuip 主容器的 `8080` 端口仅用于 Docker 容器内部网络通信，不需要向宿主机外暴露。
 
-### 端口冲突
-
-如果服务器上 OneBot 协议端端口（LLBot 默认 3001/3080）或 Web Admin 的 5104 已被占用，在 `docker-compose.yml` 中修改 compose 端口映射的宿主机侧即可；8888 仅当同机自建/自跑 searxng 时才相关。QuickQuip 的 8080 端口只用于容器内部通信，不需要对外暴露。
-
-### LLM 配置不生效
-
-优先检查以下几项：
-
-- 配置库 schema 是否受支持；草稿是否已单独应用，published_revision 与 Bot loaded_revision 是否一致，心跳是否新鲜
-- `.env` 中是否填了当前所选渠道的密钥环境变量
-- `.env` 中是否填了 `QQ_ACCOUNT` 以及启用 MCP 时需要的 API key
-- 搜索服务是否运行，QuickQuip 容器内是否能访问配置里的 `SEARXNG_BASE_URL`
-- `llm_about/identities.yaml` 是否存在且格式正确；如只使用群级覆盖，也确认 `llm_about/{群号}/identities.yaml` 存在。文件缺失（INFO）、存在但为空模板（WARNING）、正常加载（`已加载 N 条身份`）在 bot 日志中均有对应记录，可据此核对身份索引是否生效
-- `docker compose --env-file ../.env logs -f quickquip` 中是否出现配置文件缺失或 API key 缺失提示
-- 如果渠道／模型修改未生效，检查原应用任务的阶段与错误，并确认 Bot 心跳；单独重启不会应用草稿。人格或词表文件修改通过 `/llm reload` 或对应独立重载入口生效。
-- `/llm reload` 会在重载后探活当前群实际生效的 provider/model；如需全量巡检，在群内执行 `/llm probe` 或在 Web Admin 诊断页点击“探活 Provider”，会对所有已配置 provider 各发一次 max_tokens=1 的真实请求，可能产生 provider 计费
+### 5. 为什么配好了 LLM 却不生效 / 群里没反应？
+请按以下清单逐一排查：
+1. **检查配置发布状态与心跳**：进入 Web Admin“LLM 配置”页，确认配置库 schema 受支持、修改后的**草稿已点击“应用到 Bot”**（注意：单纯重启容器不会应用未发布的草稿！），且顶部显示的 `published_revision`（已发布版本）与 Bot 的 `loaded_revision`（实际加载版本）一致、Bot 心跳处于新鲜状态。若应用任务卡住或报错，点开该任务查看具体报错阶段。
+2. **检查 `.env` 必填项**：确认 `.env` 中已正确填写当前渠道所需的 API Key 环境变量、`QQ_ACCOUNT`，以及已启用 MCP 服务所需的 API Key。
+3. **检查 SearXNG 连通性**：确认搜索服务正在运行，且从 `quickquip` 容器内部能够正常访问 `.env` 中配置的 `QUICKQUIP_SEARXNG_BASE_URL`。
+4. **检查群身份索引文件（`identities.yaml`）**：确认 `llm_about/identities.yaml`（或群级覆盖 `llm_about/{群号}/identities.yaml`）存在且 YAML 格式正确。你可以在 Bot 启动日志中搜索对应提示来确认加载状态：文件缺失会记录 `INFO`、文件存在但仍是空模板会记录 `WARNING`、正常加载会打印 `已加载 N 条身份`。
+5. **查看容器报错日志**：运行 `docker compose --env-file ../.env logs -f quickquip`，检查是否有配置文件缺失或 API Key 缺失的明确报错。
+6. **重载独立资产与执行模型探活**：
+   - 如果你修改的是本地人格（Persona）或词表文件，需在群内发送 `/llm reload`（或通过对应重载入口）使其生效。
+   - `/llm reload` 会在重载后自动探活当前群实际生效的 `provider/model`；如果你需要对所有渠道做全量连通性巡检，可在群内发送 `/llm probe`，或在 Web Admin 诊断页点击“**探活 Provider**”（这会对所有已配置的 provider 各发送一次 `max_tokens=1` 的真实请求，可能按渠道计费）。

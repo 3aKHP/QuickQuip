@@ -1,126 +1,231 @@
-# Skill 系统（skills/）
+# Skill 系统（`skills/`）
 
-本文面向部署者和管理员，说明 Skill 系统的部署方式与安全约束。
+本文面向部署者和管理员，说明 QuickQuip Skill 技能系统的目录部署方式、开启流程、在线管理与安全约束。
 
-Skill 是受信任的部署资产：部署者把技能包放进 `skills/` 目录，AI 在对话中按描述匹配自行激活使用。每个技能是一个子目录，内含 `SKILL.md`（frontmatter 元数据 + 指令正文）、可选的 `references/`（参考资料）和 `scripts/`（可执行脚本）。典型用途：让 AI 基于内置文档副本回答机器人用法提问、汇报部署主机健康状态。
+**什么是 Skill？**
+Skill 是受信任的部署侧扩展资产：部署者将技能包放进 `skills/` 目录后，AI 会在对话中根据每个技能的描述（`description`）自动匹配并按需激活使用。
+
+每个技能都是 `skills/` 下的一个独立子目录，典型结构如下：
+- `SKILL.md`（必选）：包含 YAML frontmatter 元数据与 Markdown 格式的 AI 指令正文。
+- `references/`（可选）：供 AI 按需查阅或检索的参考资料文档。
+- `scripts/`（可选）：供 AI 调用的 `.py` 或 `.sh` 可执行脚本。
+
+> **典型应用场景**：让 AI 基于内置的项目文档副本回答用户关于机器人用法的提问（`self-docs`），或者让 AI 执行脚本汇报部署宿主机的健康状态（`host-healthcheck`）。
+
+---
+
+先按[部署目录](#部署目录)安装一个技能包，再按[首次启用](#首次启用-skill-的-4-步操作)打开工具调用并验证。日常更新、导入和删除可直接使用[Web 管理页](#web-管理与导入)；需要在服务器操作时，使用[预置同步脚本](#版本对齐漂移检测与同步)。
 
 ## 部署目录
 
-先确认 Bot 正在运行且已有正常 AI 对话，并能登录 Web 管理后台。在“LLM 工坊 → LLM 配置 → 工具与技能 → Skill 运行时”查看“Skill 目录”：留空使用 Bot 项目根的 `skills/`（已被 Git 忽略）；非空使用指定目录，相对路径按项目根解析。文件应放在运行 Bot 的机器上。
+### 1. 确认并准备 `skills/` 目录位置
 
-将需要的技能包从 `skills.example/` 复制到实际目录。下面的 Bash 命令适用于 `skills.example/` 与目标 `skills/` 同在项目根的首次安装：
+在开始前，请先确认 Bot 正在运行、已有正常的 AI 对话能力，并能登录 Web 管理后台：
+1. 进入后台 **“LLM 工坊 → LLM 配置 → 工具与技能 → Skill 运行时”**，查看 **“Skill 目录”**（`settings.skills.catalog_dir`）设置：
+   - **留空（默认）**：使用 Bot 项目根目录下的 `skills/`（该目录已被 Git 忽略）。
+   - **填写非空路径**：使用你指定的自定义目录（若填写相对路径，则相对于 Bot 项目根目录解析）。
+   - **注意**：Skill 文件必须存放在**实际运行 Bot 的那台机器（或对应挂载卷）**上。
 
-```bash
-mkdir -p skills
-cp -r skills.example/self-docs skills/
-```
+### 2. 复制预置技能包（首次安装）
 
-Windows 可在文件管理器创建目标 `skills` 文件夹，再复制整个 `self-docs` 文件夹，确认存在 `skills/self-docs/SKILL.md`。已有同名包时按下文“预置 Skill”节更新。自定义目录需替换命令目标；版本目录部署在部署根使用 `cp -r current/skills.example/self-docs skills/`，复制到共享目录。自建文本文件的保存步骤见[Skill 编写教程](../dev/skill-tutorial.md#43-第三步写-skillmd)。
+Docker 镜像与 Windows 懒人包均随附了 `skills.example/` 示例目录（其中 **Windows 懒人包**在首次运行 `start.bat` 时会自动将整个目录复制为 `skills/`）。
 
-Docker 镜像与 Windows 懒人包携带 `skills.example/`；Windows `start.bat` 首启自动复制整个目录。版本目录部署使用部署根共享 `skills/`：Bot 只读挂载，Web Admin 读写挂载，已安装内容随数据保留。每次部署合入仓库新增文件，现有文件和删除操作由 Web 管理页或服务器手动维护。目录供给见[生产模板](../../prod.example/README.md)。
+其他部署方式可将需要的预置技能包从 `skills.example/` 手动复制到实际的 `skills/` 目录（如果目标目录下已有同名包，请按后文[预置 Skill](#预置-skill)章节的方法同步更新；自建技能包的编写步骤见[Skill 编写教程](../dev/skill-tutorial.md#43-第三步写-skillmd)）：
 
-直接使用根 Compose 模板时，需同时启用 Bot 与 Web Admin 的 `skills` 卷挂载；在项目根运行 `docker compose -f docker-compose.example.yml up -d quickquip web-admin` 应用新挂载。容器内的 Skill 目录对应挂载目标，服务器上传与文件管理则操作其主机来源目录。
+- **普通源码 / 平铺目录首次安装（Bash）**：
+  ```bash
+  mkdir -p skills
+  cp -r skills.example/self-docs skills/
+  ```
+- **生产版本目录（Release 布局）部署**：
+  在服务器部署根目录下执行（从当前版本目录复制到部署根共享的 `skills/` 目录）：
+  ```bash
+  cp -r current/skills.example/self-docs skills/
+  ```
+- **Windows 手动操作**：
+  直接在文件资源管理器中创建目标 `skills` 文件夹（或自定义目录），将 `skills.example\self-docs` 整个文件夹复制进去，确认存在 `skills\self-docs\SKILL.md` 即可。
 
-目录约定：
+### 3. 容器化与生产部署的目录挂载规则
 
-- 一个子目录一个 Skill，目录名即 Skill 名；只允许小写字母、数字和连字符（`^[a-z0-9][a-z0-9-]*$`，最长 64 字符），且必须与 `SKILL.md` frontmatter 里的 `name` 一致。
-- `SKILL.md` 为 YAML frontmatter + Markdown 正文，必填 `name` 和 `description`；单文件上限 256KiB，`description` 上限 1024 字符。
-- `description` 帮助 AI 判断适用请求，应写清触发条件（例如“当用户询问机器人用法或配置时使用”）。
-- 解析或校验不通过的 Skill 会被跳过并记录告警日志，不影响同目录的其他 Skill。
+- **生产版本目录部署（`deploy-v4`）**：
+  使用部署根目录下的共享 `skills/` 目录——其中 `quickquip`（Bot 容器）以**只读**方式挂载，`web-admin`（后台容器）以**读写**方式挂载，已安装的技能会随持久化数据一直保留。每次执行自动部署时，脚本只会把代码仓库中**新增**的预置文件非破坏性地合入共享目录，而现有文件的修改与删除均交由 Web 管理页或在服务器上手动维护（详见[生产模板说明](../../prod.example/README.md)）。
+- **直接使用项目根 Compose 模板（`docker-compose.example.yml`）**：
+  需在 Compose 文件中同时启用 `quickquip` 与 `web-admin` 两个服务的 `skills` 卷挂载，并在项目根目录运行以下命令使新挂载生效（容器内的 Skill 目录对应挂载目标路径，而在宿主机上传或管理文件时则直接操作宿主机来源目录）：
+  ```bash
+  docker compose -f docker-compose.example.yml up -d quickquip web-admin
+  ```
 
 ## 配置（`settings.skills`）
 
-通过 Web Admin“LLM 配置”或配置 CLI 编辑并保存草稿，单独应用后由 Bot 接纳。资源上限与开关保存在 `config/managed/config.db`，Skill 内容继续由独立目录维护。完整流程见 [LLM 配置管理](llm-configuration.md)。
+Skill 系统的开关、目录路径与资源上限参数保存在 `config/managed/config.db` 数据库中（而具体的 Skill 文件内容则继续在独立目录中维护）。修改这些配置项后，需通过 Web Admin“LLM 配置”或配置 CLI **保存草稿并应用到 Bot** 才会生效（完整发布流程见 [LLM 配置管理](llm-configuration.md)；所有字段定义与约束见[配置参考](configuration.md#settingsskills--skill-系统)）。
 
-首次启用在“LLM 工坊 → LLM 配置 → 工具与技能”操作：
+> **热扫描提示**：如果只是在 `skills/` 目录里增删文件或修改 `SKILL.md` 内容，**不需要重启 Bot 也不需要重新应用配置**——模型在收到下一轮对话请求、构建系统提示词时会自动重新扫描目录并立即生效（若目录为空或不存在，模型会自动退回仅使用基础工具与基础提示词）。
 
-1. 切到“工具与搜索”，在“工具调用轮次与上限”开启“启用工具调用”（`settings.runtime.tool_calling_enabled`）。
-2. 切到“Skill 运行时”，开启“启用 Skill”（`settings.skills.enabled`），确认“Skill 目录”。
-3. 默认空工具名单可保持。若“工具与搜索 → 内置工具白名单与发现”已有非空“额外启用工具”且“启用方式”为“替换”（`settings.tools.enabled_mode = "replace"`），将下表四个 Skill 工具名加入现有名单，保留其他需要的工具。
-4. 点击“保存草稿”，再点击“应用到 Bot”，等待状态条显示 Bot 已加载目标版本。应用持续排队时先检查 Bot 进程是否正在运行。
+### 首次启用 Skill 的 4 步操作
 
-新建配置库的工具调用缺省关闭。工具发现设置见[工具发现配置](tool-discovery.md)。
+新建配置库默认关闭工具调用，Skill 开关默认开启。首次启用请登录 Web Admin，进入 **“LLM 工坊 → LLM 配置 → 工具与技能”**：
 
-开关、目录及资源上限的完整字段表见[配置参考](configuration.md#settingsskills--skill-系统)。保存时会校验取值并返回具体字段路径及约束。目录为空或缺失时，模型使用基础工具与提示词。
+1. **开启全局工具调用**：切换到 **“工具与搜索”** 面板，在“工具调用轮次与上限”中打开 **“启用工具调用”**（`settings.runtime.tool_calling_enabled`）。
+2. **开启 Skill 运行时**：切换到 **“Skill 运行时”** 面板，打开 **“启用 Skill”**（`settings.skills.enabled`），并确认 **“Skill 目录”** 路径正确。
+3. **检查工具白名单（按需）**：
+   - 默认情况下，工具白名单为空，保持默认即可自动获得所有 Skill 工具（详见[工具发现配置](tool-discovery.md)）。
+   - **特殊情况**：如果你之前在“工具与搜索 → 内置工具白名单与发现”中填写过非空的“额外启用工具”，且将“启用方式”设为了 **“替换”**（`settings.tools.enabled_mode = "replace"`），请务必把下方《工具面》表格中的 **4 个 Skill 工具名称**手动加入你的白名单列表中，同时保留其他需要的工具。
+4. **保存并应用**：点击页面顶部的 **“保存草稿”**，再点击 **“应用到 Bot”**，等待顶部状态条显示 Bot 已加载目标版本（若任务一直排队，请先检查 Bot 进程是否正在运行）。
 
-文件增删和内容更新在模型下一轮请求构建提示词时重新扫描并生效。LLM 配置中的开关、目录和资源参数通过保存草稿、应用生效。部署侧文件管理与在线入口见下文“Web 管理与导入”。
+### 在群内验证 Skill 是否生效
 
-群内 `/skill list` 可查看已安装 Skill 与当前会话已激活项（只读）；与当前版本预置副本分叉的条目会附带更新提示（见“预置 Skill”节）。安装 `self-docs` 后发送 `/ai 你的 /quote 命令怎么用？`，再看激活项是否出现 `self-docs`。名单总数取决于已有安装内容；验证时核对目标名称与激活结果。`/ai` 是默认前缀，已有自定义配置时使用对应前缀。
+1. 在已开启 AI 的群内发送 `/skill list`（只读命令）：可以查看当前已安装的 Skill 总数及列表，以及当前会话已经激活过的 Skill（如果某个预置 Skill 与当前代码版本自带的副本存在差异，条目旁还会附带更新提示，详见下文[预置 Skill](#预置-skill)）。
+2. 如果你安装了 `self-docs`，可在群内发送：
+   ```text
+   /ai 你的 /quote 命令怎么用？
+   ```
+   （注：`/ai` 为默认触发前缀，若群内自定义过前缀请使用实际前缀。）
+3. 收到回答后，再次发送 `/skill list`，核对“当前会话已激活项”中是否出现了 `self-docs`。
 
-## 工具面
-
-清单、激活与按需读取的设计依据见 [ADR-0015](../dev/adr/0015-progressive-skill-loading.md)。
-
-启用后，系统提示包含已安装 Skill 的名称和描述清单，AI 据此决定何时激活；激活后 `SKILL.md` 正文才进入对话。四个工具：
-
-| 工具 | 行为 |
-|------|------|
-| `activate_skill` | 激活一个已安装 Skill，注入其指令正文；同会话重复激活自动去重 |
-| `read_skill_resource` | 读取已激活 Skill 目录内的单个文件（需先激活），支持按行段分块读取 |
-| `search_skill_resources` | 在已激活 Skill 目录内按关键词或正则检索文本（需先激活） |
-| `run_skill_script` | 执行已激活 Skill `scripts/` 下的 `.py` / `.sh` 脚本（需先激活） |
-
-脚本按扩展名选择解释器：`.py` 优先使用 PATH 中的 `python3`，找不到时使用运行 Bot 的 Python；`.sh` 使用 PATH 中的 `sh`。解释器直接读取脚本，执行位与 shebang 不影响选择。Windows 主机优先使用 `.py`；需要 `.sh` 时须先在 Bot 环境提供 `sh`，缺失会返回错误。
-
-## 安全模型
-
-资产信任与脚本执行的设计依据见 [ADR-0016](../dev/adr/0016-trusted-skill-execution.md)。
-
-Skill 源由部署者严格把控——只放置审阅过的 Skill：其指令正文会进入对话上下文，脚本会在部署主机上执行。运行时按以下规则读取资源和执行脚本：
-
-- **内容维护**：技能包由部署者通过文件操作或 Web Admin 管理页维护，AI 工具负责激活、读取、检索和执行随包脚本。
-- **路径加固**：读取、检索、执行都限制在对应 Skill 目录内，拒绝 `..` 穿越、绝对路径与符号链接逃逸。
-- **脚本环境**：按脚本类型启动解释器，参数逐项传递；工作目录为该 Skill 目录。子进程只继承 `PATH`／`LANG`／`TZ`，Bot 进程环境中的凭据不会传给脚本。
-- **执行前复验**：脚本执行前做 SHA-256 快照比对，目录扫描之后内容有变化即拒绝执行。
-- **资源上限**：超时与输出上限见配置参考；目录内检索不起子进程，另有单次匹配 1s 引擎超时与单次调用 4s 墙钟预算兜底（复杂正则可能占用数秒）；含嵌套量词或交叠分支的量化组、相邻可空量化原子链等病态正则形态会被静态检查拒绝（防灾难性回溯），被拒绝的模式可改用字面搜索或改写；scripts/ 单文件超 256KiB 不编入清单、不可执行。
-- **统一合规扫描**：Skill 相关的全部工具产出（清单描述、激活正文、资源内容、检索结果、脚本输出）与 `search_web` 等外部工具结果走同一敏感词扫描流程，见 [sensitive-filter.md](sensitive-filter.md)；`description` 命中拦截词的 Skill 会被从清单剔除并记录告警日志，不进入系统提示与激活面。
-
-### 禁止把 `run_skill_script` 当通用 shell
-
-`run_skill_script` 只用于执行 Skill 自带、服务于该 Skill 用途的脚本。编写 `SKILL.md` 时不要指引 AI 借脚本执行 grep/find 等通用命令来绕过检索工具——`search_skill_resources` 已覆盖 Skill 目录内检索。运维侧审查第三方 Skill 时，同样应拒绝包含此类指引的 Skill。
-
-## 预置 Skill
-
-可选副本、漂移检测与显式同步的选择依据见 [ADR-0017](../dev/adr/0017-preset-skill-distribution.md)。
-
-`skills.example/` 随附两个官方 Skill：
-
-- `self-docs`：内置公开文档副本（用户手册、管理手册、配置参考、项目治理与协作约定等；同步源名单见 `scripts/ci/sync_self_docs_references.py`），AI 被问到机器人用法、命令、配置或项目协作约定时激活检索后作答。
-- `host-healthcheck`：汇报部署主机健康状态，默认采集容器内可见的宿主机指标与容器自身限额，零配置可用。可选的宿主机 cron 采集器与 compose 只读挂载增强见 `prod.example/` 模板注释。
-
-### 版本对齐：漂移检测与同步
-
-预置 Skill 经复制到达 `skills/`；QuickQuip 版本升级会更新 `skills.example/`，已复制的本地副本不会随之自动更新。可通过以下入口查看差异并同步：
-
-- **运行时漂移检测（只读）**：bot 每次扫描 Skill 目录时，对 `skills/` 与 `skills.example/` 中的同名 Skill 做全文件字节级指纹比对。分叉时记录 WARNING 日志（分叉名单变化才记录，同状态只记录一次；回归一致时记 INFO），`/skill list` 在对应条目标注“与当前版本预置不同，可运行 scripts/maintenance/sync_preset_skills.py 更新”。检测结果只进日志与命令回复，不进入 catalog 块、系统提示与任何模型注入面，也不占用 catalog 预算。`skills.example/` 缺失时（pip 安装形态）检测自动跳过。
-- **同步脚本**：`python scripts/maintenance/sync_preset_skills.py`（或 `--check`）报告每个预置 Skill 的四态——`current`（与预置副本一致）、`diverged`（已安装但不同）、`missing`（未安装）、`conflict`（存在同名非目录项或符号链接，需人工处理）；发现冲突时退出码为 2，人工处理后重试。`--apply` 安装缺失项并把分叉项覆盖为预置副本，原副本整体备份为 `skills/.preset-backups/<name>.preset-backup-<时间戳>`（备份容器自身无 SKILL.md，运行时扫描不感知；备份保存原有定制，确认后自行清理）。脚本只依赖 Python 标准库，Docker / Linux 裸机 / Windows 形态通用；bot 每轮现扫 `skills/`，下一轮请求读取同步后的文件，无需重启。
-- **部署入口**：`scripts/deploy/deploy-v4.sh` / `deploy-v4.ps1` 在 deploy、dry-run 与 migrate 时自动执行一次 `--check` 报告并给出同步命令（best-effort，不阻断部署）；源码形态部署在版本升级后按 Release notes 的“预置 Skill 变动”小节指引手动执行同步（该小节是 release PR 模板的固定检查项）。
-- **Web 管理面**：Web Admin“Skill”页顶面板按同一判定语义展示各预置 Skill 状态，支持勾选同步与一键同步全部待处理，覆盖分叉项前同样自动备份至 `skills/.preset-backups/`；详见“Web 管理与导入”。
+---
 
 ## Web 管理与导入
 
-Web Admin 导航“LLM 工坊”区的“Skill”页（`/ops/#/skills`）提供 Skill 目录的在线管理面，作用目录与 `settings.skills.catalog_dir` 的生效目录一致。所有写入直接落盘：运行时下次构建系统提示即重新扫描目录，下一轮请求读取更新后的文件，无需重启。容器化部署下写入落在部署根共享 `skills/`（web-admin 容器读写挂载），容器重建与版本部署后仍然保留；部署流程只向共享目录合入仓库新增的 Skill，不覆盖也不删除已有内容。全部写操作（新建、编辑、删除、预置同步、安装）记入审计日志（`data/audit.db`，Web Admin 审计页可见）。
+Web Admin 后台左侧导航 **“LLM 工坊 → Skill”**（路径 `/ops/#/skills`）提供了完整的在线可视化管理界面，直接操作 `settings.skills.catalog_dir` 当前生效的目录：
 
-### 管理与在线编辑
+- **直接落盘、即时生效**：所有页面操作直接写入磁盘文件；Bot 在下一轮请求构建系统提示词时会自动重扫目录读取最新内容，**无需重启服务**。
+- **容器持久化与审计**：在容器化部署下，写入直接落在部署根目录的共享 `skills/` 中（`web-admin` 具有读写权限），即使重建容器或发布新版本代码也依然保留。所有写操作（新建、编辑、删除、预置同步、安装导入）均会完整记录到 `data/audit.db` 审计日志中（可在后台“审计”页查阅）。
 
-- 列表覆盖目录内全部 Skill：解析或校验不通过、被运行时扫描静默跳过的坏项同样列出并附诊断（缺 `SKILL.md`、非 UTF-8、frontmatter 校验失败等）；与预置副本一致/已偏离的条目附预置态标注，含 `scripts/` 的条目附“含脚本”标注。
-- 详情页展示 frontmatter metadata、资源清单（路径、类型、大小）与诊断；`SKILL.md`、`references/`、`scripts/` 等文本资源可在线编辑或删除（`SKILL.md` 不可删，保存时按运行时同一 parser 校验），单文件读写上限 256KiB。
-- 新建 Skill 校验目录名规范（`^[a-z0-9][a-z0-9-]*$`，≤64 字符）并生成 frontmatter 骨架；删除 Skill 移除整个目录，不可恢复。
+### 1. 在线浏览、诊断与文件编辑
+- **全量列表与坏项诊断**：列表会展示目录下的**所有**子目录——哪怕某个 Skill 因为缺少 `SKILL.md`、文件非 UTF-8 编码或 frontmatter 语法错误而被运行时静默跳过，页面上也会把它列出来并附上具体的错误诊断原因。同时，条目旁会清晰标注“与预置一致 / 已偏离”以及是否“**含脚本**”。
+- **在线编辑文本资源**：点进详情页可查看 frontmatter 元数据、文件清单（路径、类型、大小）与诊断信息；可直接在线编辑或删除 `SKILL.md`、`references/`、`scripts/` 下的文本文件（其中 `SKILL.md` 主文件不可删除，保存时会调用与运行时完全相同的解析器做实时校验；单文件在线读写上限为 **256 KiB**）。
+- **新建与删除 Skill**：点击新建时会自动校验目录名规范（`^[a-z0-9][a-z0-9-]*$`，≤ 64 字符）并生成标准的 frontmatter 模板骨架；点击删除则会彻底移除整个 Skill 子目录（不可恢复）。
 
-### 预置同步（页面内）
+### 2. 页面内预置同步
+页面顶部的 **“预置同步”** 面板与命令行 `sync_preset_skills.py` 采用完全一致的判定逻辑，逐项列出 `current` / `diverged` / `missing` / `conflict` 状态（你自己创建的非预置本地 Skill 会单独分组显示）。
+你可以勾选特定项点击 **“同步所选”**，或直接点击 **“一键同步全部待处理”**——覆盖 `diverged` 项之前，系统同样会自动将旧副本备份至 `skills/.preset-backups/`。
 
-页顶“预置同步”面板与 `scripts/maintenance/sync_preset_skills.py` 同一判定语义，逐项报告 `current`（已安装，与预置副本一致）/ `diverged`（已安装，与预置副本不同）/ `missing`（未安装）/ `conflict`（存在同名非目录项，需人工处理）；仅本地（非预置）的 Skill 单独列出。勾选后“同步所选”，或“一键同步全部待处理”；`diverged` 项覆盖前旧副本整体备份至 `skills/.preset-backups/`，确认本地定制无丢失后自行清理。
+### 3. 导入与安装第三方 Skill（支持三种来源）
 
-### 安装第三方 Skill
+后台支持通过 **本地 `.zip` 压缩包（≤ 16 MiB）**、**本地文件夹（整目录上传）** 或 **GitHub 仓库链接** 安装第三方 Skill：
 
-三种来源：本地 `.zip` 压缩包（≤16MiB）、本地文件夹（整目录上传）、GitHub 仓库链接。包内每个含 `SKILL.md` 的目录都会成为一个候选；安装以 frontmatter `name` 为目录名，压缩包内的原始目录名不参与校验。与现有 Skill 同名时须显式勾选覆盖安装，旧副本自动备份至 `skills/.preset-backups/`。
+- **识别与命名规则**：导入包内每一个包含 `SKILL.md` 的目录都会被识别为一个候选 Skill；安装落地时**一律以 `SKILL.md` frontmatter 中的 `name` 字段作为最终目录名**（压缩包内的原始文件夹名不参与校验）。如果与现有已安装的 Skill 同名，必须显式勾选“允许覆盖”才能安装，且旧副本会自动备份到 `skills/.preset-backups/`。
+- **两阶段“检查 → 确认”安全交互**：
+  1. **第一阶段（只读检查）**：上传或拉取后不会直接写盘，而是先使用运行时同款解析器（基于 Agent Skills 开放标准可移植核心）生成一份**候选检查报告**——展示 `description`、文件数量与总体积、解析诊断结果，并重点检查**是否携带 `scripts/` 可执行脚本**（若包含脚本，界面会以**红色高危警示**列出所有脚本文件清单）。
+  2. **第二阶段（确认写入）**：检查载荷在服务端临时暂存 **30 分钟**（超时需重新发起检查）；只有当你审阅无误并点击确认后，文件才会真正写入 `skills/` 目录并立即可被运行时装载。
 
-安装是两阶段“检查 → 确认”交互：检查阶段只读产出候选报告——`description`、文件数与体积、解析诊断、是否携带 `scripts/` 可执行脚本（含脚本时红色警示并列出脚本清单）；确认后才写入目录。检查载荷在服务端暂存 30 分钟，超时需重新检查。候选验收与运行时扫描共用同一 parser（Agent Skills 开放标准的可移植核心），通过检查的 Skill 安装后即可被运行时装载。
+#### 导入体积限制与 GitHub 链接规范
 
-导入大小限制：zip 条目 ≤500、单文件 ≤1MiB、解压总量 ≤32MiB；拒绝符号链接与绝对路径条目。
+| 限制维度 | 具体规则说明 |
+|---|---|
+| **通用解压与安全限制** | 压缩包内总条目数 **≤ 500**、单个文件 **≤ 1 MiB**、解压后总体积 **≤ 32 MiB**；严禁包含符号链接（Symlink）或绝对路径条目。 |
+| **GitHub 下载要求** | 后端通过 `codeload.github.com` 下载仓库 zip 包（仅支持**公开仓库**，下载体积硬上限 **32 MiB**、超时时间 **20 秒**，要求部署宿主机能访问 `github.com` 与 `codeload.github.com`）。 |
+| **支持的 GitHub URL 格式** | 仅支持以下 3 种格式（**不支持** `/blob/` 单文件链接）：<br>1. 仓库根：`https://github.com/<owner>/<repo>`<br>2. 指定分支/Tag：`https://github.com/<owner>/<repo>/tree/<ref>`<br>3. 指定子目录：`https://github.com/<owner>/<repo>/tree/<ref>/<子目录>` |
+| **多 Skill 仓库（Monorepo）必看** | 如果目标 GitHub 仓库是一个包含很多 Skill 的合集仓库（Monorepo），**请务必复制第 3 种 `/tree/<ref>/<子目录>` 链接来精确定位单个 Skill**！如果直接填整个仓库的根链接，系统会把整个仓库的所有无关文件一并计入上述“500 条目 / 32 MiB”限制，极易触发超限拦截。 |
 
-GitHub 导入经 `codeload.github.com` 下载仓库 zip：仅支持公开仓库，下载硬上限 32MiB、超时 20s，部署主机需可访问 `github.com` / `codeload.github.com`。接受 `https://github.com/<owner>/<repo>`、`…/tree/<ref>` 与 `…/tree/<ref>/<子目录>` 三种链接；多 Skill 仓库（monorepo）必须用 `/tree/` 子目录链接定位单个 Skill——按整仓摄取会把仓库其余部分一并计入大小限制，容易触发条目数/体积上限；`/blob/` 单文件链接不受支持。
+### 4. Web 管理面的安全边界提醒
 
-### Web 管理面的安全边界
+**任何持有有效 Web Admin 登录会话的管理员，都可以编辑和导入 Skill（含可执行脚本）。**
+由于随包脚本会以 Bot 进程权限在部署主机上真实运行（工具入口执行路径与哈希检查，并限制继承环境、执行时间及输出大小），页面在列表标签、编辑页横幅和安装检查报告中均会对“含脚本”项给出醒目提示。**部署者在点击确认安装第三方 Skill 之前，请务必逐个文件审阅其指令与脚本内容。**
+## 预置 Skill
 
-持有 Web 管理会话的人可以写入和导入 Skill。页面在含脚本标注、编辑横幅和安装报告中列出可执行内容，部署者须在确认安装前逐文件审阅。脚本以 Bot 进程权限在部署主机执行；上文的环境变量限制、路径检查和资源上限同样适用于在线安装与编辑的 Skill。
+关于预置 Skill 采用“可选副本、漂移检测与显式同步”的设计依据，详见 [ADR-0017](../dev/adr/0017-preset-skill-distribution.md)。
+
+仓库的 `skills.example/` 目录随附了两个官方预置 Skill：
+
+| 预置 Skill 名称 | 用途说明 |
+|---|---|
+| **`self-docs`** | 内置项目公开文档副本（涵盖用户手册、管理手册、配置参考、项目治理与协作约定等；同步源清单定义在 `scripts/ci/sync_self_docs_references.py` 中）。当群友向 AI 询问机器人用法、命令、配置或项目协作约定时，AI 会自动激活并检索文档作答。 |
+| **`host-healthcheck`** | 汇报部署主机健康状态。默认零配置开箱即用，直接采集容器内可见的宿主机指标与容器自身资源限额；如需启用可选的宿主机 cron 采集器与 Compose 只读挂载增强，请参考 `prod.example/` 模板中的注释说明。 |
+
+---
+
+### 版本对齐：漂移检测与同步
+
+由于预置 Skill 是通过复制放入 `skills/` 目录的，当 QuickQuip 升级版本并更新了 `skills.example/` 后，你已经复制在 `skills/` 里的本地副本**不会**被自动静默覆盖。系统提供了完善的漂移检测与显式同步机制：
+
+#### 1. 运行时只读漂移检测
+- Bot 每次扫描 `skills/` 目录时，会自动将已安装的 Skill 与 `skills.example/` 中的同名预置包做**全文件字节级指纹比对**（注：如果是无 `skills.example/` 的纯 pip 安装形态，该检测会自动跳过）。
+- **当检测到不一致（分叉 `diverged`）时**：
+  - Bot 日志会打印一条 `WARNING`（仅在分叉名单发生变化时记录一次，不会刷屏；当同步回一致状态时则会记录一条 `INFO`）。
+  - 群内执行 `/skill list` 时，对应条目旁会标注：*“与当前版本预置不同，可运行 scripts/maintenance/sync_preset_skills.py 更新”*。
+  - **结果展示位置**：漂移检测结果展示在日志和 `/skill list` 回复中，不加入模型的 Skill 清单与系统提示，也不占用清单预算。
+
+#### 2. 命令行同步脚本（`sync_preset_skills.py`）
+该脚本仅依赖 Python 标准库，在 Docker、Linux 裸机和 Windows 环境下均可直接运行：
+
+```bash
+# 仅检查各预置 Skill 的状态（不修改文件）
+python scripts/maintenance/sync_preset_skills.py --check
+
+# 执行同步：自动安装未安装的预置包，并将有差异的分叉包更新为最新预置副本
+python scripts/maintenance/sync_preset_skills.py --apply
+```
+
+- **四种检测状态说明**：
+  - `current`：已安装，且与当前版本预置副本完全一致。
+  - `diverged`：已安装，但内容与当前版本预置副本不同。
+  - `missing`：尚未安装到 `skills/` 目录。
+  - `conflict`：`skills/` 下存在同名的非目录文件或符号链接（遇到 `conflict` 时脚本退出码为 `2`，需人工清理后再重试）。
+- **自动备份防丢数据**：执行 `--apply` 覆盖 `diverged` 项之前，脚本会自动把你原有的旧目录整体备份到 `skills/.preset-backups/<name>.preset-backup-<时间戳>`（该备份容器目录本身不含顶层 `SKILL.md`，因此运行时扫描会自动忽略它；等你确认原有的本地定制无需保留后，可自行删除备份）。同步完成后无需重启 Bot，下一轮对话请求即自动读取新文件。
+
+#### 3. 自动部署提示与 Web 在线同步
+- **`deploy-v4` 自动检查**：运行 `scripts/deploy/deploy-v4.sh`（或 `.ps1`）执行 `deploy`、`dry-run` 或 `migrate` 时，会自动顺带运行一次 `--check` 并在终端打印状态报告与同步命令提示（Best-effort 模式，不会阻断部署）；如果是源码部署，升级后请留意 Release Notes 中的“预置 Skill 变动”小节指引。
+- **Web Admin 一键同步**：也可以在 Web Admin 的 **“Skill”** 页面顶部面板即可可视化勾选或一键同步所有预置 Skill（见下文）。
+
+---
+
+## 工具面
+
+Skill 系统采用**渐进式加载设计**（设计依据见 [ADR-0015](../dev/adr/0015-progressive-skill-loading.md)）：
+启用后，系统提示词（System Prompt）中最初**只注入已安装 Skill 的名称（`name`）与简短描述（`description`）清单**；只有当 AI 判断需要用到某个 Skill 并主动调用 `activate_skill` 后，该技能完整的 `SKILL.md` 指令正文才会进入对话上下文，且后续的读取、检索和脚本执行工具都**要求目标 Skill 处于已激活状态**。
+
+| 工具名称 | 功能与行为说明 |
+|---|---|
+| `activate_skill` | **激活技能**：激活一个已安装的 Skill 并向对话注入其 `SKILL.md` 指令正文（同一会话内重复激活会自动去重）。 |
+| `read_skill_resource` | **读取资源文件**：读取**已激活** Skill 目录内的单个文本文件，支持按行号区间分块读取。 |
+| `search_skill_resources` | **检索目录内容**：在**已激活** Skill 目录内按关键词或正则表达式搜索文本内容。 |
+| `run_skill_script` | **执行随包脚本**：执行**已激活** Skill 的 `scripts/` 子目录下的 `.py` 或 `.sh` 脚本。 |
+
+> **脚本解释器选择规则**：
+> `run_skill_script` 严格根据**文件扩展名**选择解释器（脚本文件自身的执行权限位 `chmod +x` 与首行 `#!` shebang 均不影响选择，解释器会直接读取脚本文件）：
+> - **`.py` 脚本**：优先使用系统 `PATH` 中的 `python3`；若找不到，则回退使用当前运行 Bot 的 Python 解释器。
+> - **`.sh` 脚本**：使用系统 `PATH` 中的 `sh`。
+> - **Windows 平台建议**：在 Windows 主机上建议优先编写 `.py` 脚本；如果确实需要运行 `.sh` 脚本，必须先在运行 Bot 的系统环境中提供可用的 `sh`，否则调用时会返回错误。
+
+---
+
+## 安全模型
+
+Skill 的资产信任边界与脚本执行约束见 [ADR-0016](../dev/adr/0016-trusted-skill-execution.md)。
+
+**核心原则**：Skill 的来源由部署者严格把控——**请只放置经过你审阅的 Skill**（因为它的指令正文会进入 AI 上下文，且随包脚本会在部署宿主机上真实运行）。运行时采用以下检查与执行约束：
+
+1. **文件维护与工具入口**：部署者通过宿主机文件操作或 Web Admin 管理页维护技能包；AI 工具提供激活、读取、检索和执行随包脚本的入口。
+2. **资源路径检查与脚本权限**：读取、检索工具及被调用脚本的路径须位于对应 Skill 目录内，入口会拒绝路径穿越、绝对路径与符号链接逃逸。脚本启动后以 Bot 进程权限运行，可读写的文件与可访问的网络由实际部署权限决定；工作目录设置不提供文件系统沙箱隔离。
+3. **脚本环境变量白名单**：执行脚本时，工作目录（cwd）固定为该 Skill 子目录，参数以数组形式逐项传递，不经 Shell 解释。**脚本子进程仅继承 `PATH`、`LANG`、`TZ` 三个环境变量**；脚本仍可读取其进程权限允许访问的文件，审阅时需核对文件访问和外部请求。
+4. **执行前 SHA-256 防篡改复验**：在真正启动脚本前，系统会对脚本文件做 SHA-256 哈希快照比对；如果发现自上次目录扫描以来脚本内容发生过任何变化，将立即拒绝执行。
+5. **进程与正则资源硬上限**：
+   - 脚本单文件体积超过 **256 KiB** 的不会被编入清单，也不可执行；脚本执行耗时与输出长度受配置上限严格约束。
+   - 目录内文本检索（`search_skill_resources`）在进程内直接完成（不拉起外部子进程），并设有**单次正则匹配 1 秒引擎超时 + 单次工具调用 4 秒墙钟总预算**兜底。
+   - **防灾难性回溯（ReDoS）静态检查**：包含嵌套量词、交叠分支的量化组、或相邻可空量化原子链等病态正则表达式会被静态检查直接拒绝（被拒绝时 AI 可改用字面量搜索或简化正则）。
+6. **全链路敏感词合规扫描**：Skill 产生的所有输出（包括清单描述、激活注入的正文、读取的文件内容、检索结果以及脚本标准输出）都会与 `search_web` 等外部工具一样，统一经过[敏感词过滤器](sensitive-filter.md)扫描。如果某个 Skill 的 `description` 本身命中了拦截词，该 Skill 会在扫描阶段直接被从清单中剔除并记录告警日志，不会进入系统提示词或激活面。
+
+### 禁止把 `run_skill_script` 当作通用 Shell 使用
+
+`run_skill_script` **仅限于执行 Skill 自带的、专门服务于该技能特定业务逻辑的脚本**。
+- **编写规范**：在编写 `SKILL.md` 时，严禁诱导或指示 AI 借用脚本去跑 `grep`、`find` 等通用系统命令来绕过内置检索工具（目录内检索已被 `search_skill_resources` 完整覆盖）。
+- **运维审计**：管理员在审查或导入第三方 Skill 时，如果发现其包含此类将脚本作为通用 Shell 后门的指令，应直接拒绝安装。
+
+---
+
+
+## 编写与检查技能包
+
+<a id="4-skill-目录与文件编写规范"></a>
+
+### Skill 目录与文件规范
+
+| 规范项 | 具体约束要求 |
+|---|---|
+| **目录命名（即 Skill 名称）** | 一个子目录代表一个 Skill，**子目录名就是 Skill 名**。仅允许小写字母、数字和连字符（正则：`^[a-z0-9][a-z0-9-]*$`，最长 **64 字符**），且必须与 `SKILL.md` frontmatter 中的 `name` 字段完全一致。 |
+| **`SKILL.md` 格式与大小** | 必须采用 `YAML frontmatter + Markdown 正文` 结构；frontmatter 中**必填 `name` 和 `description`**。`SKILL.md` 单文件体积上限为 **256 KiB**，`description` 长度上限为 **1024 字符**。 |
+| **`description` 编写技巧** | `description` 帮助 AI 判断何时激活该技能，因此请明确写出**触发条件**（例如：*“当用户询问机器人用法或配置时使用”*）。 |
+| **异常容错机制** | 如果某个子目录解析或校验不通过，运行时会跳过该 Skill 并打印告警日志，**不会影响**同目录下其他正常 Skill 的加载。 |
+
+---

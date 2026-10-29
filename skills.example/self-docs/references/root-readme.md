@@ -175,6 +175,8 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 ### Windows 懒人包
 
+**从 1.16.3 升级到 1.16.4**：本版需要停服迁移配置与运行存储。先停止旧 Bot/Web 并备份，将配置和数据放入新版包后，在包目录执行 `python\python.exe -m quickquip.llm.config_cli migrate-storage --services-stopped`，再运行 `start.bat`。各部署方式的完整步骤与回退见[存储迁移](docs/admin/storage-migration.md)。
+
 Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 前端和 Playwright Chromium。解压后运行 `start.bat`，首次运行会从示例文件生成 `.env`、常用 `config/*.toml`、`config/personas/` 与资料文件并暂停，LLM 数据库由初始化／迁移流程创建；请至少在 `.env` 中填写 `WEB_ADMIN_PASSWORD`、OneBot 连接配置和需要的 API key，再次运行 `start.bat` 启动。
 
 保持启动窗口运行，浏览器打开 `http://127.0.0.1:5104/ops/`，输入刚设置的管理口令。启用 AI 对话时接着按[首次启用 LLM](docs/admin/llm-configuration.md#首次启用-llm)操作。懒人包中的 Python 命令使用解压目录内的 `python\python.exe`。

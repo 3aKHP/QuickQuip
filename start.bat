@@ -41,6 +41,10 @@ echo Initializing LLM configuration database...
 "%_PYTHON%" -m quickquip.llm.config_cli init
 if errorlevel 1 (
     echo Configuration initialization failed. Review the error above before restarting.
+    echo For migration_required: stop Bot and Web Admin, back up .env, config and data,
+    echo then run this command from the package directory:
+    echo "%_PYTHON%" -m quickquip.llm.config_cli migrate-storage --services-stopped
+    echo Keep the reported backup directory for rollback, then run start.bat again.
     pause
     exit /b 1
 )

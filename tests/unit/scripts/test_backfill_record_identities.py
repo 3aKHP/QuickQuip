@@ -92,7 +92,7 @@ def test_backfill_shipped_and_standalone_help(tmp_path):
             for line in (root / dockerfile).read_text().splitlines()
         )
     assert script in (root / "scripts/deploy/deploy-manifest.txt").read_text().splitlines()
-    workflow = (root / ".github/workflows/release.yml").read_text()
+    workflow = (root / ".github/workflows/_release-artifacts.yml").read_text()
     windows_script = script.replace("/", "\\")
     assert windows_script + " --help" in workflow
     assert any(
