@@ -43,6 +43,7 @@ BUDGET_EXCEEDED_REPLY = (
 )
 
 _EMPTY_IMAGE_PROMPT = "请描述这张图片，并优先回答群友最可能想知道的内容。"
+_EMPTY_QUOTED_TEXT_PROMPT = "请回应这条引用消息，并优先回答群友最可能想知道的内容。"
 
 
 def reply_result(
@@ -146,7 +147,7 @@ def normalize_turn_input(
     *,
     max_prompt_chars: int,
 ) -> NormalizedTurnInput:
-    """入口输入的规范化（strip / 语音并入 / 纯图默认问句 / 截断派生）。"""
+    """入口输入的规范化（strip / 语音并入 / 纯图与纯文字引用默认问句 / 截断派生）。"""
     prompt = request.prompt.strip()
     normalized_raw_user_text = (
         None if request.raw_user_text is None else request.raw_user_text.strip()
@@ -168,6 +169,15 @@ def normalize_turn_input(
         and not forward_image_urls
     ):
         prompt = _EMPTY_IMAGE_PROMPT
+    elif (
+        not prompt
+        and quoted_text
+        and not image_urls
+        and not quoted_image_urls
+        and not forward_text
+        and not forward_image_urls
+    ):
+        prompt = _EMPTY_QUOTED_TEXT_PROMPT
     stored_prompt = (
         normalized_raw_user_text if normalized_raw_user_text is not None else prompt
     )[:max_prompt_chars]
