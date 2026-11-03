@@ -106,6 +106,7 @@ Web Admin 使用 **`YYYY-MM-DD HH:mm (备注)`** 的格式标记每一个配置�
 
 - **渠道级固定属性**：渠道 ID、协议类型、Base URL、认证环境变量、自定义 Header、备用地址（Fallback URLs）和网络代理，固定在**渠道（Provider）层级**维护。
 - **模型级可覆盖参数**：超时时间、温度（Temperature）、最大输出 Token、流式开关（Stream）、User-Agent、提示词缓存、原生搜索开关、Responses Profile、思考档位（Reasoning Effort）、重试次数、纪元与思考预算等，均支持在单个模型上进行覆盖。
+- **Gemini 空回复补正**：在“渠道与模型 → 生成”配置，默认关闭；开关和补正输出额度上限均支持模型覆盖。触发条件、费用与额度规则见[配置参考](configuration.md#gemini-空回复补正)。
 - **最终生效值的五层优先级（从高到低）**：
   ```text
   1. 单次调用或会话级覆盖 (Highest)

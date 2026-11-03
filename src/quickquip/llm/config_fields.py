@@ -56,6 +56,7 @@ RANGES = {
     "timeout_seconds": (0.01, None),
     "temperature": (0, 2),
     "max_output_tokens": (1, None),
+    "gemini_empty_response_recovery_max_output_tokens": (1, 1_048_576),
     "retry_max_attempts": (0, 20),
     "retry_base_delay": (0, None),
     "retry_jitter": (0, 1),

@@ -87,12 +87,36 @@ def test_null_inherits_and_sources_remain_unexpanded(tmp_path, monkeypatch):
     assert "private-sentinel" not in json.dumps(effective)
 
 
+def test_gemini_empty_response_recovery_defaults_and_model_overrides(tmp_path):
+    doc = document()
+    provider = doc["providers"][0]
+    provider["protocol"] = "gemini"
+    config = compile_document(doc, tmp_path)
+    assert resolve_model_provider(config, "p", "org/model").gemini_empty_response_recovery is False
+    provider["parameters"].update(
+        gemini_empty_response_recovery=True,
+        gemini_empty_response_recovery_max_output_tokens=32768,
+    )
+    model = provider["models"][0]["parameters"]
+    model["gemini_empty_response_recovery"] = False
+    config = compile_document(validate_document(doc), tmp_path)
+    resolved = resolve_model_provider(config, "p", "org/model")
+    assert resolved.gemini_empty_response_recovery is False
+    assert resolved.gemini_empty_response_recovery_max_output_tokens == 32768
+    model["gemini_empty_response_recovery"] = None
+    config = compile_document(validate_document(doc), tmp_path)
+    assert resolve_model_provider(config, "p", "org/model").gemini_empty_response_recovery is True
+
+
 @pytest.mark.parametrize(
     "key,value",
     [
         ("temperature", -0.1),
         ("stream_enabled", "false"),
         ("max_output_tokens", 0),
+        ("gemini_empty_response_recovery", "true"),
+        ("gemini_empty_response_recovery_max_output_tokens", 0),
+        ("gemini_empty_response_recovery_max_output_tokens", 1_048_577),
         ("retry_jitter", 2),
         ("agent_replay_loop_tokens", 511),
         ("timeout_seconds", 0),
