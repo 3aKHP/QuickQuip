@@ -271,6 +271,18 @@ def skill_catalog_layout(root: Path) -> None:
 
 def main() -> None:
     action, *args = sys.argv[1:]
+    if action == "is-committed":
+        root, release = args
+        path = Path(root) / ".deploy" / f"{release}.transaction.json"
+        payload = json.loads(path.read_text()) if path.exists() else {}
+        raise SystemExit(0 if payload.get("committed") else 1)
+    if action == "commit":
+        root, release = args
+        path = Path(root) / ".deploy" / f"{release}.transaction.json"
+        payload = json.loads(path.read_text())
+        payload["committed"] = True
+        atomic_write(path, json.dumps(payload).encode(), 0o600)
+        return
     if action == "transaction":
         root, release, *values = args
         names = ("previous", "previous_previous", "original", "changed", "activated",
@@ -287,16 +299,22 @@ def main() -> None:
             raise ValueError("invalid journal id")
         if any(payload[name] not in ("0", "1") for name in (*names[3:6], "shared_sudo")):
             raise ValueError("invalid transaction state")
-        if not re.fullmatch(r"[a-f0-9]{32}", payload["sync_operation"]):
+        if payload["sync_operation"] and not re.fullmatch(
+            r"[a-f0-9]{32}", payload["sync_operation"]
+        ):
             raise ValueError("invalid synchronization id")
-        atomic_write(Path(root) / ".deploy" / f"{release}.transaction.json",
-                     json.dumps(payload).encode(), 0o600)
+        path = Path(root) / ".deploy" / f"{release}.transaction.json"
+        previous = json.loads(path.read_text()) if path.exists() else {}
+        payload["committed"] = previous.get("committed", False)
+        atomic_write(path, json.dumps(payload).encode(), 0o600)
         return
     if action == "read-transaction":
         root, release = args
         if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[a-f0-9]{12}", release):
             raise ValueError("invalid journal id")
         payload = json.loads((Path(root) / ".deploy" / f"{release}.transaction.json").read_text())
+        if payload.get("committed"):
+            raise ValueError("committed deployment cannot be recovered")
         for name in ("previous", "previous_previous", "original", "changed", "activated",
                      "stopped", "sync_operation", "shared_sudo"):
             print(payload[name] or "_")

@@ -139,15 +139,20 @@ class Remote:
     def deployment_status(self, release):
         if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[a-f0-9]{12}", release):
             raise ConfigError("invalid_field", "Invalid deployment release")
-        root = shlex.quote(self.root)
-        path = shlex.quote(f"{self.root}/.deploy/{release}.exit")
-        return self._ssh(
-            f"if test -f {path}; then "
-            f'if test "$(cat {path})" = 0 && test "$(basename "$(readlink {root}/current)")" '
-            f'!= "{release}"; then printf superseded; else cat {path}; fi; '
-            "else printf pending; fi",
-            None,
-        ).strip()
+        script = Path(__file__).with_name("deployment_receipt.py").read_text(encoding="utf-8")
+        return self._ssh(shlex.join(["python3", "-c", script, self.root, release]), None).strip()
+
+    def cleanup_deployment(self, release):
+        if not re.fullmatch(r"[0-9]{8}-[0-9]{6}-[a-f0-9]{12}", release):
+            raise ConfigError("invalid_field", "Invalid deployment release")
+        incoming = shlex.quote(f"{self.root}/.deploy/incoming/{release}")
+        receipt = shlex.quote(f"{self.root}/.deploy/{release}.exit")
+        result = self._ssh(
+            f"if test -f {receipt}; then rm -rf -- {incoming} "
+            f"|| sudo -n rm -rf -- {incoming} || printf 'cleanup pending'; fi", None
+        )
+        if result.strip():
+            raise ConfigError("cleanup_pending", "Deployment recovery material needs cleanup")
 
     def recover_deployment(self, operation, release):
         from quickquip.config_sync.state import identifier

@@ -71,3 +71,32 @@ def test_pull_interrupted_before_local_prepare_releases_client_state(tmp_path, m
         prepare(session, "pull")
     assert finish(session)["phase"] == "recovered"
     assert session.pending() is None
+
+
+def test_confirmed_deployment_resumes_after_new_configuration_edit(tmp_path, monkeypatch):
+    from quickquip.config_sync.installation import Installation
+    from quickquip.llm.scope_settings import ScopeSettingsRepository
+
+    class RemotePeer(Local):
+        def deployment_status(self, release):
+            raise AssertionError('Confirmed configuration already carries the receipt')
+
+    roots = [tmp_path / name for name in ('local', 'remote')]
+    for root in roots:
+        root.mkdir()
+        ConfigService(root / 'config/managed/config.db').initialize()
+        (root / '.env').write_text(
+            'QUICKQUIP_DEPLOY_LOCATION=cloud\nQUICKQUIP_DEPLOY_RUNTIME=docker\n'
+        )
+    remote = RemotePeer(roots[1])
+    session = Session(roots[0], remote_factory=lambda *_: remote)
+    operation = prepare(session, 'push')
+    receiver = Installation(roots[1])
+    receiver.install(operation)
+    receiver.verify(operation)
+    receiver.confirm(operation)
+    repository = ScopeSettingsRepository(roots[1] / 'config/managed/config.db')
+    repository.update_group_settings('10001', history_limit=9)
+    assert finish(session)['phase'] == 'confirmed'
+    assert repository.get_group_settings('10001').history_limit == 9
+    assert session.pending() is None

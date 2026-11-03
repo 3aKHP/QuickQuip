@@ -47,6 +47,8 @@ qqconf unpack
 
 Normal code deployment defaults to `--config-sync push`. `pull` receives server changes before packaging; `off` retains server configuration. `--plan` previews without building or modifying configuration. The independent `--env` option is available with `off` for bootstrap or maintenance; ordinary synchronization already includes root `.env`. PowerShell uses `-ConfigSync`, `-Plan`, and `-EnvSource`.
 
+After health and configuration verification, the server durably records the commit and confirms configuration before housekeeping. Cleanup failures are logged for retry; interrupted client acknowledgement uses the frozen transaction receipt. Recovery material stays until confirmation or verified restoration.
+
 The deployment transaction stages the reconciled configuration and environment before image validation, publishes while consumers are stopped, then switches and starts the new release. Repeating the same command continues or recovers interrupted work using its recorded destination. Standalone qqsync preserves each service's original running/stopped state; a code deployment starts the new version and checks its health.
 
 ## Commands

@@ -2,8 +2,10 @@
 
 import argparse
 import json
+import logging
 from pathlib import Path
 import sys
+import subprocess
 import time
 import uuid
 
@@ -119,6 +121,8 @@ def finish(session, record=None, *, timeout=240):
                 },
             )
             status = remote.call("inspect", operation)
+        if status["phase"] == "confirmed":
+            break
         release = status.get("deployment")
         if not release:
             remote.call("restore", operation)
@@ -129,6 +133,10 @@ def finish(session, record=None, *, timeout=240):
         if code == "0":
             break
         if code != "pending":
+            if code == "unknown":
+                raise ConfigError(
+                    "deployment_unverified", "Verify the legacy deployment before recovery"
+                )
             if code == "superseded":
                 raise ConfigError("deployment_changed", "Another release replaced this deployment")
             if status["phase"] != "recovered":
@@ -144,13 +152,23 @@ def finish(session, record=None, *, timeout=240):
                 "deployment_pending", "Deployment is running; repeat qqsync to continue"
             )
         time.sleep(1)
-    remote.call("verify", {**operation, "running": True})
+    if status["phase"] != "confirmed":
+        remote.call("verify", {**operation, "running": True})
     if record["direction"] == "pull":
-        local.call("verify", operation)
+        if local.call("inspect", operation)["phase"] != "confirmed":
+            local.call("verify", operation)
         local.call("confirm", operation)
     remote.call("confirm", operation)
     session._acknowledge(record)
     session._save(record, "confirmed")
+    if remote.runtime == "docker":
+        try:
+            remote.cleanup_deployment(status["deployment"])
+        except (ConfigError, OSError, subprocess.SubprocessError) as error:
+            logging.getLogger(__name__).warning(
+                "Deployment cleanup pending: %s",
+                error.code if isinstance(error, ConfigError) else type(error).__name__,
+            )
     return {"phase": "confirmed", "direction": record["direction"]}
 
 

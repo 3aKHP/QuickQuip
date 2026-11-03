@@ -2,6 +2,7 @@
 # Server-side release transaction. Drivers upload a private incoming directory.
 set -Eeuo pipefail
 umask 077
+export PYTHONDONTWRITEBYTECODE=1
 
 Root="${1:?deployment root required}"
 Id="${2:?operation id required}"
@@ -77,13 +78,14 @@ PrevPrevious=""
 Changed=0
 Activated=0
 Succeeded=0
+Confirmed=0
 SharedSudo=0
 ServicesStopped=0
 StorageBackup=""
 RecoveryReady=0
 
 record_transaction() {
-    [ -z "$SyncOperation" ] || "$Python" "$StateTool" transaction "$Root" "$Id" \
+    "$Python" "$StateTool" transaction "$Root" "$Id" \
         "$Prev" "$PrevPrevious" "$OriginalCurrent" "$Changed" "$Activated" \
         "$ServicesStopped" "$SyncOperation" "$SharedSudo"
 }
@@ -164,7 +166,7 @@ sync_rpc() {
     local release="$1"; shift
     if [ "$ConfigSyncProtocol" = 2 ]; then
         compose "$release" run --rm --no-deps -T -v "$Root:/qqsync-host" \
-            -e QUICKQUIP_SYNC_UID="$(id -u)" -e QUICKQUIP_SYNC_GID="$(id -g)" web-admin \
+            -e PYTHONDONTWRITEBYTECODE=1 -e QUICKQUIP_SYNC_UID="$(id -u)" -e QUICKQUIP_SYNC_GID="$(id -g)" web-admin \
             python -m quickquip.config_sync.deployment_worker "$@" \
             --root /qqsync-host --application-release "$release"
     else
@@ -371,6 +373,9 @@ finish() {
         exit 2
     fi
     export QUICKQUIP_ENV_FILE="$Root/.env"
+    if [ -f "${StateTool:-}" ] && "$Python" "$StateTool" is-committed "$Root" "$Id"; then
+        Succeeded=1
+    fi
     if [ "$Succeeded" = 0 ] && [ -n "$StorageBackup" ]; then
         compose "$Id" stop quickquip web-admin || exit 2
         compose "$Id" run --rm --no-deps web-admin python -m quickquip.llm.config_cli \
@@ -436,9 +441,15 @@ finish() {
     if [ "$Succeeded" = 0 ] && [ -n "$SyncOperation" ] && [ -n "$Prev" ]; then
         sync_rpc "$Prev" recovery-verified --operation "$SyncOperation" || { step "CONFIG RECOVERY UNVERIFIED"; exit 2; }
     fi
-    # Secrets are transient; retain only logs and numeric exit status.
-    if [ "$SharedSudo" = 1 ]; then sudo -n rm -rf "$Backup" || exit 2; fi
-    rm -rf "$Incoming"
+    if [ "$Succeeded" = 1 ] && [ "$Confirmed" = 0 ]; then
+        step "release committed; configuration confirmation pending; retain $Incoming"
+        exit 1
+    fi
+    # Recovery material is retained until confirmation or verified restoration.
+    if [ "$SharedSudo" = 1 ]; then
+        sudo -n rm -rf "$Backup" || step "cleanup pending: $Backup"
+    fi
+    rm -rf "$Incoming" || step "cleanup pending: $Incoming"
     exit "$code"
 }
 trap finish EXIT
@@ -479,8 +490,8 @@ if [ "$Action" = recover ]; then
     step "recovering interrupted deployment $Id"
     exit 1
 fi
+record_transaction
 if [ -n "$SyncOperation" ]; then
-    record_transaction
     sync_rpc "$Prev" bind-deployment --operation "$SyncOperation" --release "$Id" || fail "configuration deployment binding failed"
 fi
 
@@ -522,7 +533,10 @@ if [ "$Action" = rollback ]; then
     up "$Target" || fail "rollback startup failed"
     health "$Target" || fail "rollback health failed"
     set_link previous "$Prev"
+    record_transaction
+    "$Python" "$StateTool" commit "$Root" "$Id"
     Succeeded=1
+    Confirmed=1
     step "rollback complete: $Target ($RollbackVersion) (current credentials and data retained)"
     deployment_hook rollback "$RollbackVersion" "$Target"
     exit 0
@@ -656,16 +670,23 @@ if [ -n "$SyncOperation" ]; then
     sync_rpc "$Id" wait --operation "$SyncOperation" || fail "configuration application failed"
 fi
 set_link previous "$Prev"
+"$Python" "$StateTool" commit "$Root" "$Id"
 Succeeded=1
+if [ -n "$SyncOperation" ] && [ "$ConfigSyncProtocol" = 2 ]; then
+    sync_rpc "$Id" confirm --operation "$SyncOperation" || fail "release committed; configuration confirmation pending"
+fi
+Confirmed=1
 step "release complete: $Id ($VersionId)"
 deployment_hook "$Action" "$VersionId" "$Id"
 # Only collect completed deployments; never remove current, previous or baselines.
-touch "$Release/.complete"
+touch "$Release/.complete" || step "cleanup pending: completion marker $Release"
 count=0
 while IFS= read -r stale; do
     count=$((count + 1))
     [ "$count" -gt "$Keep" ] || continue
     [ "$stale" != "$Id" ] && [ "$stale" != "$Prev" ] || continue
-    rm -rf "$Root/releases/$stale"
+    rm -rf "$Root/releases/$stale" \
+        || sudo -n rm -rf "$Root/releases/$stale" \
+        || { step "cleanup pending: $Root/releases/$stale"; continue; }
     docker rmi "quickquip-app:$stale" >/dev/null 2>&1 || true
 done < <(find "$Root/releases" -mindepth 2 -maxdepth 2 -name .complete -printf '%h\n' | sort -r | sed 's|.*/||')
