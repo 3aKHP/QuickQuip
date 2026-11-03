@@ -2,7 +2,9 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import asyncio
 import json
+import time
 from typing import Any
 from urllib import parse
 
@@ -13,6 +15,7 @@ from quickquip.llm.provider.base import (
     BaseProviderClient,
     LLMGeneratedImage,
     LLMImageInput,
+    LLMProviderError,
     LLMRequest,
     LLMResponse,
     LLMWebSearchReport,
@@ -20,6 +23,11 @@ from quickquip.llm.provider.base import (
     _json_string,
     sanitize_gemini_schema,
 )
+from quickquip.llm.provider.gemini_recovery import (
+    empty_response_recovery_payload,
+    sum_recovery_usage,
+)
+from quickquip.llm.usage import _schedule_usage_record
 from quickquip.llm.client_fingerprints.assembly import selected_profile
 from quickquip.llm.client_fingerprints.gemini_policy import (
     GeminiBodyPolicy, validate_gemini_overrides,
@@ -389,6 +397,10 @@ class GeminiProviderClient(BaseProviderClient):
     @staticmethod
     def _assemble_stream_response(chunks: list[dict[str, Any]], fallback_model: str) -> LLMResponse:
         combined = GeminiProviderClient._combine_stream_trace(chunks, fallback_model)
+        return GeminiProviderClient._parse_response(combined, fallback_model)
+
+    @staticmethod
+    def _parse_response(combined: dict[str, Any], fallback_model: str) -> LLMResponse:
         candidates = combined.get("candidates", [])
         candidate = candidates[0] if isinstance(candidates, list) and candidates else {}
         response = GeminiProviderClient._parse_candidate(candidate, fallback_model)
@@ -460,22 +472,71 @@ class GeminiProviderClient(BaseProviderClient):
         return combined
 
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
+        started = time.monotonic()
         url, headers, payload = await self._build_request_parts(request)
         data, final_url = await self._post_json_candidate(url, headers, payload)
-        candidates = data.get("candidates", [])
-        candidate = candidates[0] if isinstance(candidates, list) and candidates else {}
-        response = self._parse_candidate(candidate, request.model)
-        usage = data.get("usageMetadata", {})
-        response.input_tokens = usage.get("promptTokenCount")
-        response.output_tokens = usage.get("candidatesTokenCount")
-        response.cache_read_tokens = usage.get("cachedContentTokenCount")
-        response.thinking_tokens = usage.get("thoughtsTokenCount")
+        response = self._parse_response(data, request.model)
         response.owner = build_response_owner(self.config, final_url, request.model)
-        return response
+        return await self._recover_empty_response(
+            request, headers, payload, data, response, final_url, started, stream=False,
+        )
 
     async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
+        started = time.monotonic()
         url, headers, payload = await self._build_request_parts(request, stream=True)
         chunks, final_url = await self._post_stream_sse_candidate(url, headers, payload)
-        response = self._assemble_stream_response(chunks, request.model)
+        data = self._combine_stream_trace(chunks, request.model)
+        response = self._parse_response(data, request.model)
         response.owner = build_response_owner(self.config, final_url, request.model)
-        return response
+        return await self._recover_empty_response(
+            request, headers, payload, data, response, final_url, started, stream=True,
+        )
+
+    async def _recover_empty_response(
+        self,
+        request: LLMRequest,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        data: dict[str, Any],
+        initial: LLMResponse,
+        final_url: str,
+        started: float,
+        *,
+        stream: bool,
+    ) -> LLMResponse:
+        # Probes and diagnostics that request one dispatch must stay single-call.
+        if self.single_dispatch:
+            return initial
+        recovery_payload = empty_response_recovery_payload(self.config, payload, data, initial)
+        if recovery_payload is None:
+            return initial
+        try:
+            # The continuation belongs to the successful endpoint. Bypass URL
+            # fallback and outer retries so a failed correction cannot restart
+            # the original generation or send its token to another endpoint.
+            async with asyncio.timeout(self.config.timeout_seconds):
+                if stream:
+                    chunks = await self._post_stream_sse(final_url, headers, recovery_payload)
+                    recovered_data = self._combine_stream_trace(chunks, request.model)
+                else:
+                    recovered_data = await self._post_json(final_url, headers, recovery_payload)
+            candidates = recovered_data.get("candidates")
+            if (
+                not isinstance(candidates, list) or len(candidates) != 1
+                or not isinstance(candidates[0], dict)
+            ):
+                raise LLMProviderError("Gemini 空回复补正响应缺少候选结果。")
+            combined = self._combine_stream_trace([data, recovered_data], request.model)
+            combined["usageMetadata"] = recovered_data.get("usageMetadata", {})
+            recovered = self._parse_response(combined, request.model)
+            sum_recovery_usage(initial, recovered)
+            recovered.owner = initial.owner
+            return recovered
+        except asyncio.CancelledError:
+            _schedule_usage_record(self, request, initial, started, stream, "ok")
+            raise
+        except Exception as exc:
+            # The original completed HTTP request has already incurred usage.
+            # A non-retryable protocol error also prevents streaming fallback.
+            _schedule_usage_record(self, request, initial, started, stream, "ok")
+            raise LLMProviderError("Gemini 空回复补正请求失败。") from exc

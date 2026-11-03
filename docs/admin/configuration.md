@@ -308,10 +308,20 @@
 | `prompt_caching` | 是否启用 Anthropic Prompt Caching 断点打点（**仅 `claude` 协议生效**，需上游或中转站支持 CLI 缓存格式） | `false` |
 | `cache_ttl` | Claude Prompt Cache 的生存期：留空 `""` 默认为 5 分钟，填 `"1h"` 使用 1 小时扩展缓存（**仅 `claude` 协议生效**） | `""` |
 | `builtin_search` | 是否启用服务商原生联网搜索（**仅 `gemini` 协议生效**）：开启后请求会携带 `google_search` 声明，并在回复末尾自动附上 Grounding 来源链接；同时该渠道会话会自动移除本地 `search_web` 工具并切换提示词引导（其他协议配置此项无效并会记录 warning；检索在 Google 侧执行并计费，不计入本地轮次与 Token 看板）。<br>⚠️ **Gemini 版本兼容性警告**：将 `google_search` 与工具调用（Function Calling）放在同一次请求中混用，**仅 Gemini 3 系列模型支持**！如果你使用的是 Gemini 2.x 模型，必须关闭 `builtin_search` 或关闭全局 `tool_calling_enabled`，否则请求会被 Google API 直接拒绝 | `false` |
+| `gemini_empty_response_recovery` | Gemini GenerateContent 空回复补正开关，触发条件与额度规则见[空回复补正](#gemini-空回复补正) | `false` |
+| `gemini_empty_response_recovery_max_output_tokens` | 补正请求的输出额度上限，包含推理与回答；可设为 `1`–`1048576` | `65536` |
 | `responses_profile` | **`openai_responses` 协议专属后端能力档位**：<br>• `openai-public`（默认）：对接官方 `/v1/responses` 接口；<br>• `codex-http-relay`：对接 Codex 形态的第三方中转网关（不发送 `service_tier`、容忍 `codex.*` 扩展事件、当终态事件缺省字段时以流式完整收集的 item 作为历史回放基准） | `openai-public` |
 | `reasoning_effort` | **思考档位（全协议通用）**：可选 `low` / `medium` / `high` / `xhigh` / `max` / `ultra`，留空 `""` 表示不发送思考参数（使用模型自身默认档）。系统会根据协议和模型家族自动翻译为对应的底层参数并做超档钳制（详见下方映射表）。支持在群内用 `/llm effort <档位>` 按群覆盖（`/llm effort default` 恢复跟随；`/llm status` 可查看“配置档 / 覆盖档 / 实际生效档”三层状态），也可在 Web 后台“群 LLM”页按群设置 | `""` |
 | `max_inline_media_bytes` | **单次请求内联图片总解码字节预算**（设为 `0` 表示不限制，详见下方媒体预算说明） | `5242880` (5 MiB) |
 | `epoch_*` / 预算键 | 支持同名覆盖 `settings.runtime` 中的 6 个 `epoch_*` 水位键，以及 `request_input_token_budget` 和 `agent_replay_loop_tokens` | `null` (继承全局) |
+
+#### Gemini 空回复补正
+
+在 Web Admin 的“渠道与模型 → 生成”中开启“Gemini 空回复补正”，保存草稿并应用到 Bot。渠道和单个模型均可设置；模型选择“跟随上层”时继承渠道值。启用后可能增加一次模型调用及对应费用。
+
+补正仅在单个候选以 `MAX_TOKENS` 结束、正文为空、没有工具调用或多模态产出，并携带非空 `continuationToken` 时触发。适配器在同一实际端点重发原始请求，附上该 token，将输出额度扩大为原额度的两倍，并受 `gemini_empty_response_recovery_max_output_tokens` 限制。例如原额度为 `16384`、补正上限为 `65536` 时，补正请求的额度为 `32768`。推理 token 仍计入额度；上限未高于原额度时跳过补正。渠道须支持返回 token 的续接请求，参见 [Google 的 GenerateContent 续接说明](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon)。
+
+每次生成最多补正一次，流式与非流式均支持。补正 HTTP 请求的总等待时间受 `timeout_seconds` 约束；失败时结束本次调用，已知用量保留。已有正文的截断回复、正常结束、安全拦截和 `CONTINUATION` 终值保持各自处理方式；探活与单次诊断不触发补正。
 
 #### 渠道与模型的 JSON 层级示例
 

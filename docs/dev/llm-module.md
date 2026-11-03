@@ -83,6 +83,8 @@ LLM 维护入口按职责列在下表：
 
 协议客户端的 `complete()` 对 429、5xx 和网络错误执行指数退避，策略由 `retry.py` 提供；探活和诊断使用 `RetryPolicy.disabled()` 禁用自动重试。基类、四协议实现、工厂、重试和追踪分别由相应子模块维护。
 
+Gemini GenerateContent 适配器支持默认关闭的空回复补正，配置见[管理员参考](../admin/configuration.md#gemini-空回复补正)。仅单候选 `MAX_TOKENS`、无正文或工具及多模态产出、存在 `continuationToken` 时，在实际成功端点发送一次补正请求。原始消息、工具声明和思考参数完整保留，输出额度翻倍并受补正上限约束；补正使用独立的总等待时限，失败转换为不可重试的协议错误。上层一次 `complete()` 仍获得一个响应，有序 parts 与各 HTTP 请求上报的用量合并；HTTP Trace 分别保留两次请求。补正失败或被取消时，首段已知用量单独落库，终态记录错误或取消。`single_dispatch` 调用跳过补正。
+
 Gemini 在原生工具回合保存并按顺序回放含 `thoughtSignature` 的 parts。Claude 当前工具循环通过通用重建回传签名 thinking 块，已关闭且包含工具的 Loop 在归属匹配和签名有效时跨轮原生回放。Responses 使用 `store:false` 全量回放，当前工具循环回传原生 items，并检查 call_id 记账、冲突和结果配对；已关闭历史经归属校验回放 reasoning 密文，上游返回 HTTP 400 时剥离历史 reasoning 重试一次。当前工具循环内容保留。历史投影规则见第 4.2 节。
 
 Responses 的 `openai-public` 与 `codex-http-relay` Profile 均接受新增的事件类型和附加 JSON 字段。未知事件通过序号与终态顺序校验后跳过，继续等待终态；每条流最多记录八种未知事件，每种记录一次，事件名截取前 128 个字符并转义，原始载荷由 HTTP Trace 开关控制保存。`codex-http-relay` 将 `response.metadata`、`codex.response.metadata` 等已知中转附加事件静默忽略。此策略遵循 OpenAI 将新增流式事件类型视为兼容扩展的[约定](https://developers.openai.com/api/reference/overview#backwards-compatibility)。

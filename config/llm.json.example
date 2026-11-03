@@ -100,6 +100,8 @@
         "timeout_seconds": 45.0,
         "temperature": 0.5,
         "max_output_tokens": 2048,
+        "gemini_empty_response_recovery": false,
+        "gemini_empty_response_recovery_max_output_tokens": 65536,
         "style_profile": "gemini_family",
         "style_overrides": ""
       },

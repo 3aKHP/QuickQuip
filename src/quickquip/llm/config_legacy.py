@@ -255,6 +255,12 @@ def _parse_single_provider(
         cache_ttl=str(entry.get("cache_ttl", "")).strip(),
         auth_method=str(entry.get("auth_method", "api_key")).strip().lower() or "api_key",
         builtin_search=as_bool(entry.get("builtin_search"), default=False),
+        gemini_empty_response_recovery=as_bool(
+            entry.get("gemini_empty_response_recovery"), default=False
+        ),
+        gemini_empty_response_recovery_max_output_tokens=int(
+            entry.get("gemini_empty_response_recovery_max_output_tokens", 65536)
+        ),
         responses_profile=(
             str(entry.get("responses_profile", DEFAULT_RESPONSES_PROFILE_ID)).strip().lower()
             or DEFAULT_RESPONSES_PROFILE_ID

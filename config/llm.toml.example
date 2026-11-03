@@ -444,6 +444,8 @@ style_profile = "gemini_family"
 #                         # 自动附上检索来源。仅 gemini 协议生效，其他协议下该键不生效。
 #                         # 注意：google_search 与 function calling 组合仅 Gemini 3 系列模型支持，
 #                         # 2.x 模型请关闭本键或全局 tool_calling_enabled，否则请求会被 API 拒绝。
+# gemini_empty_response_recovery = false  # MAX_TOKENS 且无正文、工具或图片时，凭 token 续接一次
+# gemini_empty_response_recovery_max_output_tokens = 65536  # 补正额度最多翻倍，推理与回答合计不超过此值
 timeout_seconds = 45
 temperature = 0.5
 max_output_tokens = 2048

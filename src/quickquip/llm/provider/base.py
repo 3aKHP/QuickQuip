@@ -564,8 +564,9 @@ class BaseProviderClient:
         dispatch paths retry retryable failures (HTTP 429/5xx, transport
         errors) with jittered exponential backoff per ``retry_policy``.
 
-        Every complete() (success/error/cancelled) is metered once via
-        ``_record_usage``; metering failure never affects the main path.
+        This layer meters complete() (success/error/cancelled) once via
+        ``_record_usage``. An interrupted protocol recovery can additionally
+        record its completed legs; metering failure never affects the main path.
         """
         started = time.monotonic()
         stream_used = self.config.stream_enabled

@@ -57,7 +57,7 @@ export const PARAM_SOURCE_LABELS: Record<string, string> = {
   builtin: '内置默认', runtime: '全局设置', provider: '渠道覆盖', model: '模型覆盖', automatic: '自动识别', unknown: '无法确定',
 }
 
-/** 26 个请求参数的中文标签与说明；分组决定 ProvidersPanel 的展示结构 */
+/** 请求参数的中文标签与说明；分组决定 ProvidersPanel 的展示结构 */
 export const PARAM_LABELS: Record<string, FieldLabel> = {
   temperature: { label: '温度', hint: '采样温度，越高越发散。0–2。' },
   max_output_tokens: { label: '最大输出 token', hint: '单次回复允许生成的 token 上限。' },
@@ -71,6 +71,8 @@ export const PARAM_LABELS: Record<string, FieldLabel> = {
   prompt_caching: { label: '提示词缓存', hint: '对支持的渠道开启上下文缓存。' },
   cache_ttl: { label: '缓存时长', hint: '提示词缓存的保留时长。' },
   builtin_search: { label: '内置搜索', hint: '仅 Gemini 协议在请求级生效。' },
+  gemini_empty_response_recovery: { label: 'Gemini 空回复补正', hint: '达到输出上限且无正文、工具调用或图片时，凭续接 token 最多补正一次；输出额度最多翻倍。默认关闭。' },
+  gemini_empty_response_recovery_max_output_tokens: { label: 'Gemini 补正输出额度上限', unit: 'token', hint: '补正请求中推理与回答的合计额度上限；仅开启空回复补正时生效。' },
   responses_profile: { label: 'Responses 端点形态', hint: '仅 OpenAI Responses 协议使用。' },
   retry_max_attempts: { label: '最大重试次数', hint: '失败后的额外尝试次数，0 表示不重试。' },
   retry_base_delay: { label: '重试基础延迟', unit: '秒' },
@@ -91,7 +93,7 @@ export const PARAM_GROUP_LABELS: Record<string, string> = {
 }
 
 export const PARAM_GROUPS: Record<string, string[]> = {
-  generation: ['temperature', 'max_output_tokens', 'style_profile', 'style_overrides', 'reasoning_effort', 'prompt_caching', 'cache_ttl', 'builtin_search', 'responses_profile'],
+  generation: ['temperature', 'max_output_tokens', 'style_profile', 'style_overrides', 'reasoning_effort', 'prompt_caching', 'cache_ttl', 'builtin_search', 'gemini_empty_response_recovery', 'gemini_empty_response_recovery_max_output_tokens', 'responses_profile'],
   connection: ['timeout_seconds', 'stream_enabled', 'user_agent', 'extra_body'],
   retry: ['retry_max_attempts', 'retry_base_delay', 'retry_jitter'],
   epoch: ['epoch_context_tokens', 'epoch_cold_idle_seconds', 'epoch_cold_target_tokens', 'epoch_cold_trigger_tokens', 'epoch_hot_target_tokens', 'epoch_cap_tokens'],
