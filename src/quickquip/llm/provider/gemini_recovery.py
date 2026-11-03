@@ -5,7 +5,7 @@ from copy import deepcopy
 from typing import Any
 
 from quickquip.llm.config import ProviderConfig
-from quickquip.llm.provider.base import LLMResponse
+from quickquip.llm.provider.base import LLMProviderError, LLMResponse
 
 
 def empty_response_recovery_payload(
@@ -52,6 +52,20 @@ def empty_response_recovery_payload(
     recovered["continuationToken"] = token
     recovered["generationConfig"]["maxOutputTokens"] = expanded
     return recovered
+
+
+def merge_recovery_response(initial: dict[str, Any], recovered: dict[str, Any]) -> dict[str, Any]:
+    """Concatenate complete parts without coalescing signature-bearing boundaries."""
+    merged = deepcopy(recovered)
+    first_content = initial["candidates"][0].get("content") or {}
+    candidate = merged["candidates"][0]
+    content = candidate.get("content") or {}
+    if not isinstance(content, dict) or not isinstance(content.get("parts", []), list):
+        raise LLMProviderError("Gemini 空回复补正响应的内容格式无效。")
+    content["parts"] = deepcopy(first_content.get("parts", [])) + content.get("parts", [])
+    content.setdefault("role", first_content.get("role", "model"))
+    candidate["content"] = content
+    return merged
 
 
 def sum_recovery_usage(initial: LLMResponse, recovered: LLMResponse) -> None:

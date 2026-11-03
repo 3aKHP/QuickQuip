@@ -25,6 +25,7 @@ from quickquip.llm.provider.base import (
 )
 from quickquip.llm.provider.gemini_recovery import (
     empty_response_recovery_payload,
+    merge_recovery_response,
     sum_recovery_usage,
 )
 from quickquip.llm.usage import _schedule_usage_record
@@ -404,13 +405,16 @@ class GeminiProviderClient(BaseProviderClient):
         candidates = combined.get("candidates", [])
         candidate = candidates[0] if isinstance(candidates, list) and candidates else {}
         response = GeminiProviderClient._parse_candidate(candidate, fallback_model)
-        usage = combined.get("usageMetadata", {})
+        GeminiProviderClient._apply_usage(response, combined.get("usageMetadata"))
+        return response
+
+    @staticmethod
+    def _apply_usage(response: LLMResponse, usage: Any) -> None:
         if isinstance(usage, dict):
             response.input_tokens = usage.get("promptTokenCount")
             response.output_tokens = usage.get("candidatesTokenCount")
             response.cache_read_tokens = usage.get("cachedContentTokenCount")
             response.thinking_tokens = usage.get("thoughtsTokenCount")
-        return response
 
     @staticmethod
     def _combine_stream_trace(
@@ -510,6 +514,7 @@ class GeminiProviderClient(BaseProviderClient):
         recovery_payload = empty_response_recovery_payload(self.config, payload, data, initial)
         if recovery_payload is None:
             return initial
+        known_usage = initial
         try:
             # The continuation belongs to the successful endpoint. Bypass URL
             # fallback and outer retries so a failed correction cannot restart
@@ -517,26 +522,39 @@ class GeminiProviderClient(BaseProviderClient):
             async with asyncio.timeout(self.config.timeout_seconds):
                 if stream:
                     chunks = await self._post_stream_sse(final_url, headers, recovery_payload)
-                    recovered_data = self._combine_stream_trace(chunks, request.model)
+                    usage = next((
+                        chunk["usageMetadata"] for chunk in reversed(chunks)
+                        if isinstance(chunk.get("usageMetadata"), dict)
+                    ), None)
                 else:
                     recovered_data = await self._post_json(final_url, headers, recovery_payload)
+                    usage = recovered_data.get("usageMetadata")
+            # Capture reported usage before candidate/content validation, which
+            # can fail even for a completed, billed response (e.g. promptFeedback).
+            known_usage = LLMResponse(
+                text="", model=initial.model, finish_reason=initial.finish_reason,
+                owner=initial.owner,
+            )
+            self._apply_usage(known_usage, usage)
+            sum_recovery_usage(initial, known_usage)
+            if stream:
+                recovered_data = self._combine_stream_trace(chunks, request.model)
             candidates = recovered_data.get("candidates")
             if (
                 not isinstance(candidates, list) or len(candidates) != 1
                 or not isinstance(candidates[0], dict)
             ):
                 raise LLMProviderError("Gemini 空回复补正响应缺少候选结果。")
-            combined = self._combine_stream_trace([data, recovered_data], request.model)
-            combined["usageMetadata"] = recovered_data.get("usageMetadata", {})
+            combined = merge_recovery_response(data, recovered_data)
             recovered = self._parse_response(combined, request.model)
             sum_recovery_usage(initial, recovered)
             recovered.owner = initial.owner
             return recovered
         except asyncio.CancelledError:
-            _schedule_usage_record(self, request, initial, started, stream, "ok")
+            _schedule_usage_record(self, request, known_usage, started, stream, "ok")
             raise
         except Exception as exc:
-            # The original completed HTTP request has already incurred usage.
+            # Completed HTTP legs have already incurred their reported usage.
             # A non-retryable protocol error also prevents streaming fallback.
-            _schedule_usage_record(self, request, initial, started, stream, "ok")
+            _schedule_usage_record(self, request, known_usage, started, stream, "ok")
             raise LLMProviderError("Gemini 空回复补正请求失败。") from exc

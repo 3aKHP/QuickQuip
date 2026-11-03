@@ -178,6 +178,45 @@ async def test_missing_recovery_usage_does_not_count_initial_usage_twice(transpo
 
 
 @pytest.mark.parametrize("stream", [False, True])
+async def test_recovery_keeps_unsigned_and_signed_thought_parts_separate(
+    transport, metering, stream,
+):
+    install, _sent = transport
+    first = _body()
+    del first["candidates"][0]["content"]["parts"][0]["thoughtSignature"]
+    second = _body(text="answer", finish="STOP")
+    second["candidates"][0]["content"]["parts"][0]["text"] = "later thought"
+    client = install([first, second], stream=stream)
+    response = await client.complete(_request())
+    assert response.native_blocks == (
+        first["candidates"][0]["content"]["parts"]
+        + second["candidates"][0]["content"]["parts"]
+    )
+    assert response.thinking_blocks[1]["part"]["text"] == "later thought"
+    assert response.thinking_blocks[1]["part"]["thoughtSignature"] == "signed-thought"
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_recovery_with_no_candidate_preserves_its_reported_usage(
+    transport, metering, stream,
+):
+    install, sent = transport
+    second = {
+        "promptFeedback": {"blockReason": "SAFETY"},
+        "usageMetadata": {"promptTokenCount": 40, "cachedContentTokenCount": 25},
+    }
+    client = install([_body(), second], stream=stream)
+    with pytest.raises(LLMProviderError, match="补正"):
+        await client.complete(_request())
+    await drain_usage_tasks()
+    assert len(sent) == 2
+    assert [state for state, _ in metering] == ["ok", "error"]
+    assert metering[0][1].input_tokens == 70
+    assert metering[0][1].cache_read_tokens == 45
+    assert metering[0][1].thinking_tokens == 15
+
+
+@pytest.mark.parametrize("stream", [False, True])
 async def test_failed_correction_does_not_replay_or_fallback_and_keeps_spent_usage(
     transport, metering, stream,
 ):
