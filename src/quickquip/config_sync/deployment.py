@@ -92,21 +92,58 @@ def _restore_local(session, local, record):
     session._save(record, "recovered")
 
 
+def _inspect(remote, operation, original):
+    try:
+        return remote.call("inspect", operation)
+    except ConfigError as error:
+        if remote.runtime != "docker" or error.code not in (
+            "compose_failed", "compose_missing", "remote_command_failed", "protocol_error"
+        ):
+            raise
+        # Interrupted installation can leave live Compose unusable for discovery.
+        remote.controller.bind(original)
+        return remote.call("inspect", operation)
+
+
+def _cleanup(remote, release):
+    if remote.runtime != "docker":
+        return
+    try:
+        remote.cleanup_deployment(release)
+    except (ConfigError, OSError, subprocess.SubprocessError) as error:
+        logging.getLogger(__name__).warning(
+            "Deployment cleanup pending: %s",
+            error.code if isinstance(error, ConfigError) else type(error).__name__,
+        )
+
+
 def finish(session, record=None, *, timeout=240):
     record = record or session.pending()
     if record is None:
-        return {"phase": "confirmed"}
+        latest = session.state.read("qqsync/client.json")
+        if not latest or latest["phase"] != "confirmed" or not latest.get("deployment"):
+            return {"phase": "confirmed"}
+        record = latest
     if not record.get("deployment"):
         return session._continue(record)
     mode = Deployment(**record["route"])
-    local, remote = session._peers(mode)
-    if remote.runtime == "docker":
-        remote.controller.bind(record["remote_original"])
     operation = {"operation": record["id"]}
+    if record["phase"] == "confirmed":
+        try:
+            _, remote = session._peers(mode)
+            status = _inspect(remote, operation, record["remote_original"])
+            _cleanup(remote, status["deployment"])
+        except (ConfigError, OSError, subprocess.SubprocessError) as error:
+            logging.getLogger(__name__).warning(
+                "Deployment cleanup pending: %s",
+                error.code if isinstance(error, ConfigError) else type(error).__name__,
+            )
+        return {"phase": "confirmed", "direction": record["direction"]}
+    local, remote = session._peers(mode)
     deadline = time.monotonic() + timeout
     while True:
         try:
-            status = remote.call("inspect", operation)
+            status = _inspect(remote, operation, record["remote_original"])
         except ConfigError as error:
             if error.code != "operation_missing":
                 raise
@@ -120,7 +157,7 @@ def finish(session, record=None, *, timeout=240):
                     "publish": True,
                 },
             )
-            status = remote.call("inspect", operation)
+            status = _inspect(remote, operation, record["remote_original"])
         if status["phase"] == "confirmed":
             break
         release = status.get("deployment")
@@ -140,6 +177,8 @@ def finish(session, record=None, *, timeout=240):
             if code == "superseded":
                 raise ConfigError("deployment_changed", "Another release replaced this deployment")
             if status["phase"] != "recovered":
+                if remote.runtime == "docker":
+                    remote.controller.bind(record["remote_original"])
                 remote.recover_deployment(record["id"], release)
                 if remote.call("inspect", operation)["phase"] != "recovered":
                     raise ConfigError(
@@ -161,14 +200,7 @@ def finish(session, record=None, *, timeout=240):
     remote.call("confirm", operation)
     session._acknowledge(record)
     session._save(record, "confirmed")
-    if remote.runtime == "docker":
-        try:
-            remote.cleanup_deployment(status["deployment"])
-        except (ConfigError, OSError, subprocess.SubprocessError) as error:
-            logging.getLogger(__name__).warning(
-                "Deployment cleanup pending: %s",
-                error.code if isinstance(error, ConfigError) else type(error).__name__,
-            )
+    _cleanup(remote, status["deployment"])
     return {"phase": "confirmed", "direction": record["direction"]}
 
 

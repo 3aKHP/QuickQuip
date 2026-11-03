@@ -73,7 +73,10 @@ def test_pull_interrupted_before_local_prepare_releases_client_state(tmp_path, m
     assert session.pending() is None
 
 
-def test_confirmed_deployment_resumes_after_new_configuration_edit(tmp_path, monkeypatch):
+@pytest.mark.parametrize("helper_mode", ["current", "recorded"])
+def test_confirmed_deployment_resumes_after_new_configuration_edit(
+    tmp_path, monkeypatch, helper_mode
+):
     from quickquip.config_sync.installation import Installation
     from quickquip.llm.scope_settings import ScopeSettingsRepository
 
@@ -92,11 +95,75 @@ def test_confirmed_deployment_resumes_after_new_configuration_edit(tmp_path, mon
     session = Session(roots[0], remote_factory=lambda *_: remote)
     operation = prepare(session, 'push')
     receiver = Installation(roots[1])
+    with receiver.owned(operation) as record:
+        record['deployment'] = '20260907-020000-bbbbbbbbbbbb'
+        receiver.save(record)
     receiver.install(operation)
     receiver.verify(operation)
     receiver.confirm(operation)
     repository = ScopeSettingsRepository(roots[1] / 'config/managed/config.db')
     repository.update_group_settings('10001', history_limit=9)
+    import json
+    import subprocess
+    from quickquip.config_sync.compose import Compose
+    from quickquip.configuration.errors import ConfigError
+    from quickquip.config_sync.worker import execute
+
+    (roots[1] / 'docker-compose.yml').write_text('services: {}\n')
+    remote.runtime = 'docker'
+    remote.controller = Compose(roots[1])
+    remote.controller.helper_image = 'sha256:current' if helper_mode == 'current' else None
+    pending = session.pending()
+    pending['remote_original']['helper_image'] = (
+        'sha256:deleted' if helper_mode == 'current' else 'sha256:recorded'
+    )
+    session.state.write('qqsync/client.json', pending)
+    helper_calls = []
+
+    def docker(command, environment, cwd, payload):
+        if command[:2] == ['docker', 'compose']:
+            raise ConfigError('compose_failed', 'Interrupted environment prevents discovery')
+        assert 'sha256:deleted' not in command, 'Old helper was garbage collected'
+        assert 'sha256:' + helper_mode in command
+        helper_calls.append(command[-3])
+        return json.dumps(execute(roots[1], command[-3], payload))
+
+    remote.controller.runner = docker
+    monkeypatch.setattr(remote, 'call', lambda action, body=None:
+                        remote.controller.call(action, body or {}))
+    cleanups = []
+
+    def cleanup(release):
+        cleanups.append(release)
+        if len(cleanups) == 1:
+            raise subprocess.TimeoutExpired('ssh', 1)
+
+    monkeypatch.setattr(remote, 'cleanup_deployment', cleanup, raising=False)
     assert finish(session)['phase'] == 'confirmed'
     assert repository.get_group_settings('10001').history_limit == 9
     assert session.pending() is None
+    baseline = session.state.read('qqsync/peers.json')
+    assert finish(session)['phase'] == 'confirmed'
+    assert session.state.read('qqsync/peers.json') == baseline
+    assert len(cleanups) == 2
+    assert helper_calls == ['inspect', 'confirm', 'inspect']
+
+
+def test_completed_cleanup_keeps_commit_when_remote_is_offline(tmp_path, monkeypatch, caplog):
+    from quickquip.configuration.errors import ConfigError
+
+    session = Session(tmp_path)
+    record = {
+        'id': 'a' * 32, 'phase': 'confirmed', 'deployment': True, 'direction': 'push',
+        'route': {'location': 'cloud', 'runtime': 'docker',
+                  'host': 'synthetic', 'remote_dir': '/srv/synthetic'},
+    }
+    session.state.write('qqsync/client.json', record)
+
+    def offline(mode):
+        raise ConfigError('transport_error', 'Remote unavailable')
+
+    monkeypatch.setattr(session, '_peers', offline)
+    assert finish(session) == {'phase': 'confirmed', 'direction': 'push'}
+    assert session.state.read('qqsync/client.json') == record
+    assert 'transport_error' in caplog.text
