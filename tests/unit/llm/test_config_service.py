@@ -163,6 +163,67 @@ def test_structured_parameters_and_report_tables(service):
         assert report[0] == empty_document()["settings"]["weekly_report"]["length_hint"]
 
 
+def test_gemini_recovery_settings_work_with_pre_feature_schema_4(tmp_path, monkeypatch):
+    """Existing schema-4 databases must accept the new document-owned settings."""
+    import quickquip.llm.config_fields as config_fields
+    from quickquip.llm.config_document import compile_document, resolve_model_provider
+    from quickquip.llm.config_store import expected_schema_objects, projection_consistent
+
+    recovery_keys = {
+        "gemini_empty_response_recovery", "gemini_empty_response_recovery_max_output_tokens",
+    }
+    current_registry = config_fields.field_registry
+
+    def pre_feature_registry():
+        registry = current_registry()
+        registry["parameters"] = {
+            k: v for k, v in registry["parameters"].items() if k not in recovery_keys
+        }
+        return registry
+
+    service = ConfigService(tmp_path / "config.db")
+    with monkeypatch.context() as patch:
+        patch.setattr(config_fields, "field_registry", pre_feature_registry)
+        expected_schema_objects.cache_clear()
+        original = service.initialize()
+    expected_schema_objects.cache_clear()
+    with sqlite3.connect(service.path) as connection:
+        original_schema = connection.execute(
+            "SELECT name,sql FROM sqlite_master ORDER BY name"
+        ).fetchall()
+
+    assert service.initialize() == original
+    document = service.read()["document"]
+    document["providers"] = [{
+        "id": "p", "protocol": "gemini", "base_url": "https://example.test/v1beta",
+        "api_key_env": "SYNTHETIC_GEMINI_KEY", "default_model": "m",
+        "parameters": {
+            "gemini_empty_response_recovery": True,
+            "gemini_empty_response_recovery_max_output_tokens": 65536,
+        },
+        "models": [{"model": "m", "context_window": 65536, "parameters": {
+            "gemini_empty_response_recovery": False,
+            "gemini_empty_response_recovery_max_output_tokens": 32768,
+        }}],
+    }]
+    saved = service.replace(document, original["revision"])
+    service.store.verify()
+    with service.store.connect() as connection:
+        projection_consistent(connection)
+        assert [tuple(row) for row in connection.execute(
+            "SELECT name,sql FROM sqlite_master ORDER BY name"
+        )] == original_schema
+    assert service.read("published") == original
+    loaded = ConfigService(service.path).read()
+    assert loaded == saved
+    compiled = compile_document(loaded["document"], tmp_path)
+    assert compiled.providers["p"].gemini_empty_response_recovery is True
+    assert compiled.providers["p"].gemini_empty_response_recovery_max_output_tokens == 65536
+    effective = resolve_model_provider(compiled, "p", "m")
+    assert effective.gemini_empty_response_recovery is False
+    assert effective.gemini_empty_response_recovery_max_output_tokens == 32768
+
+
 def test_snapshot_sql_update_rejected(service):
     with service.store.connect(write=True) as conn:
         with pytest.raises(sqlite3.IntegrityError):

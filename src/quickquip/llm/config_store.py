@@ -16,6 +16,11 @@ from quickquip.configuration.database import DOMAIN_SCHEMA, SCHEMA_VERSION
 # Snapshot-owned settings that do not require a relational lookup/index column.
 # Keep the schema-2 projection compatible with databases from existing installations.
 DOCUMENT_ONLY_SETTINGS = {"runtime": frozenset({"claude_code_device_id", "gemini_cli_install_id"})}
+# Adapter recovery policy is owned by the configuration document; it has no
+# relational lookup requirement. Keep the existing schema-4 parameter columns.
+DOCUMENT_ONLY_PARAMETERS = frozenset({
+    "gemini_empty_response_recovery", "gemini_empty_response_recovery_max_output_tokens",
+})
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS config_meta (
@@ -69,7 +74,8 @@ def declared_schema(*, legacy=False):
     from quickquip.llm.config_fields import field_registry
 
     registry = field_registry()
-    columns = _columns(registry["parameters"])
+    columns = _columns({k: v for k, v in registry["parameters"].items()
+                        if k not in DOCUMENT_ONLY_PARAMETERS})
     statements = [
         f"CREATE TABLE IF NOT EXISTS provider_parameters ("
         f"provider_id TEXT PRIMARY KEY REFERENCES providers(id) ON DELETE CASCADE, {columns});",
@@ -320,7 +326,9 @@ def project_document(conn, document):
         pid = provider["id"]
         conn.execute("INSERT INTO providers VALUES(?,?,?)", (pid, position, dumps(provider)))
         _insert_fields(
-            conn, "provider_parameters", {"provider_id": pid}, provider.get("parameters", {})
+            conn, "provider_parameters", {"provider_id": pid},
+            {k: v for k, v in provider.get("parameters", {}).items()
+             if k not in DOCUMENT_ONLY_PARAMETERS},
         )
         for order, model in enumerate(provider.get("models", [])):
             conn.execute(
@@ -331,7 +339,8 @@ def project_document(conn, document):
                 conn,
                 "model_parameters",
                 {"provider_id": pid, "model": model["model"]},
-                model.get("parameters", {}),
+                {k: v for k, v in model.get("parameters", {}).items()
+                 if k not in DOCUMENT_ONLY_PARAMETERS},
             )
         for order, alias in enumerate(provider.get("aliases", [])):
             conn.execute(
