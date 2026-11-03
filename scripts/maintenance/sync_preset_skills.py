@@ -36,6 +36,8 @@ import sys
 from pathlib import Path
 from types import ModuleType
 
+sys.dont_write_bytecode = True
+
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 # 默认目录与 quickquip.common.paths 的 SKILLS_DIR / SKILLS_EXAMPLE_DIR 一致。
 # 本工具刻意不 import 包（避免连带 yaml/dotenv 等第三方依赖，保证无项目

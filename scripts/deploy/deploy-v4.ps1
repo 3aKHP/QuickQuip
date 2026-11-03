@@ -168,12 +168,13 @@ try {
         Start-Sleep -Seconds 5
     }
     $code = ssh @SshArgs $HostAlias "cat '$ExitFile'"
-    if ($LASTEXITCODE -ne 0 -or "$code".Trim() -ne '0') { throw "Remote action failed (exit $code): $Log" }
+    if ($LASTEXITCODE -ne 0) { throw "Remote action failed (exit $code): $Log" }
     if ($SyncOperation) {
         Invoke-Native 'configuration acknowledgement; resume if interrupted' {
             & $SyncPython -m quickquip.config_sync.deployment deploy-finish --root $ProjectRoot --operation $SyncOperation --host-alias $HostAlias --remote-dir $RemoteDir
         }
     }
+    if (-not $SyncOperation -and "$code".Trim() -ne '0') { throw "Remote action failed (exit $code): $Log" }
     Write-Host "$Mode complete. Status: scripts/deploy/deploy-v4.ps1 -Status -HostAlias $HostAlias -RemoteDir $RemoteDir"
 } finally {
     if (Test-Path $Temp) { Remove-Item -Recurse -Force $Temp }

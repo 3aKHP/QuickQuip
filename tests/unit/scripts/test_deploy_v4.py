@@ -1125,3 +1125,49 @@ exit 1
     assert 'config:recover' in events
     assert 'start:old' in events
     assert 'config:recovery-verified' in events
+
+
+def test_retention_failure_keeps_commit_and_finishes_confirmation(deployment):
+    root, inbox = _sync_candidate(deployment)
+    for index in range(5):
+        stale = root / 'releases' / f'20260901-00000{index}-cccccccccccc'
+        stale.mkdir()
+        (stale / '.complete').touch()
+    binary = Path(deployment[2]['PATH'].split(os.pathsep)[0])
+    real_rm = shutil.which('rm')
+    (binary / 'rm').write_text(
+        '#!/bin/bash\n'
+        'case "$*" in *20260901*) exit 1;; esac\n'
+        f'exec {real_rm} "$@"\n'
+    )
+    (binary / 'rm').chmod(0o700)
+    (binary / 'sudo').write_text('#!/bin/sh\nexit 1\n')
+    (binary / 'sudo').chmod(0o700)
+    result = run_deploy(deployment, CONFIG_SYNC='push', CONFIG_SYNC_PROTOCOL='2',
+                        SYNC_OPERATION='a' * 32)
+    assert result.returncode == 0, result.stdout + result.stderr
+    assert (root / 'current').readlink().name == NEW
+    journal = json.loads((root / '.deploy' / f'{NEW}.transaction.json').read_text())
+    assert journal['committed'] is True
+    calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
+    assert any('confirm' in call for call in calls)
+    assert 'cleanup pending:' in result.stdout
+    assert not inbox.exists()
+
+
+def test_confirmation_failure_retains_commit_and_recovery_material(deployment):
+    root, inbox = _sync_candidate(deployment)
+    docker = Path(deployment[2]['PATH'].split(os.pathsep)[0]) / 'docker'
+    docker.write_text(docker.read_text().replace(
+        '    elif "up" in args:',
+        '    elif "confirm" in args:\n        sys.exit(1)\n    elif "up" in args:',
+    ))
+    result = run_deploy(deployment, CONFIG_SYNC='push', CONFIG_SYNC_PROTOCOL='2',
+                        SYNC_OPERATION='a' * 32)
+    assert result.returncode == 1
+    assert (root / 'current').readlink().name == NEW
+    assert json.loads((root / '.deploy' / f'{NEW}.transaction.json').read_text())['committed']
+    assert (inbox / 'backup/index.json').exists()
+    assert (inbox / 'remote-deploy-v4.sh').exists()
+    calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
+    assert not any('recover' in call for call in calls)

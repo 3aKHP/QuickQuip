@@ -200,8 +200,9 @@ until ssh "${ssh_args[@]}" "$HostAlias" \
     sleep 5
 done
 code="$(ssh "${ssh_args[@]}" "$HostAlias" "cat '$ExitFile'")" || die "cannot read completion status: $ExitFile"
-[ "$code" = 0 ] || die "remote action failed (exit $code): $Log"
 if [ -n "$SyncOperation" ]; then
     "$SyncPython" -m quickquip.config_sync.deployment deploy-finish --root "$PWD" --operation "$SyncOperation" --host-alias "$HostAlias" --remote-dir "$RemoteDir" || die "deployment finished; configuration acknowledgement needs resume"
+else
+    [ "$code" = 0 ] || die "remote action failed (exit $code): $Log"
 fi
 printf '%s complete. Status: bash scripts/deploy/deploy-v4.sh --status --host-alias %s --remote-dir %s\n' "$Mode" "$HostAlias" "$RemoteDir"

@@ -220,6 +220,8 @@ except Exception:
                 "-i",
                 "--entrypoint",
                 "python",
+                "-e",
+                "PYTHONDONTWRITEBYTECODE=1",
                 "-v",
                 str(self.root) + ":/qqsync-host",
                 *ownership,

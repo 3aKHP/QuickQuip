@@ -59,6 +59,8 @@ def execute(root, application_release, action, operation, release=None):
         return installation.install(operation)
     if action in ("wait", "verify-committed"):
         return installation.verify(operation, running=True)
+    if action == "confirm":
+        return installation.confirm(operation)
     if action == "recover":
         return installation.restore(operation)
     if action == "recovery-verified":
