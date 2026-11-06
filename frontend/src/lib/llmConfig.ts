@@ -190,8 +190,13 @@ export const SETTINGS_FIELD_LABELS: Record<string, Record<string, FieldLabel>> =
   tools: {
     enabled: { label: '额外启用工具', hint: '在默认白名单与 MCP 工具之上追加。' },
     enabled_mode: { label: '启用方式', hint: '追加＝在默认集合上加；替换＝严格只用列表内工具。' },
-    discovery_mode: { label: '工具发现', hint: '自动＝工具数量不足时按需检索。' },
+    discovery_mode: { label: '工具发现', hint: '自动＝工具数量或 schema 体量达到阈值时按需检索。' },
     discovery_min_tools: { label: '触发发现的工具数下限' },
+    discovery_min_schema_tokens: {
+      label: '触发发现的 schema 体量下限',
+      unit: 'token',
+      hint: '可延迟工具 schema 总量超过该值同样开启发现；0 关闭该控线。',
+    },
     discovery_search_limit: { label: '每次检索返回数' },
     discovery_max_loaded_tools: { label: '最多同时装载工具数' },
     always_loaded: { label: '常驻工具', hint: '无论发现机制如何都直接装载。' },

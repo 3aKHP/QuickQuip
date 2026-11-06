@@ -15,7 +15,12 @@ from quickquip.configuration.database import DOMAIN_SCHEMA, SCHEMA_VERSION
 
 # Snapshot-owned settings that do not require a relational lookup/index column.
 # Keep the schema-2 projection compatible with databases from existing installations.
-DOCUMENT_ONLY_SETTINGS = {"runtime": frozenset({"claude_code_device_id", "gemini_cli_install_id"})}
+DOCUMENT_ONLY_SETTINGS = {
+    "runtime": frozenset({"claude_code_device_id", "gemini_cli_install_id"}),
+    # 体量控线阈值无关系查询需求；文档式存储保持既有库 tools_settings
+    # 列集不变（对照 parameters 的 DOCUMENT_ONLY_PARAMETERS 同款策略）。
+    "tools": frozenset({"discovery_min_schema_tokens"}),
+}
 # Adapter recovery policy is owned by the configuration document; it has no
 # relational lookup requirement. Keep the existing schema-4 parameter columns.
 DOCUMENT_ONLY_PARAMETERS = frozenset({

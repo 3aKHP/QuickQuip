@@ -224,6 +224,55 @@ def test_gemini_recovery_settings_work_with_pre_feature_schema_4(tmp_path, monke
     assert effective.gemini_empty_response_recovery_max_output_tokens == 32768
 
 
+def test_discovery_schema_tokens_works_with_pre_feature_tools_settings(tmp_path, monkeypatch):
+    """既有配置库的 tools_settings 列集不含体量控线字段,初始化不得判为
+    schema 漂移;字段经文档式存储(DOCUMENT_ONLY_SETTINGS)保存与重载。"""
+    import quickquip.llm.config_fields as config_fields
+    from quickquip.llm.config_document import compile_document
+    from quickquip.llm.config_store import expected_schema_objects, projection_consistent
+
+    current_registry = config_fields.field_registry
+
+    def pre_feature_registry():
+        registry = current_registry()
+        registry["settings"]["tools"] = {
+            k: v for k, v in registry["settings"]["tools"].items()
+            if k != "discovery_min_schema_tokens"
+        }
+        return registry
+
+    service = ConfigService(tmp_path / "config.db")
+    with monkeypatch.context() as patch:
+        patch.setattr(config_fields, "field_registry", pre_feature_registry)
+        expected_schema_objects.cache_clear()
+        original = service.initialize()
+    expected_schema_objects.cache_clear()
+    with sqlite3.connect(service.path) as connection:
+        original_schema = connection.execute(
+            "SELECT name,sql FROM sqlite_master ORDER BY name"
+        ).fetchall()
+        tools_columns = {
+            row[1] for row in connection.execute("PRAGMA table_info(tools_settings)")
+        }
+    assert "discovery_min_schema_tokens" not in tools_columns
+
+    # 现行注册表下重复初始化必须接受既有库结构(不判 unsupported_schema)
+    assert service.initialize() == original
+    document = service.read()["document"]
+    document["settings"]["tools"]["discovery_min_schema_tokens"] = 800
+    saved = service.replace(document, original["revision"])
+    service.store.verify()
+    with service.store.connect() as connection:
+        projection_consistent(connection)
+        assert [tuple(row) for row in connection.execute(
+            "SELECT name,sql FROM sqlite_master ORDER BY name"
+        )] == original_schema
+    loaded = ConfigService(service.path).read()
+    assert loaded == saved
+    compiled = compile_document(loaded["document"], tmp_path)
+    assert compiled.tools.discovery_min_schema_tokens == 800
+
+
 def test_snapshot_sql_update_rejected(service):
     with service.store.connect(write=True) as conn:
         with pytest.raises(sqlite3.IntegrityError):
