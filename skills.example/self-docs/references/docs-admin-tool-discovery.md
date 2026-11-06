@@ -26,7 +26,7 @@
     "tools": {
       "enabled": [],
       "discovery_mode": "auto",
-      "discovery_min_tools": 10,
+      "discovery_min_tools": 6,
       "discovery_search_limit": 5,
       "discovery_max_loaded_tools": 12,
       "always_loaded": [

@@ -14,8 +14,9 @@ from quickquip.llm.memory_envelope import excerpt
 MEMORY_TOOL_NAMES = frozenset({"list_memories", "read_memory", "write_memory", "delete_memory"})
 _SEARCH_EXCERPT_TOKENS = 128
 _RULES = (
-    "修改前先读原条目；约定冲突按全局管理员＞群主＞群管理员＞成员；"
-    "个人事实按可靠来源与明确更正；source_message_id=依据消息 ID，程序核实角色。"
+    "自主维护当前会话记忆，修改前先读原条目；约定冲突按全局管理员＞群主＞群管理员＞成员；"
+    "个人事实按可靠来源与明确更正；source_message_id=依据消息 ID，角色由程序核实；"
+    "未提供时来源未知。"
 )
 
 
