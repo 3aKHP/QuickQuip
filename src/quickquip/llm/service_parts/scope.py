@@ -36,9 +36,6 @@ class ScopeMixin:
     def _memory_label(self, chat_type: str) -> str:
         return "当前私聊记忆" if chat_type == "private" else "当前群记忆"
 
-    def _model_label(self, chat_type: str) -> str:
-        return "当前私聊模型配置" if chat_type == "private" else "当前群模型配置"
-
     def _context_scope_key(self, context: ToolExecutionContext) -> str:
         if context.chat_scope:
             return context.chat_scope

@@ -258,7 +258,7 @@
 | `enabled` | 自定义工具名单列表。为空数组 `[]` 时，默认暴露所有内置默认白名单工具 + 全部已启用的 MCP 工具；非空时按下方 `enabled_mode` 规则生效 | `[]` |
 | `enabled_mode` | 当 `enabled` 非空时的作用模式：<br>• **`append`（默认，追加模式）**：在内置默认白名单 + 全部 MCP 工具的基础上，额外启用列入的可选内置工具（例如开启 `draw_svg` 画图工具只需用此模式）；<br>• **`replace`（替换模式）**：严格精确白名单，仅向模型暴露 `enabled` 中明确列出的工具 | `append` |
 | `discovery_mode` | 工具按需发现模式（用于节省海量 MCP 工具占用的上下文 Token）：<br>• `off`：全量直接暴露所有工具定义；<br>• `on`：仅暴露常驻工具（`always_loaded`），其余工具通过 `tool_search` 按需动态加载；<br>• `auto`（默认）：当可延迟加载的工具数量超过 `discovery_min_tools` 阈值时自动启用按需发现 | `auto` |
-| `discovery_min_tools` | `auto` 模式下触发按需发现的“可延迟工具”数量阈值 | `10` |
+| `discovery_min_tools` | `auto` 模式下触发按需发现的“可延迟工具”数量阈值 | `6` |
 | `discovery_search_limit` | 模型单次调用 `tool_search` 最多返回并加载的工具数量 | `5` |
 | `discovery_max_loaded_tools` | 单次会话中允许同时加载的工具总数上限（含常驻工具；达到该上限后停止新增加载，已加载的工具集合保持可用） | `12` |
 | `always_loaded` | 开启工具发现时，第一轮就直接暴露给模型的常驻工具名列表（未配置时使用右侧内置默认集合） | `["tool_search", "tool_list", "get_identity", "list_memories", "read_memory", "write_memory", "delete_memory", "search_web", "activate_skill"]` |

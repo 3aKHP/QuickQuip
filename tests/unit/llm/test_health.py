@@ -19,7 +19,9 @@ async def test_health_report_checks_core_layers(llm_service, monkeypatch):
     assert items["provider"].details["api_key_status"] == "set"
     assert "provider_reachable" not in items["provider"].details  # no probe by default
     assert items["database"].status == "ok"
-    assert "get_health_status" in items["tools"].details["tools"]
+    assert "get_llm_status" in items["tools"].details["tools"]
+    # get_health_status 已移出默认面，健康报告的工具明细不应再包含它
+    assert "get_health_status" not in items["tools"].details["tools"]
     assert items["image_preprocessing"].details["enabled"] is False
 
 

@@ -125,7 +125,9 @@ class ToolsConfig:
     # （默认，opt-in 工具的启用路径）；replace = 精确过滤，只暴露所列工具
     enabled_mode: str = "append"  # append | replace
     discovery_mode: str = "auto"  # off | on | auto
-    discovery_min_tools: int = 10
+    # 与默认面联动校准：默认面 14、常驻 9，可延迟数 = 5 + MCP 工具数；
+    # 阈值 6 保持「≥2 个 MCP 工具即开启发现」的既有 auto 边界。
+    discovery_min_tools: int = 6
     discovery_search_limit: int = 5
     discovery_max_loaded_tools: int = 12
     always_loaded: list[str] = field(default_factory=list)

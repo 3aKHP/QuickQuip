@@ -116,3 +116,15 @@ async def test_recall_changes_only_tail_and_loop_reuses_snapshot(protocol, llm_s
     )
     assert cache_text(loop[key][: len(first[key])]) == cache_text(first[key])
     assert "每周六联机" in json.dumps(loop[key], ensure_ascii=False)
+
+
+async def test_memory_tool_schemas_omit_additional_properties(llm_service):
+    """#338 契约：memory 工具 schema 不声明 additionalProperties——本地
+    validate_tool_arguments 不检查未知键，Gemini parameters 路径本就剥除该键，
+    声明只增加常驻 schema 的每请求开销。重新引入前先过这组依据。"""
+    specs = llm_service.tool_registry.get_specs(
+        ["list_memories", "read_memory", "write_memory", "delete_memory"]
+    )
+    assert len(specs) == 4
+    for spec in specs:
+        assert "additionalProperties" not in spec.input_schema

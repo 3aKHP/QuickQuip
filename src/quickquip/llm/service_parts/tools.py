@@ -44,8 +44,8 @@ _MODEL_ROUTING_NOTE = (
 
 class ToolMixin(McpLifecycleMixin):
     # MRO contract: ToolMixin calls self._context_scope_key / self.build_chat_scope_key
-    # (defined in ScopeMixin) and self._scope_subject / self._memory_label /
-    # self._model_label (also ScopeMixin); _register_builtin_tools additionally
+    # (defined in ScopeMixin) and self._scope_subject / self._memory_label
+    # (also ScopeMixin); _register_builtin_tools additionally
     # calls self.register_draw_svg_tool (defined in DrawSvgToolMixin) and
     # self.register_schedule_messages_tool (defined in ScheduleMessagesToolMixin),
     # and reload_runtime calls self.start_mcp_background / self.ensure_mcp_ready.
@@ -194,7 +194,8 @@ class ToolMixin(McpLifecycleMixin):
         self.tool_registry.register(
             LLMToolSpec(
                 name="get_llm_status",
-                description="查看当前群 LLM 状态，可选返回简版状态或当前详细配置。",
+                description="查看当前群 LLM 状态与配置，可选返回简版状态或当前详细配置"
+                "（provider、model、persona、触发方式等）。",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -204,20 +205,7 @@ class ToolMixin(McpLifecycleMixin):
             ),
             self._tool_get_llm_status,
             category="diagnostics",
-            keywords=["llm", "状态", "配置", "当前"],
-        )
-        self.tool_registry.register(
-            LLMToolSpec(
-                name="get_current_model",
-                description="查看当前群正在使用的 provider、model、persona 和触发方式。",
-                input_schema={
-                    "type": "object",
-                    "properties": {},
-                },
-            ),
-            self._tool_get_current_model,
-            category="diagnostics",
-            keywords=["模型", "provider", "persona", "触发"],
+            keywords=["llm", "状态", "配置", "当前", "模型", "provider", "persona", "触发"],
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -708,28 +696,6 @@ class ToolMixin(McpLifecycleMixin):
         else:
             text = self.format_status(context.group_id, chat_type=context.chat_type)
         return f"{text}\n{_MODEL_ROUTING_NOTE}"
-
-    async def _tool_get_current_model(
-        self,
-        arguments: dict[str, object],
-        context: ToolExecutionContext,
-    ) -> str:
-        _ = arguments
-        settings = self.get_chat_settings(context.group_id, chat_type=context.chat_type)
-        lines = [f"{self._model_label(context.chat_type)}："]
-        lines.append(f"- Provider：{settings.provider_id}")
-        lines.append(f"- Model：{settings.model}")
-        lines.append(f"- Persona：{settings.persona_id}")
-        lines.append(
-            f"- 前缀触发：{'ON' if settings.allow_prefix else 'OFF'} "
-            f"({settings.trigger_prefix})"
-        )
-        if context.chat_type == "private":
-            lines.append("- 艾特触发：OFF（私聊不适用）")
-        else:
-            lines.append(f"- 艾特触发：{'ON' if settings.allow_at else 'OFF'}")
-        lines.append(f"- {_MODEL_ROUTING_NOTE}")
-        return "\n".join(lines)
 
     async def _tool_get_health_status(
         self,

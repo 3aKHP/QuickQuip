@@ -14,9 +14,9 @@ from quickquip.llm.memory_envelope import excerpt
 MEMORY_TOOL_NAMES = frozenset({"list_memories", "read_memory", "write_memory", "delete_memory"})
 _SEARCH_EXCERPT_TOKENS = 128
 _RULES = (
-    "自主维护当前会话记忆，修改前读取条目和来源。管理约定冲突时依次优先考虑"
-    "全局管理员、群主、群管理员、普通成员；个人事实按可靠来源和明确更正判断。"
-    "用 source_message_id 指明依据的消息 ID，角色由程序核实；未提供时来源未知。"
+    "自主维护当前会话记忆，修改前先读原条目；约定冲突按全局管理员＞群主＞群管理员＞成员；"
+    "个人事实按可靠来源与明确更正；source_message_id=依据消息 ID，角色由程序核实；"
+    "未提供时来源未知。"
 )
 
 
@@ -168,7 +168,7 @@ def register_memory_tools(registry, store, settings, capacity, enabled) -> None:
         (
             "write_memory",
             handlers.write,
-            "新增记忆；提供 id 和 version 时覆写。content 与 content_parts 恰选一项。" + _RULES,
+            "新增记忆；id+version 时覆写；content 与 content_parts 恰选一项。" + _RULES,
             {
                 "id": integer,
                 "version": integer,
@@ -179,7 +179,7 @@ def register_memory_tools(registry, store, settings, capacity, enabled) -> None:
                 "content_parts": {
                     "type": "object",
                     "description": (
-                        "含明确艾特的条目使用读取返回的结构，编辑 text 正文并保留 member 引用"
+                        "仅含艾特条目；回读 read_memory 结构，只改 text，保留 member 引用"
                     ),
                     "properties": {
                         # Gemini's parameters proto only accepts string enum values.
@@ -227,6 +227,8 @@ def register_memory_tools(registry, store, settings, capacity, enabled) -> None:
         ),
     ]
     for name, handler, description, properties, required in definitions:
+        # additionalProperties 省略：本地校验不检查未知键，Gemini parameters
+        # 路径本就剥除该键，省下的是常驻 schema 的每请求开销。
         registry.register(
             LLMToolSpec(
                 name=name,
@@ -235,7 +237,6 @@ def register_memory_tools(registry, store, settings, capacity, enabled) -> None:
                     "type": "object",
                     "properties": properties,
                     "required": required,
-                    "additionalProperties": False,
                 },
             ),
             handler,
