@@ -1186,6 +1186,10 @@
                     "minimum": 1,
                     "type": "integer"
                   },
+                  "discovery_min_schema_tokens": {
+                    "minimum": 0,
+                    "type": "integer"
+                  },
                   "discovery_min_tools": {
                     "minimum": 1,
                     "type": "integer"
