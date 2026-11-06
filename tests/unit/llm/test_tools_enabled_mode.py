@@ -136,6 +136,83 @@ def test_config_no_append_semantics_warning_when_enabled_empty(tmp_path, caplog)
     assert not any("enabled_mode" in record.message for record in caplog.records)
 
 
+def _register_heavy_tool(host, name: str = "heavy_tool") -> None:
+    host.tool_registry.register(
+        LLMToolSpec(
+            name=name,
+            description="重型描述" * 400,  # ~1600 字符,token 估算远超体量线
+            input_schema=_MINIMAL_SPEC,
+        ),
+        lambda arguments, context: "",
+    )
+
+
+def test_auto_discovery_triggers_on_heavy_schemas():
+    """体量控线:个数控线不触发时,少量重型 schema 仍开启 auto 发现。"""
+    host = _FakeHost(_tools(["heavy_tool"]), set())
+    host.config.tools.discovery_min_tools = 99  # 隔离个数控线
+    host.config.tools.discovery_min_schema_tokens = 500
+    _register_heavy_tool(host)
+
+    assert host._is_tool_discovery_enabled() is True
+
+
+def test_auto_discovery_schema_line_disabled_at_zero():
+    host = _FakeHost(_tools(["heavy_tool"]), set())
+    host.config.tools.discovery_min_tools = 99
+    host.config.tools.discovery_min_schema_tokens = 0
+    _register_heavy_tool(host)
+
+    assert host._is_tool_discovery_enabled() is False
+
+
+def test_auto_discovery_count_line_still_governs_lightweight_face():
+    """轻量默认面(5 个可延迟、schema 极小)不触発体量线,维持原 auto 边界。"""
+    host = _FakeHost(_tools([]), set())
+    host.config.runtime.tool_calling_enabled = True
+
+    assert host._is_tool_discovery_enabled() is False
+    assert host._get_deferred_tool_names() == []
+
+
+async def test_real_builtin_deferred_face_stays_under_schema_threshold(llm_service):
+    """真实内置默认面的可延迟 schema 总量必须对体量线留足余量——
+    内置工具描述增肥导致默认面静默翻转 discovery 时,此测试报警。"""
+    from quickquip.llm.service_parts.constants import (
+        DEFAULT_ALWAYS_LOADED_TOOLS,
+        DEFAULT_ENABLED_TOOLS,
+    )
+    from quickquip.llm.tool_registry import estimate_spec_tokens
+
+    deferred = [
+        name
+        for name in DEFAULT_ENABLED_TOOLS
+        if name not in DEFAULT_ALWAYS_LOADED_TOOLS
+        and llm_service.tool_registry.has_tool(name)
+    ]
+    assert deferred  # fixture 至少注册了非 skill 延迟面
+    total = sum(
+        estimate_spec_tokens(spec)
+        for spec in llm_service.tool_registry.get_specs(deferred)
+    )
+    threshold = llm_service.config.tools.discovery_min_schema_tokens
+    assert total < threshold * 0.5, (
+        f"内置默认面可延迟 schema {total} tok 已超过体量线 {threshold} 的一半,"
+        "继续增肥会翻转默认部署的 auto 发现边界"
+    )
+
+
+def test_config_parses_discovery_schema_tokens(tmp_path):
+    config_path = tmp_path / "llm.toml"
+    config_path.write_text('[tools]\ndiscovery_min_schema_tokens = 800\n', encoding="utf-8")
+    loaded = load_llm_config(config_path)
+    assert loaded.tools.discovery_min_schema_tokens == 800
+
+
+def test_discovery_schema_tokens_default():
+    assert ToolsConfig().discovery_min_schema_tokens == 2000
+
+
 # ---------------------------------------------------------------------------
 # builtin_search 与 search_web 的会话级互斥
 # ---------------------------------------------------------------------------

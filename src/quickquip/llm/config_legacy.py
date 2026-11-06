@@ -689,6 +689,9 @@ def _load_llm_config(path: str | Path) -> LLMConfig:
             enabled_mode=_enabled_mode,
             discovery_mode=str(tools_raw.get("discovery_mode", "auto")).strip().lower() or "auto",
             discovery_min_tools=max(1, int(tools_raw.get("discovery_min_tools", 6))),
+            discovery_min_schema_tokens=max(
+                0, int(tools_raw.get("discovery_min_schema_tokens", 2000))
+            ),
             discovery_search_limit=max(1, min(int(tools_raw.get("discovery_search_limit", 5)), 20)),
             discovery_max_loaded_tools=max(
                 1, min(int(tools_raw.get("discovery_max_loaded_tools", 12)), 64)

@@ -13,6 +13,25 @@ from quickquip.llm.tools import (
     ToolExecutionContext,
     ToolManifestEntry,
 )
+from quickquip.llm.token_estimate import estimate_tokens
+
+
+def estimate_spec_tokens(spec: LLMToolSpec) -> int:
+    """单个工具声明的体量估算：协议中立序列化（name+description+
+    input_schema 紧凑 JSON）经同一字符级估算函数 ``estimate_tokens``
+    核算。载荷形态与 dev/research 工具面盘点脚本一致；与
+    ``request_budget`` 的逐字段 repr 口径存在 ~10-20% 数值差，
+    两处口径各自独立、不互换。"""
+    payload = json.dumps(
+        {
+            "name": spec.name,
+            "description": spec.description,
+            "input_schema": spec.input_schema,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return estimate_tokens(payload)
 
 
 class ToolValidationError(ValueError):

@@ -23,6 +23,7 @@ from quickquip.llm.service_parts.constants import (
 )
 from quickquip.llm.service_parts.mcp_lifecycle import McpLifecycleMixin
 from quickquip.llm.tool_discovery import resolve_explicit_tool_names
+from quickquip.llm.tool_registry import estimate_spec_tokens
 from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
 from quickquip.search.web_search import SearXNGSearchClient, format_search_response
 
@@ -313,8 +314,18 @@ class ToolMixin(McpLifecycleMixin):
         }
         if mode == "on":
             return len(enabled) > len(always_names)
-        deferred_count = len(enabled_set - always_names)
-        return deferred_count > self.config.tools.discovery_min_tools
+        deferred_names = enabled_set - always_names
+        if len(deferred_names) > self.config.tools.discovery_min_tools:
+            return True
+        # 体量控线：个数不多但 schema 总量已足以常驻挤占上下文时同样开启
+        min_schema_tokens = self.config.tools.discovery_min_schema_tokens
+        if min_schema_tokens <= 0 or not deferred_names:
+            return False
+        deferred_tokens = sum(
+            estimate_spec_tokens(spec)
+            for spec in self.tool_registry.get_specs(sorted(deferred_names))
+        )
+        return deferred_tokens > min_schema_tokens
 
     def _get_enabled_tool_specs(
         self, chat_type: str = "group", *, provider_id: str | None = None

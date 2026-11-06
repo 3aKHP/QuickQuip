@@ -25,6 +25,7 @@
       "enabled": [],
       "discovery_mode": "auto",
       "discovery_min_tools": 6,
+      "discovery_min_schema_tokens": 2000,
       "discovery_search_limit": 5,
       "discovery_max_loaded_tools": 12,
       "always_loaded": [
@@ -47,6 +48,7 @@
 | `enabled` | 工具名单。空列表启用默认内置工具和已连接的 MCP 工具；非空时默认追加，`enabled_mode = "replace"` 按名单精确过滤，见[配置参考](configuration.md#settingstools--工具调用) |
 | `discovery_mode` | `off` 全量暴露；`on` 强制工具发现（`tool_search` 被白名单排除或当前没有可延迟工具时不生效）；`auto` 超过阈值后自动启用 |
 | `discovery_min_tools` | `auto` 模式下，可延迟工具数超过该值才启用工具发现 |
+| `discovery_min_schema_tokens` | `auto` 模式下的体量控线：可延迟工具 schema 总量（token 估算）超过该值同样启用，与数量阈值 OR；`0` 关闭 |
 | `discovery_search_limit` | 单次 `tool_search` 最多返回并加载的工具数；同一上限也约束 `tool_list mode = "load"` 的单次加载数 |
 | `discovery_max_loaded_tools` | 新增工具时比较当前已加载总数，`always_loaded` 常驻工具计入；达到该值后停止新增，已有集合保留 |
 | `always_loaded` | 工具发现开启时直接提供给模型的常驻工具。未配置时回退内置默认集：`tool_search` / `tool_list` / `get_identity` / `list_memories` / `read_memory` / `write_memory` / `delete_memory` / `search_web` / `activate_skill` |
