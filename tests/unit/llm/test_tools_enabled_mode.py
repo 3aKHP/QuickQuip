@@ -175,6 +175,33 @@ def test_auto_discovery_count_line_still_governs_lightweight_face():
     assert host._get_deferred_tool_names() == []
 
 
+async def test_real_builtin_deferred_face_stays_under_schema_threshold(llm_service):
+    """真实内置默认面的可延迟 schema 总量必须对体量线留足余量——
+    内置工具描述增肥导致默认面静默翻转 discovery 时,此测试报警。"""
+    from quickquip.llm.service_parts.constants import (
+        DEFAULT_ALWAYS_LOADED_TOOLS,
+        DEFAULT_ENABLED_TOOLS,
+    )
+    from quickquip.llm.tool_registry import estimate_spec_tokens
+
+    deferred = [
+        name
+        for name in DEFAULT_ENABLED_TOOLS
+        if name not in DEFAULT_ALWAYS_LOADED_TOOLS
+        and llm_service.tool_registry.has_tool(name)
+    ]
+    assert deferred  # fixture 至少注册了非 skill 延迟面
+    total = sum(
+        estimate_spec_tokens(spec)
+        for spec in llm_service.tool_registry.get_specs(deferred)
+    )
+    threshold = llm_service.config.tools.discovery_min_schema_tokens
+    assert total < threshold * 0.5, (
+        f"内置默认面可延迟 schema {total} tok 已超过体量线 {threshold} 的一半,"
+        "继续增肥会翻转默认部署的 auto 发现边界"
+    )
+
+
 def test_config_parses_discovery_schema_tokens(tmp_path):
     config_path = tmp_path / "llm.toml"
     config_path.write_text('[tools]\ndiscovery_min_schema_tokens = 800\n', encoding="utf-8")
