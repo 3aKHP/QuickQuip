@@ -40,7 +40,8 @@ DEFAULT_ALWAYS_LOADED_TOOLS = [
     ACTIVATE_SKILL_TOOL_NAME,
 ]
 # get_group_stats / get_rule_status / get_health_status 已移出默认面（生产 0 调用），
-# 仍注册并经 config.tools.enabled opt-in；PRIVATE_UNAVAILABLE_TOOLS 条目相应保留。
+# 仍注册并经 config.tools.enabled opt-in；前两者在 PRIVATE_UNAVAILABLE_TOOLS 中，
+# 私聊面同样经 opt-in 后才会被过滤。
 DEFAULT_ENABLED_TOOLS = [
     TOOL_SEARCH_NAME,
     TOOL_LIST_NAME,
