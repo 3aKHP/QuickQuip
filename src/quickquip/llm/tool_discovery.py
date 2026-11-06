@@ -91,22 +91,33 @@ class ToolDiscovery:
         self._loaded_names.append(name)
         return True
 
-    def load_from_search_call(self, call) -> list[str]:
+    def load_from_search_call(self, call) -> tuple[list[str], list[str]]:
+        """装载 tool_search 调用点名的工具，返回 ``(已新装载, 未装载)``。
+
+        未装载 = 点名/命中但未入集（达到 ``max_loaded_tools`` 上限或不在
+        启用面）；已加载工具的重复点名是无害 no-op，不计入未装载。工具
+        循环对未装载名单追加纠正行，避免 handler 承诺"下一轮可用"却被
+        上限截断、模型下一轮撞"尚未加载"错误。
+        """
         try:
             arguments = json.loads(call.arguments_json or "{}")
         except json.JSONDecodeError:
-            return []
+            return [], []
         query = str(arguments.get("query", "")).strip()
+        loaded: list[str] = []
+        skipped: list[str] = []
         explicit = resolve_explicit_tool_names(query, self._enabled_names)
         if explicit is not None:
-            # select:/裸名点名：按名直接加载（幂等，已加载为无害 no-op；
-            # 数量受 max_loaded_tools 兜底）。选择已可用工具不算错误，
-            # 模型可无缝继续调用（防重试打转）。
-            loaded: list[str] = []
+            # select:/裸名点名：按名直接加载（幂等，已加载为无害 no-op，
+            # 模型可无缝继续调用，防重试打转）。
             for name in explicit:
+                if name in self._loaded_names:
+                    continue
                 if self._append_loaded_tool(name):
                     loaded.append(name)
-            return loaded
+                else:
+                    skipped.append(name)
+            return loaded, skipped
         category = str(arguments.get("category", "")).strip()
         try:
             limit = int(arguments.get("limit", self._search_limit) or self._search_limit)
@@ -119,11 +130,14 @@ class ToolDiscovery:
             category=category,
             limit=max(1, min(limit, self._search_limit)),
         )
-        loaded: list[str] = []
         for entry in matches:
+            if entry.name in self._loaded_names:
+                continue
             if self._append_loaded_tool(entry.name):
                 loaded.append(entry.name)
-        return loaded
+            else:
+                skipped.append(entry.name)
+        return loaded, skipped
 
     def load_from_list_call(self, call) -> list[str]:
         try:

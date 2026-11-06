@@ -233,11 +233,19 @@ def test_get_deferred_tool_names_requires_discovery():
     assert off._get_deferred_tool_names() == []
 
     on = _FakeHost(ToolsConfig(enabled=[], discovery_mode="on"), set())
+    on.config.runtime.tool_calling_enabled = True
     names = on._get_deferred_tool_names()
     # 常驻面与元工具不在公告名单;延迟面技能三件套在
     assert "get_identity" not in names
     assert "tool_search" not in names and "tool_list" not in names
     assert {"read_skill_resource", "search_skill_resources", "run_skill_script"} <= set(names)
+
+
+def test_get_deferred_tool_names_gated_by_tool_calling_switch():
+    """工具总闸关闭时模型面前无工具,公告必须同闸关闭。"""
+    gated = _FakeHost(ToolsConfig(enabled=[], discovery_mode="on"), set())
+    gated.config.runtime.tool_calling_enabled = False
+    assert gated._get_deferred_tool_names() == []
 
 
 async def test_tool_search_select_reports_available_and_missing():

@@ -74,8 +74,9 @@ def test_load_from_search_call_select_loads_named_tools():
         ["tool_search", "tool_list", "draw_svg", "get_group_stats"],
         initial=["tool_search", "tool_list"],
     )
-    loaded = discovery.load_from_search_call(_call("select:draw_svg,get_group_stats"))
+    loaded, skipped = discovery.load_from_search_call(_call("select:draw_svg,get_group_stats"))
     assert loaded == ["draw_svg", "get_group_stats"]
+    assert skipped == []
     assert discovery.is_loaded("draw_svg") and discovery.is_loaded("get_group_stats")
 
 
@@ -83,26 +84,29 @@ def test_load_from_search_call_select_is_idempotent_noop():
     discovery = _discovery(
         ["tool_search", "tool_list", "draw_svg"], initial=["tool_search", "tool_list", "draw_svg"]
     )
-    # 已加载工具重复点名:无害 no-op,不报错、不重复入集
-    assert discovery.load_from_search_call(_call("select:draw_svg")) == []
+    # 已加载工具重复点名:无害 no-op,不报错、不重复入集、不计未装载
+    loaded, skipped = discovery.load_from_search_call(_call("select:draw_svg"))
+    assert loaded == [] and skipped == []
     assert discovery.is_loaded("draw_svg")
+
+
+def test_load_from_search_call_reports_cap_skipped_names():
+    discovery = _discovery(
+        ["tool_search", "a", "b", "c"], initial=["tool_search"], max_loaded=2
+    )
+    # 上限 2:初始 1 个,select 三个只装 1 个;被截断的名字进未装载清单
+    loaded, skipped = discovery.load_from_search_call(_call("select:a,b,c"))
+    assert loaded == ["a"]
+    assert skipped == ["b", "c"]
+    assert not discovery.is_loaded("c")
 
 
 def test_load_from_search_call_bare_name_fast_path():
     discovery = _discovery(
         ["tool_search", "tool_list", "draw_svg"], initial=["tool_search", "tool_list"]
     )
-    assert discovery.load_from_search_call(_call("draw_svg")) == ["draw_svg"]
-
-
-def test_load_from_search_call_select_respects_max_loaded_cap():
-    discovery = _discovery(
-        ["tool_search", "a", "b", "c"], initial=["tool_search"], max_loaded=2
-    )
-    # 上限 2:初始 1 个,select 三个只能装入 1 个
-    loaded = discovery.load_from_search_call(_call("select:a,b,c"))
-    assert loaded == ["a"]
-    assert not discovery.is_loaded("c")
+    loaded, _ = discovery.load_from_search_call(_call("draw_svg"))
+    assert loaded == ["draw_svg"]
 
 
 def test_load_from_search_call_keyword_path_unchanged():
@@ -110,4 +114,5 @@ def test_load_from_search_call_keyword_path_unchanged():
         ["tool_search", "draw_svg"], initial=["tool_search"]
     )
     # 关键词路径不受影响:按描述命中
-    assert discovery.load_from_search_call(_call("draw_svg 工具")) == ["draw_svg"]
+    loaded, skipped = discovery.load_from_search_call(_call("draw_svg 工具"))
+    assert loaded == ["draw_svg"] and skipped == []

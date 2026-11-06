@@ -352,6 +352,10 @@ class ToolMixin(McpLifecycleMixin):
         self, chat_type: str = "group", *, provider_id: str | None = None
     ) -> list[str]:
         """discovery 开启时按名延迟加载的工具清单（信封公告用，仅名字）。"""
+        if not self.config.runtime.tool_calling_enabled:
+            # 工具总闸关闭时模型面前没有任何工具，公告会诱导无效调用
+            # （与 tool_specs 的闸门同口径）。
+            return []
         if not self._is_tool_discovery_enabled(chat_type, provider_id=provider_id):
             return []
         loaded = set(

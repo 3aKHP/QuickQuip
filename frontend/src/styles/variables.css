@@ -88,6 +88,7 @@
   --qq-env-participants: #10b981;
   --qq-env-memories: #8b5cf6;
   --qq-env-vocab: #f59e0b;
+  --qq-env-tools: #6366f1;
   --qq-env-mentions: #06b6d4;
   --qq-epoch-stripe-a: #f0f1f5;
   --qq-epoch-stripe-b: #eceef3;
@@ -277,6 +278,7 @@
   --qq-env-participants: #34d399;
   --qq-env-memories: #a78bfa;
   --qq-env-vocab: #fbbf24;
+  --qq-env-tools: #818cf8;
   --qq-env-mentions: #22d3ee;
   --qq-epoch-stripe-a: #262b36;
   --qq-epoch-stripe-b: #2b313d;
