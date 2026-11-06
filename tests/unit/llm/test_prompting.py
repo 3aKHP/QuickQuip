@@ -17,6 +17,7 @@ from quickquip.llm.prompting import (
     build_messages,
     build_system_prompt,
     build_turn_envelope,
+    build_turn_envelope_segments,
     format_participant_label,
     merge_image_urls,
 )
@@ -867,6 +868,63 @@ def test_turn_envelope_omits_empty_sections(frozen_now):
     assert lines[0] == "【轮次上下文】"
     assert len(lines) == 2
     assert lines[1].startswith("- 当前时间：")
+
+
+def test_turn_envelope_deferred_tools_segment(frozen_now):
+    envelope = build_turn_envelope(
+        now=frozen_now,
+        prompt="你好",
+        memories=[],
+        vocab=_vocab_stub(),
+        deferred_tool_names=["draw_svg", "get_group_stats"],
+    )
+    assert "可按需加载的工具" in envelope
+    assert "draw_svg" in envelope and "get_group_stats" in envelope
+    assert "select:名称" in envelope
+    # 名单为空时整段省略（默认面/discovery 关闭不注入）
+    absent = build_turn_envelope(now=frozen_now, prompt="你好", memories=[], vocab=_vocab_stub())
+    assert "可按需加载的工具" not in absent
+
+
+def test_turn_envelope_deferred_tools_caps_at_twenty(frozen_now):
+    names = [f"tool_{i}" for i in range(25)]
+    envelope = build_turn_envelope(
+        now=frozen_now, prompt="你好", memories=[], vocab=_vocab_stub(),
+        deferred_tool_names=names,
+    )
+    assert "tool_19" in envelope
+    assert "tool_20" not in envelope
+    assert "等 25 个" in envelope
+
+
+def test_turn_envelope_segment_keys_match_cache_contract(frozen_now):
+    """段键序同步契约:分解的键序与 envelope_cache.SEGMENT_KEYS 逐项一致
+    (空段省略,在场键按契约序排列),且 build_turn_envelope 逐字节等于
+    join(tools 段在尾部)。"""
+    from quickquip.llm.envelope_cache import SEGMENT_KEYS
+
+    parts = build_turn_envelope_segments(
+        now=frozen_now,
+        prompt="你好",
+        memories=[{"id": 1, "title": "t", "content": "c", "version": 1}],
+        vocab=_vocab_stub(),
+        participants=[{"canonical_name": "阿桃", "sender_name": "桃", "user_id": "20002"}],
+        mention_profiles=[{"canonical_name": "镜子", "user_id": "20003"}],
+        deferred_tool_names=["draw_svg"],
+    )
+    assert list(parts.keys()) == [key for key in SEGMENT_KEYS if key in parts]
+    assert "tools" in parts  # 传入名单时段在场,且为最后一个键
+    assert list(parts.keys())[-1] == "tools"
+    envelope = build_turn_envelope(
+        now=frozen_now,
+        prompt="你好",
+        memories=[{"id": 1, "title": "t", "content": "c", "version": 1}],
+        vocab=_vocab_stub(),
+        participants=[{"canonical_name": "阿桃", "sender_name": "桃", "user_id": "20002"}],
+        mention_profiles=[{"canonical_name": "镜子", "user_id": "20003"}],
+        deferred_tool_names=["draw_svg"],
+    )
+    assert envelope == "\n".join(parts.values())
 
 
 def test_turn_envelope_festival_on_injected_date():

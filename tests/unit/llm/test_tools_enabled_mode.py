@@ -216,6 +216,58 @@ def test_builtin_search_removes_search_web_from_always_loaded():
     assert "tool_search" in always
 
 
+def _ctx(provider_id: str = "p") -> ToolExecutionContext:
+    return ToolExecutionContext(
+        group_id=1001,
+        user_id=2002,
+        sender_name="tester",
+        provider_id=provider_id,
+        model="m",
+        chat_scope="1001",
+    )
+
+
+def test_get_deferred_tool_names_requires_discovery():
+    # auto 模式下默认面可延迟数(5)未过阈值 → 关闭 → 无公告名单
+    off = _FakeHost(_tools([]), set())
+    assert off._get_deferred_tool_names() == []
+
+    on = _FakeHost(ToolsConfig(enabled=[], discovery_mode="on"), set())
+    on.config.runtime.tool_calling_enabled = True
+    names = on._get_deferred_tool_names()
+    # 常驻面与元工具不在公告名单;延迟面技能三件套在
+    assert "get_identity" not in names
+    assert "tool_search" not in names and "tool_list" not in names
+    assert {"read_skill_resource", "search_skill_resources", "run_skill_script"} <= set(names)
+
+
+def test_get_deferred_tool_names_gated_by_tool_calling_switch():
+    """工具总闸关闭时模型面前无工具,公告必须同闸关闭。"""
+    gated = _FakeHost(ToolsConfig(enabled=[], discovery_mode="on"), set())
+    gated.config.runtime.tool_calling_enabled = False
+    assert gated._get_deferred_tool_names() == []
+
+
+async def test_tool_search_select_reports_available_and_missing():
+    host = _FakeHost(_tools(["draw_svg", "get_group_stats"]), set())
+
+    text = await host._tool_search_tools(
+        {"query": "select:draw_svg,get_identity,no_such_tool"}, _ctx()
+    )
+
+    assert "draw_svg" in text and "将于下一轮可用" in text
+    assert "get_identity" in text and "已常驻" in text
+    assert "no_such_tool" in text and "未找到" in text
+
+
+async def test_tool_search_bare_tool_name_loads_without_select():
+    host = _FakeHost(_tools(["draw_svg"]), set())
+
+    text = await host._tool_search_tools({"query": "draw_svg"}, _ctx())
+
+    assert "draw_svg" in text and "将于下一轮可用" in text
+
+
 async def test_tool_search_view_excludes_search_web_for_builtin_session():
     """tool_search 处理器视图与主链路一致：内置搜索会话搜不到 search_web。"""
     host = _FakeHost(

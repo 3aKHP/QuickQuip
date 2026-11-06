@@ -24,7 +24,7 @@
 
 <script setup lang="ts">
 /**
- * 【轮次上下文】信封构成条：最近一封的六段 token 分解。
+ * 【轮次上下文】信封构成条：最近一封的分段 token 分解。
  *
  * 段键与后端 build_turn_envelope_segments 一致（vocab 段含黑话解释）；
  * 空段整段省略。数据只来自 epoch_snapshot 的实时缓存——信封组装时渲染、
@@ -103,6 +103,7 @@ defineExpose({ total })
 .seg-mentions { background: var(--qq-env-mentions); }
 .seg-memories { background: var(--qq-env-memories); }
 .seg-vocab { background: var(--qq-env-vocab); }
+.seg-tools { background: var(--qq-env-tools); }
 .envseg-enter-active { transition: opacity 0.5s ease, transform 0.5s ease; }
 .envseg-enter-from { opacity: 0; transform: translateY(6px); }
 .empty {

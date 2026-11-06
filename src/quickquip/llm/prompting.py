@@ -370,12 +370,14 @@ def build_turn_envelope_segments(
     chat_type: str = "group",
     participants: list[dict[str, str]] | None = None,
     mention_profiles: list[dict[str, str]] | None = None,
+    deferred_tool_names: list[str] | None = None,
 ) -> dict[str, str]:
-    """当轮上下文信封的六段分解（键序即拼接序）。
+    """当轮上下文信封的分解（键序即拼接序）。
 
     段键：time（头行+时间行，恒在）/ festival / participants / mentions /
-    memories / vocab；空段整段省略。vocab 段在分解口径上并入黑话解释
-    （glossary），六段契约由此定死。``build_turn_envelope`` 逐字节等于
+    memories / vocab / tools；空段整段省略。vocab 段在分解口径上并入黑话
+    解释（glossary），tools 段为 discovery 开启时的延迟池按名公告（仅
+    名字，schema 仍按需加载）。``build_turn_envelope`` 逐字节等于
     ``"\\n".join(parts.values())``——两函数的行序改动必须同步。
     """
     parts: dict[str, str] = {}
@@ -436,6 +438,14 @@ def build_turn_envelope_segments(
     if vocab_lines:
         parts["vocab"] = "\n".join(vocab_lines)
 
+    if deferred_tool_names:
+        names = deferred_tool_names[:20]
+        suffix = f" 等 {len(deferred_tool_names)} 个" if len(deferred_tool_names) > 20 else ""
+        parts["tools"] = (
+            f"- 可按需加载的工具：{'、'.join(names)}{suffix}"
+            "（用 tool_search 的 select:名称 按名加载，或按能力关键词搜索）"
+        )
+
     return parts
 
 
@@ -448,6 +458,7 @@ def build_turn_envelope(
     chat_type: str = "group",
     participants: list[dict[str, str]] | None = None,
     mention_profiles: list[dict[str, str]] | None = None,
+    deferred_tool_names: list[str] | None = None,
 ) -> str:
     """渲染当轮上下文信封，由 build_messages prepend 到最终 user 消息头部。
 
@@ -465,6 +476,7 @@ def build_turn_envelope(
         chat_type=chat_type,
         participants=participants,
         mention_profiles=mention_profiles,
+        deferred_tool_names=deferred_tool_names,
     )
     return "\n".join(parts.values())
 

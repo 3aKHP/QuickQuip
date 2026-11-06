@@ -22,6 +22,7 @@ from quickquip.llm.service_parts.constants import (
     TOOL_SEARCH_NAME,
 )
 from quickquip.llm.service_parts.mcp_lifecycle import McpLifecycleMixin
+from quickquip.llm.tool_discovery import resolve_explicit_tool_names
 from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
 from quickquip.search.web_search import SearXNGSearchClient, format_search_response
 
@@ -58,7 +59,9 @@ class ToolMixin(McpLifecycleMixin):
         self.tool_registry.register(
             LLMToolSpec(
                 name=TOOL_SEARCH_NAME,
-                description="按能力描述搜索当前可用工具，并在下一轮工具调用中加载少量相关工具。",
+                description="按能力关键词搜索可用工具并在下一轮加载；"
+                "query 也支持 select:名称1,名称2 按名精确批量加载"
+                "（预期要用多个工具时合并进一次调用，不要逐个加载）。",
                 input_schema={
                     "type": "object",
                     "properties": {
@@ -345,6 +348,26 @@ class ToolMixin(McpLifecycleMixin):
                 categories.append(category)
         return categories
 
+    def _get_deferred_tool_names(
+        self, chat_type: str = "group", *, provider_id: str | None = None
+    ) -> list[str]:
+        """discovery 开启时按名延迟加载的工具清单（信封公告用，仅名字）。"""
+        if not self.config.runtime.tool_calling_enabled:
+            # 工具总闸关闭时模型面前没有任何工具，公告会诱导无效调用
+            # （与 tool_specs 的闸门同口径）。
+            return []
+        if not self._is_tool_discovery_enabled(chat_type, provider_id=provider_id):
+            return []
+        loaded = set(
+            self._get_always_loaded_tool_names(chat_type=chat_type, provider_id=provider_id)
+        )
+        meta_names = {TOOL_SEARCH_NAME, TOOL_LIST_NAME}
+        return [
+            name
+            for name in self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id)
+            if name not in loaded and name not in meta_names
+        ]
+
     def bind_group_stats_tracker(self, tracker: "GroupStatsTracker | None") -> None:
         self.stats_tracker = tracker
         self._identity_repository.names_provider = (
@@ -445,6 +468,32 @@ class ToolMixin(McpLifecycleMixin):
                 chat_type=context.chat_type, provider_id=context.provider_id
             )
         )
+
+        explicit = resolve_explicit_tool_names(query, current_enabled)
+        if explicit is not None:
+            # select:/裸名点名：可用（常驻或下一轮加载）与未找到分组回报；
+            # 点名已可用工具是无害 no-op，不构成错误（防模型重试打转）。
+            enabled_set = set(current_enabled)
+            available: list[str] = []
+            missing: list[str] = []
+            for name in explicit:
+                if name in enabled_set and self.tool_registry.has_tool(name):
+                    available.append(name)
+                else:
+                    missing.append(name)
+            lines = ["工具加载请求："]
+            if available:
+                lines.append(
+                    "- "
+                    + "、".join(
+                        f"{name}（{'已常驻' if name in loaded_names else '将于下一轮可用'}）"
+                        for name in available
+                    )
+                )
+            if missing:
+                lines.append(f"- 未找到：{'、'.join(missing)}（可用 tool_list 查看工具目录）")
+            lines.append("下一轮请直接调用已加载的工具名。")
+            return "\n".join(lines)
         matches = self.tool_registry.search_manifest(
             query,
             enabled_names=current_enabled,

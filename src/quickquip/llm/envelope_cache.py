@@ -1,4 +1,4 @@
-"""最近一封【轮次上下文】信封的六段 token 分解缓存（进程内旁路）。
+"""最近一封【轮次上下文】信封的分段 token 分解缓存（进程内旁路）。
 
 与纪元锚点同生命周期语义：真值在 bot 进程内存，不落库（信封组装时渲染、
 逐轮全价重算是设计契约）；本缓存只服务 Web Admin 纪元看板的"信封构成条"
@@ -14,7 +14,7 @@ from quickquip.llm.epoch import EpochKey
 from quickquip.llm.token_estimate import estimate_tokens
 
 # 分解口径的段序（与 prompting.build_turn_envelope_segments 的键序一致）。
-SEGMENT_KEYS = ("time", "festival", "participants", "mentions", "memories", "vocab")
+SEGMENT_KEYS = ("time", "festival", "participants", "mentions", "memories", "vocab", "tools")
 
 
 @dataclass(frozen=True, slots=True)

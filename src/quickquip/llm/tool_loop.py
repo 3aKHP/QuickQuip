@@ -280,11 +280,16 @@ async def run_tool_call_loop(
                     result = await result_pipeline.process_result(call, result)
             if request_guard is not None:
                 request_guard(current_request)
-            tool_results.append(result)
-            if turn_recorder is not None and execution_id is not None:
-                turn_recorder.on_tool_finished(execution_id, result)
             if tool_discovery_enabled and call.name == tool_search_name and not result.is_error:
-                newly_loaded = discovery.load_from_search_call(call)
+                newly_loaded, not_loaded = discovery.load_from_search_call(call)
+                if not_loaded:
+                    # 上限/启用面截断的纠正行：handler 侧无法感知本 run 的
+                    # 装载余量，这里以装载权威身份补正承诺，防止下一轮
+                    # 撞"尚未加载"错误白白多耗一轮。
+                    result.content += (
+                        f"\n注意：以下工具未加载（已达加载上限或不可用）："
+                        f"{'、'.join(not_loaded)}。请先使用已加载的工具。"
+                    )
                 if newly_loaded:
                     logger.info(
                         "LLM tool discovery loaded tools: provider=%s model=%s names=%s",
@@ -301,6 +306,9 @@ async def run_tool_call_loop(
                         response.model,
                         newly_loaded,
                     )
+            tool_results.append(result)
+            if turn_recorder is not None and execution_id is not None:
+                turn_recorder.on_tool_finished(execution_id, result)
         tool_messages = [
             LLMConversationMessage(
                 role="tool",

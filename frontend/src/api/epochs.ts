@@ -82,14 +82,14 @@ export interface EpochEnvelopeSnapshot {
   scope_key: string
   provider_id: string
   model: string
-  /** 六段分解（键序 time/festival/participants/mentions/memories/vocab） */
+  /** 分段分解（键序 time/festival/participants/mentions/memories/vocab/tools） */
   parts: Record<string, number>
   total_tokens: number
   recorded_at: number
 }
 
 /**
- * 信封六段的键序与展示名（与后端 build_turn_envelope_segments 段序一致）。
+ * 信封各段的键序与展示名（与后端 build_turn_envelope_segments 段序一致）。
  * 构成条与图例的唯一来源——新增/改名段只动这里。
  */
 export const ENVELOPE_SEGMENTS: ReadonlyArray<{ key: string; name: string }> = [
@@ -99,6 +99,7 @@ export const ENVELOPE_SEGMENTS: ReadonlyArray<{ key: string; name: string }> = [
   { key: 'mentions', name: '艾特档案' },
   { key: 'memories', name: '持久记忆' },
   { key: 'vocab', name: '词表命中' },
+  { key: 'tools', name: '工具公告' },
 ]
 
 export interface EpochSnapshot {

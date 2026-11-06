@@ -320,6 +320,7 @@ class TurnRequestAssembler:
             self.memories,
             participants=self.participants,
             mention_profiles=mention_profiles,
+            provider_id=self.provider.id,
         )
         self.envelope_parts['participants'] = (
             self.envelope_parts.get('participants', '')
