@@ -29,20 +29,38 @@ def resolve_explicit_tool_names(
 ) -> list[str] | None:
     """显式点名解析：``select:`` 前缀或裸工具名 → 规范化名字列表。
 
-    ``select:a,b,c`` 逗号分隔批量点名（名字按启用名单做大小写规范化，
-    未命中名单的原样返回，由加载侧按注册表校验）。裸名快路径仅在
-    query **精确等于**启用面内某工具名（不区分大小写）时生效；其余
-    形态一律返回 None，走关键词搜索，避免普通查询被误判为点名。
+    ``select:a,b,c`` 逗号分隔批量点名。名字解析规则：**大小写完全匹配
+    优先**；仅当小写形式在启用名单中**唯一**命中时才做大小写容错——
+    启用面存在仅大小写不同的多个工具名时，容错会静默装错目标工具，
+    此时未精确命中的名字原样返回（加载侧报"未找到/未装载"），失败
+    可见。裸名快路径同理，仅在能无歧义解析时生效；其余形态一律返回
+    None，走关键词搜索，避免普通查询被误判为点名。
     """
-    by_lower = {name.lower(): name for name in enabled_names}
+    exact_set = set(enabled_names)
+    by_lower: dict[str, list[str]] = {}
+    for name in enabled_names:
+        by_lower.setdefault(name.lower(), []).append(name)
+
+    def _resolve(name: str) -> str:
+        if name in exact_set:
+            return name
+        candidates = by_lower.get(name.lower())
+        if candidates and len(candidates) == 1:
+            return candidates[0]
+        return name  # 未命中或有歧义：原样返回，由加载/回报侧判失败
+
     selected = parse_tool_select_query(query)
     if selected is not None:
-        return [by_lower.get(name.lower(), name) for name in selected]
+        return [_resolve(name) for name in selected]
     text = (query or "").strip()
     if not text:
         return None
-    hit = by_lower.get(text.lower())
-    return [hit] if hit is not None else None
+    if text in exact_set:
+        return [text]
+    candidates = by_lower.get(text.lower())
+    if candidates and len(candidates) == 1:
+        return [candidates[0]]
+    return None
 
 
 class ToolDiscovery:

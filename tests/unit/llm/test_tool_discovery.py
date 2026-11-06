@@ -63,10 +63,23 @@ def test_resolve_explicit_names_covers_select_and_bare_name():
         "draw_svg",
         "get_group_stats",
     ]
-    # 裸名快路径 + 大小写规范化到启用名单
+    # 裸名快路径 + 大小写规范化到启用名单(唯一命中才容错)
     assert resolve_explicit_tool_names("DRAW_SVG", enabled) == ["draw_svg"]
     # 非显式形态返回 None(走关键词搜索)
     assert resolve_explicit_tool_names("画图", enabled) is None
+
+
+def test_resolve_explicit_names_case_collision_prefers_exact_match():
+    """仅大小写不同的两个合法工具名:精确匹配优先,静默装错必须被杜绝。"""
+    enabled = ["mcp_demo_Read", "mcp_demo_read"]
+    # 精确大小写命中各自的目标,不被 by_lower 覆盖
+    assert resolve_explicit_tool_names("select:mcp_demo_Read", enabled) == ["mcp_demo_Read"]
+    assert resolve_explicit_tool_names("select:mcp_demo_read", enabled) == ["mcp_demo_read"]
+    assert resolve_explicit_tool_names("mcp_demo_Read", enabled) == ["mcp_demo_Read"]
+    # 大小写歧义(小写命中两个候选)时不容错:select 原样返回(加载侧
+    # 报未找到),裸名不触发快路径(走关键词搜索)
+    assert resolve_explicit_tool_names("select:mcp_demo_READ", enabled) == ["mcp_demo_READ"]
+    assert resolve_explicit_tool_names("mcp_demo_READ", enabled) is None
 
 
 def test_load_from_search_call_select_loads_named_tools():
