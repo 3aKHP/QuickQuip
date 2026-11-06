@@ -8,7 +8,7 @@ from quickquip.llm.service_parts.tools import ToolMixin
 from quickquip.llm.tool_registry import ToolRegistry
 from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
 
-_BUILTIN_TOOLS = [*DEFAULT_ENABLED_TOOLS, "draw_svg"]
+_BUILTIN_TOOLS = [*DEFAULT_ENABLED_TOOLS, "draw_svg", "get_group_stats", "get_rule_status"]
 
 _MINIMAL_SPEC = {"type": "object", "properties": {}}
 
@@ -58,8 +58,20 @@ def test_replace_mode_filters_exactly():
     assert names == ["search_web", "mcp_a"]
 
 
+def test_demoted_tools_require_opt_in():
+    """get_group_stats/get_rule_status 已移出默认面，opt-in 后才可用。"""
+    host = _FakeHost(_tools([]), set())
+    names = host._get_enabled_tool_names()
+    assert "get_group_stats" not in names
+    assert "get_rule_status" not in names
+
+    opted_in = _FakeHost(_tools(["get_group_stats"]), set())
+    assert "get_group_stats" in opted_in._get_enabled_tool_names()
+
+
 def test_private_chat_filters_unavailable_tools():
-    host = _FakeHost(_tools(["draw_svg"]), set())
+    host = _FakeHost(_tools(["draw_svg", "get_group_stats"]), set())
+    assert "get_group_stats" in host._get_enabled_tool_names()
     names = host._get_enabled_tool_names(chat_type="private")
     assert "get_group_stats" not in names
     assert "get_rule_status" not in names

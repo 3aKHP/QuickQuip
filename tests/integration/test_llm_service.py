@@ -98,13 +98,15 @@ async def test_generate_reply_populates_system_prompt_and_tools(
         "get_identity",
         "list_memories",
         "search_web",
-        "get_group_stats",
-        "get_rule_status",
         "search_recent_messages",
         "get_llm_status",
-        "get_current_model",
     }
     assert expected <= tool_names
+    # 诊断/群状态工具已移出默认面（opt-in 仍可启用）
+    assert "get_current_model" not in tool_names
+    assert "get_group_stats" not in tool_names
+    assert "get_rule_status" not in tool_names
+    assert "get_health_status" not in tool_names
 
     # Recent messages get injected as context in the first user message
     history_msg = req.messages[0].content

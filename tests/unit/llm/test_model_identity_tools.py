@@ -32,13 +32,9 @@ async def _execute(llm_service, name: str, arguments: dict) -> str:
     return result.content
 
 
-async def test_get_current_model_returns_active_identity(llm_service):
-    content = await _execute(llm_service, "get_current_model", {})
-
-    assert "openai-main" in content
-    assert "gpt-test" in content
-    # 模型可见路径必须附带路由说明（防模型把回复归因给虚构的"其他模型"）
-    assert _MODEL_ROUTING_NOTE in content
+async def test_get_current_model_tool_is_removed_from_registry(llm_service):
+    """get_current_model 已并入 get_llm_status（detail="current"），不再单独注册。"""
+    assert not llm_service.tool_registry.has_tool("get_current_model")
 
 
 async def test_get_llm_status_returns_active_identity_in_both_details(llm_service):

@@ -39,6 +39,8 @@ DEFAULT_ALWAYS_LOADED_TOOLS = [
     SEARCH_TOOL_NAME,
     ACTIVATE_SKILL_TOOL_NAME,
 ]
+# get_group_stats / get_rule_status / get_health_status 已移出默认面（生产 0 调用），
+# 仍注册并经 config.tools.enabled opt-in；PRIVATE_UNAVAILABLE_TOOLS 条目相应保留。
 DEFAULT_ENABLED_TOOLS = [
     TOOL_SEARCH_NAME,
     TOOL_LIST_NAME,
@@ -48,12 +50,8 @@ DEFAULT_ENABLED_TOOLS = [
     "write_memory",
     "delete_memory",
     SEARCH_TOOL_NAME,
-    "get_group_stats",
-    "get_rule_status",
     "search_recent_messages",
     "get_llm_status",
-    "get_current_model",
-    "get_health_status",
     ACTIVATE_SKILL_TOOL_NAME,
     READ_SKILL_RESOURCE_TOOL_NAME,
     SEARCH_SKILL_RESOURCES_TOOL_NAME,
