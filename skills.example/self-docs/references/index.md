@@ -61,7 +61,7 @@
 - `docs/admin/sensitive-filter.md` → `references/docs-admin-sensitive-filter.md` — 敏感词过滤部署与维护 ｜ 关键词：config/sensitive_words.toml、words、block、soft、/llm reload、/llm health verbose、sensitive_filter、GET /ops/api/sensitive-filter/status、[内容已屏蔽]、/draw
 - `docs/admin/skills.md` → `references/docs-admin-skills.md` — Skill 系统（`skills/`） ｜ 关键词：skills/、description、SKILL.md、references/、scripts/、.py、.sh、self-docs、host-healthcheck、settings.skills.catalog_dir
 - `docs/admin/storage-migration.md` → `references/docs-admin-storage-migration.md` — 将配置与运行数据分开存储（存储迁移指南） ｜ 关键词：data/llm_config.db、migration_required、init、start.bat、config/managed/config.db、data/config_runtime.db、config/managed/scheduled_messages.json、data/pending_scheduled_messages.json、data/、data/llm.db
-- `docs/admin/tool-discovery.md` → `references/docs-admin-tool-discovery.md` — LLM 工具发现配置 ｜ 关键词：tool_search、settings.tools、enabled、enabled_mode = "replace"、discovery_mode、off、on、auto、discovery_min_tools、discovery_search_limit
+- `docs/admin/tool-discovery.md` → `references/docs-admin-tool-discovery.md` — LLM 工具发现配置 ｜ 关键词：tool_search、settings.tools、enabled、enabled_mode = "replace"、discovery_mode、off、on、auto、discovery_min_tools、discovery_min_schema_tokens
 - `docs/admin/web-admin.md` → `references/docs-admin-web-admin.md` — Web Admin 管理后台 ｜ 关键词：/ops/、.env、WEB_ADMIN_PASSWORD、start.bat、http://127.0.0.1:5104/ops/、ssh -N -L 5104:127.0.0.1:5104 user@server、web-admin、up -d、/ops/#/stats、awakening_*
 
 ## 开发文档
