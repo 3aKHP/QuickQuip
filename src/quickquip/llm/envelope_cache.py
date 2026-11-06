@@ -14,7 +14,7 @@ from quickquip.llm.epoch import EpochKey
 from quickquip.llm.token_estimate import estimate_tokens
 
 # 分解口径的段序（与 prompting.build_turn_envelope_segments 的键序一致）。
-SEGMENT_KEYS = ("time", "festival", "participants", "mentions", "memories", "vocab")
+SEGMENT_KEYS = ("time", "festival", "participants", "mentions", "memories", "vocab", "tools")
 
 
 @dataclass(frozen=True, slots=True)

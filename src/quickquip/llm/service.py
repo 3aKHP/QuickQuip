@@ -435,8 +435,9 @@ class LLMService(
         memories: list[dict[str, object]],
         participants: list[dict[str, str]] | None = None,
         mention_profiles: list[dict[str, str]] | None = None,
+        provider_id: str | None = None,
     ) -> dict[str, str]:
-        # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。返回六段分解，
+        # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。返回分段分解，
         # join 由 TurnRequestAssembler 统一执行（字节口径单点）。
         return build_turn_envelope_segments(
             now=datetime.now(ZoneInfo(BEIJING_TIMEZONE)),
@@ -446,6 +447,9 @@ class LLMService(
             chat_type=chat_type,
             participants=participants,
             mention_profiles=mention_profiles,
+            deferred_tool_names=self._get_deferred_tool_names(
+                chat_type, provider_id=provider_id
+            ),
         )
 
     def _collect_mention_profiles(

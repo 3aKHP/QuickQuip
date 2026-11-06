@@ -9,6 +9,40 @@ the loaded set has this single owner.
 from __future__ import annotations
 
 import json
+import re
+
+_SELECT_QUERY_RE = re.compile(r"^select:(.+)$", re.IGNORECASE)
+
+
+def parse_tool_select_query(query: str) -> list[str] | None:
+    """``select:a,b,c`` → 名字列表；其余形态（含空 select:）返回 None。"""
+    text = (query or "").strip()
+    match = _SELECT_QUERY_RE.match(text)
+    if not match:
+        return None
+    names = [name.strip() for name in match.group(1).split(",") if name.strip()]
+    return names or None
+
+
+def resolve_explicit_tool_names(
+    query: str, enabled_names: list[str]
+) -> list[str] | None:
+    """显式点名解析：``select:`` 前缀或裸工具名 → 规范化名字列表。
+
+    ``select:a,b,c`` 逗号分隔批量点名（名字按启用名单做大小写规范化，
+    未命中名单的原样返回，由加载侧按注册表校验）。裸名快路径仅在
+    query **精确等于**启用面内某工具名（不区分大小写）时生效；其余
+    形态一律返回 None，走关键词搜索，避免普通查询被误判为点名。
+    """
+    by_lower = {name.lower(): name for name in enabled_names}
+    selected = parse_tool_select_query(query)
+    if selected is not None:
+        return [by_lower.get(name.lower(), name) for name in selected]
+    text = (query or "").strip()
+    if not text:
+        return None
+    hit = by_lower.get(text.lower())
+    return [hit] if hit is not None else None
 
 
 class ToolDiscovery:
@@ -63,6 +97,16 @@ class ToolDiscovery:
         except json.JSONDecodeError:
             return []
         query = str(arguments.get("query", "")).strip()
+        explicit = resolve_explicit_tool_names(query, self._enabled_names)
+        if explicit is not None:
+            # select:/裸名点名：按名直接加载（幂等，已加载为无害 no-op；
+            # 数量受 max_loaded_tools 兜底）。选择已可用工具不算错误，
+            # 模型可无缝继续调用（防重试打转）。
+            loaded: list[str] = []
+            for name in explicit:
+                if self._append_loaded_tool(name):
+                    loaded.append(name)
+            return loaded
         category = str(arguments.get("category", "")).strip()
         try:
             limit = int(arguments.get("limit", self._search_limit) or self._search_limit)

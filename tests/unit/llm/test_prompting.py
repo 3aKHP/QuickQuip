@@ -869,6 +869,33 @@ def test_turn_envelope_omits_empty_sections(frozen_now):
     assert lines[1].startswith("- 当前时间：")
 
 
+def test_turn_envelope_deferred_tools_segment(frozen_now):
+    envelope = build_turn_envelope(
+        now=frozen_now,
+        prompt="你好",
+        memories=[],
+        vocab=_vocab_stub(),
+        deferred_tool_names=["draw_svg", "get_group_stats"],
+    )
+    assert "可按需加载的工具" in envelope
+    assert "draw_svg" in envelope and "get_group_stats" in envelope
+    assert "select:名称" in envelope
+    # 名单为空时整段省略（默认面/discovery 关闭不注入）
+    absent = build_turn_envelope(now=frozen_now, prompt="你好", memories=[], vocab=_vocab_stub())
+    assert "可按需加载的工具" not in absent
+
+
+def test_turn_envelope_deferred_tools_caps_at_twenty(frozen_now):
+    names = [f"tool_{i}" for i in range(25)]
+    envelope = build_turn_envelope(
+        now=frozen_now, prompt="你好", memories=[], vocab=_vocab_stub(),
+        deferred_tool_names=names,
+    )
+    assert "tool_19" in envelope
+    assert "tool_20" not in envelope
+    assert "等 25 个" in envelope
+
+
 def test_turn_envelope_festival_on_injected_date():
     from quickquip.chat.festival import get_active_festival
 
