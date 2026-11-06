@@ -91,7 +91,9 @@ discovery 启用时，轮次信封（【轮次上下文】尾段）附加一行*
 `discovery_mode = "auto"`：
 
 - 统计不在 `always_loaded` 里的可延迟工具数量
-- 当可延迟工具数大于 `discovery_min_tools` 时启用
+- 当可延迟工具数大于 `discovery_min_tools`，或其 schema 总量（协议中立
+  序列化的 token 估算）大于 `discovery_min_schema_tokens` 时启用（两线
+  OR；体量线设 0 关闭）
 - 小工具集直接发送全部启用工具
 
 配置位于 `settings.tools`，由草稿保存与应用流程生效。工具调用总开关 `settings.runtime.tool_calling_enabled` 默认关闭，开启后才向模型提供工具。`settings.tools.enabled` 排除 `tool_search` 时，发现机制关闭；配置严格名单时应同时保留 `tool_search` 和 `tool_list`。

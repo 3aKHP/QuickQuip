@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 
+import json
 import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
@@ -8,6 +9,7 @@ from typing import TYPE_CHECKING
 from quickquip.llm.config import LLMConfig, provider_builtin_search_active
 from quickquip.llm.image_preprocessor import ImagePreprocessor, VisionImagePreprocessor
 from quickquip.llm.provider import build_provider_client
+from quickquip.llm.token_estimate import estimate_tokens
 from quickquip.llm.service_parts.constants import (
     ACTIVATE_SKILL_TOOL_NAME,
     DEFAULT_ALWAYS_LOADED_TOOLS,
@@ -32,6 +34,22 @@ if TYPE_CHECKING:
     from quickquip.common.recent_message_buffer import RecentMessageBuffer
 
 logger = logging.getLogger(__name__)
+
+
+def _estimate_spec_tokens(spec: LLMToolSpec) -> int:
+    """协议中立序列化（name+description+input_schema 紧凑 JSON）的字符级
+    token 估算，与工具面盘点的核算口径一致。"""
+    payload = json.dumps(
+        {
+            "name": spec.name,
+            "description": spec.description,
+            "input_schema": spec.input_schema,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    return estimate_tokens(payload)
+
 
 # 模型可见的身份类工具输出统一附带的路由说明：画图/语音/搜索等能力可能由
 # 不同模型通道服务，Provider/Model 字段只描述当前对话的路由，避免模型
@@ -313,8 +331,18 @@ class ToolMixin(McpLifecycleMixin):
         }
         if mode == "on":
             return len(enabled) > len(always_names)
-        deferred_count = len(enabled_set - always_names)
-        return deferred_count > self.config.tools.discovery_min_tools
+        deferred_names = enabled_set - always_names
+        if len(deferred_names) > self.config.tools.discovery_min_tools:
+            return True
+        # 体量控线：个数不多但 schema 总量已足以常驻挤占上下文时同样开启
+        min_schema_tokens = self.config.tools.discovery_min_schema_tokens
+        if min_schema_tokens <= 0 or not deferred_names:
+            return False
+        deferred_tokens = sum(
+            _estimate_spec_tokens(spec)
+            for spec in self.tool_registry.get_specs(sorted(deferred_names))
+        )
+        return deferred_tokens > min_schema_tokens
 
     def _get_enabled_tool_specs(
         self, chat_type: str = "group", *, provider_id: str | None = None

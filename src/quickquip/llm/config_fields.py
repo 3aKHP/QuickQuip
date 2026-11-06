@@ -91,6 +91,7 @@ RANGES = {
     "quick_judge.timeout": (0.5, None),
     "quick_judge.max_tokens": (8, None),
     "tools.discovery_min_tools": (1, None),
+    "tools.discovery_min_schema_tokens": (0, None),
     "tools.discovery_search_limit": (1, 20),
     "tools.discovery_max_loaded_tools": (1, 64),
     "skills.script_timeout_ms": (1, MAX_SCRIPT_TIMEOUT_MS),

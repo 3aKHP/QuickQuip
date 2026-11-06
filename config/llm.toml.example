@@ -117,11 +117,14 @@ max_tokens = 64    # reasoning 模型的思考 token 计入该预算，需调大
 enabled = []
 enabled_mode = "append"
 # 工具发现：工具较多时只常驻少量核心工具，其余工具由 tool_search
-# 按能力描述搜索并在下一轮加载。auto 模式会在可延迟工具数超过
-# discovery_min_tools 后启用，适合接入大批 MCP 工具时控制提示词体积。
-# 默认面 14、常驻 9 时阈值 6 ≈ 接入 2 个及以上 MCP 工具即开启发现。
+# 按能力描述搜索并在下一轮加载。auto 模式在可延迟工具数超过
+# discovery_min_tools，或其 schema 总量（token 估算）超过
+# discovery_min_schema_tokens 时启用（两线 OR），适合接入大批或重型
+# MCP 工具时控制提示词体积。默认面 14、常驻 9 时阈值 6 ≈ 接入 2 个及
+# 以上 MCP 工具即开启发现；体量线对少量重型 schema 工具同样生效。
 discovery_mode = "auto"       # off | on | auto
 discovery_min_tools = 6
+discovery_min_schema_tokens = 2000
 discovery_search_limit = 5
 discovery_max_loaded_tools = 12
 always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "read_memory", "write_memory", "delete_memory", "search_web", "activate_skill"]

@@ -136,6 +136,56 @@ def test_config_no_append_semantics_warning_when_enabled_empty(tmp_path, caplog)
     assert not any("enabled_mode" in record.message for record in caplog.records)
 
 
+def _register_heavy_tool(host, name: str = "heavy_tool") -> None:
+    host.tool_registry.register(
+        LLMToolSpec(
+            name=name,
+            description="重型描述" * 400,  # ~1600 字符,token 估算远超体量线
+            input_schema=_MINIMAL_SPEC,
+        ),
+        lambda arguments, context: "",
+    )
+
+
+def test_auto_discovery_triggers_on_heavy_schemas():
+    """体量控线:个数控线不触发时,少量重型 schema 仍开启 auto 发现。"""
+    host = _FakeHost(_tools(["heavy_tool"]), set())
+    host.config.tools.discovery_min_tools = 99  # 隔离个数控线
+    host.config.tools.discovery_min_schema_tokens = 500
+    _register_heavy_tool(host)
+
+    assert host._is_tool_discovery_enabled() is True
+
+
+def test_auto_discovery_schema_line_disabled_at_zero():
+    host = _FakeHost(_tools(["heavy_tool"]), set())
+    host.config.tools.discovery_min_tools = 99
+    host.config.tools.discovery_min_schema_tokens = 0
+    _register_heavy_tool(host)
+
+    assert host._is_tool_discovery_enabled() is False
+
+
+def test_auto_discovery_count_line_still_governs_lightweight_face():
+    """轻量默认面(5 个可延迟、schema 极小)不触発体量线,维持原 auto 边界。"""
+    host = _FakeHost(_tools([]), set())
+    host.config.runtime.tool_calling_enabled = True
+
+    assert host._is_tool_discovery_enabled() is False
+    assert host._get_deferred_tool_names() == []
+
+
+def test_config_parses_discovery_schema_tokens(tmp_path):
+    config_path = tmp_path / "llm.toml"
+    config_path.write_text('[tools]\ndiscovery_min_schema_tokens = 800\n', encoding="utf-8")
+    loaded = load_llm_config(config_path)
+    assert loaded.tools.discovery_min_schema_tokens == 800
+
+
+def test_discovery_schema_tokens_default():
+    assert ToolsConfig().discovery_min_schema_tokens == 2000
+
+
 # ---------------------------------------------------------------------------
 # builtin_search 与 search_web 的会话级互斥
 # ---------------------------------------------------------------------------

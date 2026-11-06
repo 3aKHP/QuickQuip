@@ -128,6 +128,10 @@ class ToolsConfig:
     # 与默认面联动校准：默认面 14、常驻 9，可延迟数 = 5 + MCP 工具数；
     # 阈值 6 保持「≥2 个 MCP 工具即开启发现」的既有 auto 边界。
     discovery_min_tools: int = 6
+    # 体量控线：可延迟工具的 schema 总 token 超过该值时 auto 同样开启
+    # 发现（与个数阈值 OR 关系）。个数制对 schema 体重不敏感——少量重型
+    # MCP 工具足以常驻挤占上下文时也应触发；0 关闭该控线。
+    discovery_min_schema_tokens: int = 2000
     discovery_search_limit: int = 5
     discovery_max_loaded_tools: int = 12
     always_loaded: list[str] = field(default_factory=list)
