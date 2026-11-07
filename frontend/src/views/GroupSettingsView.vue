@@ -120,6 +120,14 @@
                   <option :value="false">关</option>
                 </select>
               </div>
+              <div v-if="!selectedIsPrivate" class="field">
+                <label>群历史查询<UiInfoTip text="开启后模型可按需搜索并阅读本群已归档的历史消息（只读工具 search_group_history / read_group_history，等效群内 /llm history on）。查询结果仅参与当前回答，不写入长期记录；全局默认在 LLM 配置 [group_history] 的 enabled。" /></label>
+                <select v-model="draftTriState.history_enabled">
+                  <option :value="null">跟随默认（{{ defaultHint('history_enabled') }}）</option>
+                  <option :value="true">开</option>
+                  <option :value="false">关</option>
+                </select>
+              </div>
               <div class="field">
                 <label>中间轮发送<UiInfoTip text="开启后该会话的工具调用多轮回复中，非最终轮的正文照常作为消息发出（如「我先查一下…」这类过程文本）；关闭时中间轮只记录不发送。全局默认在 LLM 配置 的 agent_delivery_intermediate_enabled 配置。" /></label>
                 <select v-model="draftTriState.agent_delivery_intermediate_enabled">

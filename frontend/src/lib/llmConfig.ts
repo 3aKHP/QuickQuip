@@ -120,10 +120,10 @@ export const MODEL_FIELD_LABELS: Record<string, FieldLabel> = {
   context_window: { label: '上下文容量', hint: '留空自动识别；识别失败将无法参与长上下文任务。', unit: 'token' },
 }
 
-/** settings 十二 section 的中文名 */
+/** settings 各 section 的中文名 */
 export const SETTINGS_SECTION_LABELS: Record<string, string> = {
   runtime: '总开关与默认', triggers: '触发与回复', auto_search: '自动搜索', quick_judge: '快速判定',
-  tools: '工具', skills: 'Skill', mcp: 'MCP 服务', daily_summary: '每日总结', daily_briefing: '每日播报',
+  tools: '工具', skills: 'Skill', group_history: '群历史查询', mcp: 'MCP 服务', daily_summary: '每日总结', daily_briefing: '每日播报',
   weekly_report: '每周报告', monthly_report: '每月报告', image_preprocessing: '图片预处理',
 }
 
@@ -200,6 +200,20 @@ export const SETTINGS_FIELD_LABELS: Record<string, Record<string, FieldLabel>> =
     discovery_search_limit: { label: '每次检索返回数' },
     discovery_max_loaded_tools: { label: '最多同时装载工具数' },
     always_loaded: { label: '常驻工具', hint: '无论发现机制如何都直接装载。' },
+  },
+  group_history: {
+    enabled: {
+      label: '启用群历史查询',
+      hint: '总默认开关（出厂关）。群可在群设置或 /llm history 单独开关；开启后模型可按需只读检索本群归档历史。',
+    },
+    investigation_provider_id: {
+      label: '调查执行器渠道',
+      hint: '留空＝跟随当前对话渠道；专用历史调查子任务使用的 provider。',
+    },
+    investigation_model: {
+      label: '调查执行器模型', hint: '留空＝跟随渠道默认模型。' },
+    investigation_timeout_seconds: { label: '调查总时限', unit: '秒' },
+    investigation_max_calls: { label: '调查模型调用数上限', unit: '次' },
   },
   skills: {
     enabled: { label: '启用 Skill' },

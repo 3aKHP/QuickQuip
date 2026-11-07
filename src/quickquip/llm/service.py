@@ -136,6 +136,7 @@ from quickquip.llm.settings import ResolvedGroupSettings, resolve_group_settings
 from quickquip.llm.store import LLMStore
 from quickquip.llm.tool_registry import ToolRegistry
 from quickquip.llm.runtime_snapshot import RuntimeSnapshotMixin, chat_model_entry, snapshot_entry
+from quickquip.llm.history_tools import HistoryToolState
 from quickquip.llm.tool_loop import run_tool_call_loop
 from quickquip.llm.tools import (
     LLMConversationMessage,
@@ -214,6 +215,8 @@ class LLMService(
         self._delivery_sink = None
         self.rule_switch: "GroupRuleSwitch | None" = None
         self.recent_message_buffer: "RecentMessageBuffer | None" = None
+        # #72 群历史查询服务（app 层注入；None = 未绑定，工具不执行）
+        self.group_history_service = None
         self._init_mcp_lifecycle()
         self._session_presets: dict[str, str] = {}
         # 会话纪元锚点表（进程内）：进程重启 = 冷一次缓存，首请求按 CTX 跨度懒初始化
@@ -436,6 +439,7 @@ class LLMService(
         participants: list[dict[str, str]] | None = None,
         mention_profiles: list[dict[str, str]] | None = None,
         provider_id: str | None = None,
+        history_enabled: bool = False,
     ) -> dict[str, str]:
         # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。返回分段分解，
         # join 由 TurnRequestAssembler 统一执行（字节口径单点）。
@@ -448,7 +452,7 @@ class LLMService(
             participants=participants,
             mention_profiles=mention_profiles,
             deferred_tool_names=self._get_deferred_tool_names(
-                chat_type, provider_id=provider_id
+                chat_type, provider_id=provider_id, history_enabled=history_enabled
             ),
         )
 
@@ -760,6 +764,16 @@ class LLMService(
         request_guard=None,
     ):
         epoch_key = EpochKey(context.chat_scope, provider.id, request.model)
+        history_enabled = bool(getattr(context, "history", None))
+
+        # 结果空间探针（#72 §8.1）：按当前 request 实况推导"还能塞进多少
+        # 工具结果"，历史工具的结果预算据此在每轮刷新。
+        def _result_space_probe(current_request: LLMRequest) -> int:
+            from quickquip.llm.request_budget import check_request_budget
+
+            check = check_request_budget(self.config, provider, current_request)
+            return max(0, check.budget_limit - check.estimated_input_tokens)
+
         return await run_tool_call_loop(
             provider=provider,
             request=request,
@@ -778,17 +792,24 @@ class LLMService(
             search_failsafe_max_calls_per_round=SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
             search_max_calls_per_round=self.config.auto_search.search_max_calls_per_round,
             tool_discovery_enabled=self._is_tool_discovery_enabled(
-                context.chat_type, provider_id=provider.id
+                context.chat_type,
+                provider_id=provider.id,
+                history_enabled=history_enabled,
             ),
             tool_search_name=TOOL_SEARCH_NAME,
             tool_list_name=TOOL_LIST_NAME,
             enabled_tool_names=self._get_enabled_tool_names(
-                chat_type=context.chat_type, provider_id=provider.id
+                chat_type=context.chat_type,
+                provider_id=provider.id,
+                history_enabled=history_enabled,
             ),
             initial_tool_names=[spec.name for spec in request.tools],
             tool_discovery_search_limit=self.config.tools.discovery_search_limit,
             tool_discovery_max_loaded_tools=self.config.tools.discovery_max_loaded_tools,
             image_preprocessor=self.image_preprocessor,
+            result_space_probe=(
+                _result_space_probe if getattr(context, "history", None) else None
+            ),
         )
 
     def _load_scrubbed_history_and_participants(
@@ -1250,8 +1271,15 @@ class LLMService(
             provider=provider, model=settings.model
         )
         builtin_search_active = provider_builtin_search_active(provider)
+        history_enabled = self._effective_history_enabled(
+            request.chat_id, request.chat_type
+        )
         tool_specs = (
-            self._get_enabled_tool_specs(chat_type=request.chat_type, provider_id=provider.id)
+            self._get_enabled_tool_specs(
+                chat_type=request.chat_type,
+                provider_id=provider.id,
+                history_enabled=history_enabled,
+            )
             if self.config.runtime.tool_calling_enabled
             else []
         )
@@ -1274,6 +1302,7 @@ class LLMService(
             load_history=self._load_scrubbed_history_and_participants,
             collect_mention_profiles=self._collect_mention_profiles,
             build_turn_envelope=self._build_turn_envelope,
+            history_enabled=history_enabled,
             sender_role=request.sender_role,
             build_messages=self._build_messages,
             chat_id=request.chat_id,
@@ -1374,6 +1403,11 @@ class LLMService(
             chat_scope=scope_key,
             chat_type=request.chat_type,
             sender_role=request.sender_role,
+            history=(
+                HistoryToolState()
+                if history_enabled and self.group_history_service is not None
+                else None
+            ),
             memory_sources={
                 str(item['message_id']): {
                     'source_message_id': str(item['message_id']),
@@ -1389,6 +1423,10 @@ class LLMService(
         )
 
         recorder: TurnRecorder | None = None
+
+        if tool_context.history is not None:
+            # 调查执行器在每次子模型活动前复核父会话有效性（§7：取消传播）
+            tool_context.history.parent_cancel_check = check_session
 
         def check_error_session() -> None:
             try:

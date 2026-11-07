@@ -159,6 +159,9 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
         if tokens[:2] == ["memory", "status"]:
             await llm_cmd.finish(svc.format_memory_status(chat_id, chat_type=chat_type))
 
+        if tokens[:2] == ["history", "status"]:
+            await llm_cmd.finish(svc.format_history_status(chat_id, chat_type=chat_type))
+
         if tokens[:1] == ["effort"]:
             # 查询无门槛；变更走内联管理门（probe 先例），早于下方的总闸门。
             action = tokens[1].lower() if len(tokens) >= 2 else "status"
@@ -318,6 +321,27 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             svc.set_group_allow_at(chat_id, value == "on")
             await llm_cmd.finish(f"{scope_label}艾特触发已设为 {value}")
 
+        if tokens[:2] == ["history", "on"]:
+            if chat_type != "group":
+                await llm_cmd.finish("群聊历史查询仅支持群聊使用")
+            svc.set_group_history_enabled(chat_id, True)
+            await llm_cmd.finish(
+                svc.format_history_status(chat_id, chat_type=chat_type)
+                + "\n开启后模型可按需搜索/阅读本群归档历史（只读）。"
+            )
+
+        if tokens[:2] == ["history", "off"]:
+            if chat_type != "group":
+                await llm_cmd.finish("群聊历史查询仅支持群聊使用")
+            svc.set_group_history_enabled(chat_id, False)
+            await llm_cmd.finish(svc.format_history_status(chat_id, chat_type=chat_type))
+
+        if tokens[:2] == ["history", "reset"]:
+            if chat_type != "group":
+                await llm_cmd.finish("群聊历史查询仅支持群聊使用")
+            svc.set_group_history_enabled(chat_id, None)
+            await llm_cmd.finish(svc.format_history_status(chat_id, chat_type=chat_type))
+
         if tokens[:2] == ["memory", "on"]:
             svc.set_chat_memory_enabled(chat_id, True, chat_type=chat_type)
             await llm_cmd.finish(f"{scope_label}记忆注入已开启")
@@ -364,6 +388,7 @@ def register_llm_commands(on_command, Message, MessageSegment) -> None:
             "personas|persona use <id>|trigger prefix <value>|"
             "trigger prefix_mode on|off|trigger at on|off|"
             "memory status|memory on|memory off|"
+            "history status|history on|off|reset|"
             "auto_memory on|off|reset|status|"
             "effort <档>|effort default|effort clear|effort status|"
             "delivery intermediate|final|all <on|off|reset>|delivery status|"

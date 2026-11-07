@@ -44,3 +44,12 @@ Agent 执行记录需要保存工具调用事实，以支持回放、交付检�
 - [HTTP Trace 职责](../llm-module.md#1-模块定位)
 - [MCP 内容进入模型的归一化边界](0018-mcp-result-normalization.md)
 - [临时检索结果术语](../../glossary.md#ephemeral-result)
+
+## 2026-11 补记：ephemeral 全链接线（#72）
+
+本 ADR 定义的 EPHEMERAL 保留政策随 #72 落到工具面：注册元数据
+（`result_retention` / `redact_arguments`）→ 工具循环传递 retention →
+记录器按政策省略结果正文；声明参数按白名单持久化（只留模式/时间范围/
+引用计数）；ephemeral 工具触达后的 Loop，Turn 原生副本整体省略
+（`NativeOmissionReason.EPHEMERAL_POLICY`），内存协议状态保留至 Loop
+结束。首批接入：`search_recent_messages` 与群历史三工具（ADR-0027）。

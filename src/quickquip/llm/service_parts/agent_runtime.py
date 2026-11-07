@@ -212,6 +212,7 @@ class TurnRecorder:
         declared_calls: list,
         executable_calls: list,
         has_more_rounds: bool,
+        native_state_omission: NativeOmissionReason | None = None,
     ) -> dict[str, str]:
         """完整响应到达后的原子提交（§5.3.4-5）。
 
@@ -219,6 +220,9 @@ class TurnRecorder:
         ``executable_calls`` = 本轮实际执行子集；差集由 ``on_tool_skipped``
         记 not_executed。预算/字节触顶抛 ``DeliveryAborted``；文字交付由
         ``deliver_turn`` 在工具执行前单独驱动（§5.3.6）。
+
+        ``native_state_omission`` 由调用方强制省略原生副本（ephemeral
+        工具触达后的 Loop：原生块可能携带临时载荷，§8.2）。
         """
         text, text_policy = self._scrubbed_text(response.text)
         is_final = not executable_calls or not has_more_rounds
@@ -246,7 +250,11 @@ class TurnRecorder:
             parts.append({"type": "tool_ref", "execution_id": declaration.execution_id})
         native_state = None
         native_omission = None
-        if response.native_blocks:
+        if native_state_omission is not None:
+            # 强制省略（ephemeral 触达后的 Loop）：优先于尺寸判定，
+            # 原生副本整体不入业务持久层。
+            native_omission = native_state_omission
+        elif response.native_blocks:
             candidate = {
                 "version": AGENT_RECORD_VERSION,
                 "owner": _owner_payload(response.owner),

@@ -21,6 +21,26 @@ from quickquip.llm.service_parts.constants import (
     TOOL_LIST_NAME,
     TOOL_SEARCH_NAME,
 )
+from quickquip.llm.history_tools import (
+    HISTORY_TOOLS,
+    CONTEXT_NOTE_MAX_CHARS,
+    INVESTIGATION_BUDGET_REPLY,
+    HistoryToolDeps,
+    INVESTIGATE_GROUP_HISTORY_SPEC,
+    MAX_ANCHORS,
+    MIN_PARENT_REPORT_SPACE,
+    QUESTION_MAX_CHARS,
+    READ_GROUP_HISTORY_SPEC,
+    SEARCH_GROUP_HISTORY_SPEC,
+    INVESTIGATION_REPORT_TOKEN_CAP,
+    parse_history_time,
+    redact_read_arguments,
+    redact_recent_arguments,
+    redact_search_arguments,
+    render_investigation_result,
+    run_group_history_read,
+    run_group_history_search,
+)
 from quickquip.llm.service_parts.mcp_lifecycle import McpLifecycleMixin
 from quickquip.llm.tool_discovery import resolve_explicit_tool_names
 from quickquip.llm.tool_registry import estimate_spec_tokens
@@ -129,7 +149,8 @@ class ToolMixin(McpLifecycleMixin):
                               lambda: self.config.runtime.memory_max_items_per_group,
                               lambda name, context: self.config.runtime.tool_calling_enabled
                               and name in self._get_enabled_tool_names(
-                                  context.chat_type, provider_id=context.provider_id))
+                                  context.chat_type, provider_id=context.provider_id,
+                                  history_enabled=bool(getattr(context, "history", None))))
         self.tool_registry.register(
             LLMToolSpec(
                 name=SEARCH_TOOL_NAME,
@@ -194,6 +215,34 @@ class ToolMixin(McpLifecycleMixin):
             self._tool_search_recent_messages,
             category="context",
             keywords=["最近消息", "上下文", "短期缓冲", "群聊记录"],
+            # 短期缓冲正文同为群聊临时载荷（ADR-0005）：声明与结果均走
+            # 临时保留策略，持久化只留模式事实。
+            result_retention="ephemeral",
+            redact_arguments=redact_recent_arguments,
+        )
+        self.tool_registry.register(
+            SEARCH_GROUP_HISTORY_SPEC,
+            self._tool_search_group_history,
+            category="history",
+            keywords=["群聊历史", "历史消息", "归档", "搜索记录", "谁说过"],
+            result_retention="ephemeral",
+            redact_arguments=redact_search_arguments,
+        )
+        self.tool_registry.register(
+            READ_GROUP_HISTORY_SPEC,
+            self._tool_read_group_history,
+            category="history",
+            keywords=["群聊历史", "上下文", "阅读记录", "附近消息"],
+            result_retention="ephemeral",
+            redact_arguments=redact_read_arguments,
+        )
+        self.tool_registry.register(
+            INVESTIGATE_GROUP_HISTORY_SPEC,
+            self._tool_investigate_group_history,
+            category="history",
+            keywords=["群聊历史", "调查", "时间线", "追查", "多方核对"],
+            result_retention="ephemeral",
+            redact_arguments=redact_search_arguments,
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -254,7 +303,11 @@ class ToolMixin(McpLifecycleMixin):
         return provider is not None and provider_builtin_search_active(provider)
 
     def _get_enabled_tool_names(
-        self, chat_type: str = "group", *, provider_id: str | None = None
+        self,
+        chat_type: str = "group",
+        *,
+        provider_id: str | None = None,
+        history_enabled: bool = False,
     ) -> list[str]:
         configured = self.config.tools.enabled
         if not configured:
@@ -272,6 +325,10 @@ class ToolMixin(McpLifecycleMixin):
             names = [name for name in names if name not in skill_tools]
         if chat_type == "private":
             names = [name for name in names if name not in PRIVATE_UNAVAILABLE_TOOLS]
+        if not history_enabled:
+            # #72：群历史工具只对「全局配置 + 群开关」双开的面曝光；
+            # 私聊恒不曝光，handler 内再校验一次（防绕过）。
+            names = [name for name in names if name not in HISTORY_TOOLS]
         if self._builtin_search_active(provider_id):
             # 内置搜索开启的 provider 会话移除 search_web，避免模型面前
             # 出现客户端与 provider 原生两条竞争的搜索路径。
@@ -279,15 +336,23 @@ class ToolMixin(McpLifecycleMixin):
         return [name for name in names if self.tool_registry.has_tool(name)]
 
     def _get_always_loaded_tool_names(
-        self, chat_type: str = "group", *, provider_id: str | None = None
+        self,
+        chat_type: str = "group",
+        *,
+        provider_id: str | None = None,
+        history_enabled: bool = False,
     ) -> list[str]:
         configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
-        enabled = set(self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id))
+        enabled = set(self._get_enabled_tool_names(
+            chat_type=chat_type, provider_id=provider_id, history_enabled=history_enabled
+        ))
         names = [
             name for name in configured if name in enabled and self.tool_registry.has_tool(name)
         ]
         if (
-            self._is_tool_discovery_enabled(chat_type, provider_id=provider_id)
+            self._is_tool_discovery_enabled(
+                chat_type, provider_id=provider_id, history_enabled=history_enabled
+            )
             and TOOL_SEARCH_NAME in enabled
             and TOOL_SEARCH_NAME not in names
         ):
@@ -295,7 +360,11 @@ class ToolMixin(McpLifecycleMixin):
         return names
 
     def _is_tool_discovery_enabled(
-        self, chat_type: str = "group", *, provider_id: str | None = None
+        self,
+        chat_type: str = "group",
+        *,
+        provider_id: str | None = None,
+        history_enabled: bool = False,
     ) -> bool:
         mode = self.config.tools.discovery_mode
         if mode == "off":
@@ -303,7 +372,9 @@ class ToolMixin(McpLifecycleMixin):
         # Cache the enabled-names list once — previously this was recomputed
         # up to 5+ times per call (inside list/set comprehensions), each time
         # rebuilding the filtered list through tool_registry.has_tool().
-        enabled = self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id)
+        enabled = self._get_enabled_tool_names(
+            chat_type=chat_type, provider_id=provider_id, history_enabled=history_enabled
+        )
         if TOOL_SEARCH_NAME not in enabled:
             return False
         enabled_set = set(enabled)
@@ -328,29 +399,49 @@ class ToolMixin(McpLifecycleMixin):
         return deferred_tokens > min_schema_tokens
 
     def _get_enabled_tool_specs(
-        self, chat_type: str = "group", *, provider_id: str | None = None
+        self,
+        chat_type: str = "group",
+        *,
+        provider_id: str | None = None,
+        history_enabled: bool = False,
     ) -> list[LLMToolSpec]:
-        if self._is_tool_discovery_enabled(chat_type, provider_id=provider_id):
+        if self._is_tool_discovery_enabled(
+            chat_type, provider_id=provider_id, history_enabled=history_enabled
+        ):
             return self.tool_registry.get_specs(
                 self._get_always_loaded_tool_names(
-                    chat_type=chat_type, provider_id=provider_id
+                    chat_type=chat_type,
+                    provider_id=provider_id,
+                    history_enabled=history_enabled,
                 )
             )
         return self.tool_registry.list_specs(
-            self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id)
+            self._get_enabled_tool_names(
+                chat_type=chat_type,
+                provider_id=provider_id,
+                history_enabled=history_enabled,
+            )
         )
 
     def _get_deferred_tool_categories(
-        self, chat_type: str = "group", *, provider_id: str | None = None
+        self,
+        chat_type: str = "group",
+        *,
+        provider_id: str | None = None,
+        history_enabled: bool = False,
     ) -> list[str]:
-        if not self._is_tool_discovery_enabled(chat_type, provider_id=provider_id):
+        if not self._is_tool_discovery_enabled(
+            chat_type, provider_id=provider_id, history_enabled=history_enabled
+        ):
             return []
-        loaded = set(
-            self._get_always_loaded_tool_names(chat_type=chat_type, provider_id=provider_id)
-        )
+        loaded = set(self._get_always_loaded_tool_names(
+            chat_type=chat_type, provider_id=provider_id, history_enabled=history_enabled
+        ))
         categories: list[str] = []
         for entry in self.tool_registry.list_manifest(
-            self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id)
+            self._get_enabled_tool_names(
+                chat_type=chat_type, provider_id=provider_id, history_enabled=history_enabled
+            )
         ):
             if entry.name in loaded:
                 continue
@@ -360,22 +451,30 @@ class ToolMixin(McpLifecycleMixin):
         return categories
 
     def _get_deferred_tool_names(
-        self, chat_type: str = "group", *, provider_id: str | None = None
+        self,
+        chat_type: str = "group",
+        *,
+        provider_id: str | None = None,
+        history_enabled: bool = False,
     ) -> list[str]:
         """discovery 开启时按名延迟加载的工具清单（信封公告用，仅名字）。"""
         if not self.config.runtime.tool_calling_enabled:
             # 工具总闸关闭时模型面前没有任何工具，公告会诱导无效调用
             # （与 tool_specs 的闸门同口径）。
             return []
-        if not self._is_tool_discovery_enabled(chat_type, provider_id=provider_id):
+        if not self._is_tool_discovery_enabled(
+            chat_type, provider_id=provider_id, history_enabled=history_enabled
+        ):
             return []
-        loaded = set(
-            self._get_always_loaded_tool_names(chat_type=chat_type, provider_id=provider_id)
-        )
+        loaded = set(self._get_always_loaded_tool_names(
+            chat_type=chat_type, provider_id=provider_id, history_enabled=history_enabled
+        ))
         meta_names = {TOOL_SEARCH_NAME, TOOL_LIST_NAME}
         return [
             name
-            for name in self._get_enabled_tool_names(chat_type=chat_type, provider_id=provider_id)
+            for name in self._get_enabled_tool_names(
+                chat_type=chat_type, provider_id=provider_id, history_enabled=history_enabled
+            )
             if name not in loaded and name not in meta_names
         ]
 
@@ -390,6 +489,179 @@ class ToolMixin(McpLifecycleMixin):
 
     def bind_recent_message_buffer(self, buffer: "RecentMessageBuffer | None") -> None:
         self.recent_message_buffer = buffer
+
+    def bind_group_history(self, query_service) -> None:
+        """#72：注入同群只读历史查询服务（app 层 ChatArchive 的门面）。"""
+        self.group_history_service = query_service
+
+    def _effective_history_enabled(self, group_id: int | str, chat_type: str) -> bool:
+        """群历史双开关仲裁：群级显式开关 > [group_history].enabled；私聊恒关。"""
+        if chat_type != "group":
+            return False
+        override = self.store.get_group_history_flag(group_id) if self.store else None
+        return self.config.group_history.enabled if override is None else override
+
+    def _history_deps(self) -> HistoryToolDeps | None:
+        service = getattr(self, "group_history_service", None)
+        if service is None:
+            return None
+
+        def _is_enabled(group_id) -> bool:
+            return self._effective_history_enabled(group_id, chat_type="group")
+
+        def _resolve_speaker(group_id, query: str) -> list[str]:
+            entries = self._resolve_identities(str(group_id)).search(query, limit=5)
+            qq_ids: list[str] = []
+            for entry in entries:
+                for qq in entry.qq_ids:
+                    if qq not in qq_ids:
+                        qq_ids.append(qq)
+            return qq_ids
+
+        return HistoryToolDeps(
+            query_service=service,
+            is_enabled=_is_enabled,
+            resolve_speaker=_resolve_speaker,
+        )
+
+    async def _tool_search_group_history(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> str:
+        deps = self._history_deps()
+        if deps is None:
+            return "群聊历史查询未启用。"
+        return await run_group_history_search(deps, arguments, context)
+
+    async def _tool_read_group_history(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> str:
+        deps = self._history_deps()
+        if deps is None:
+            return "群聊历史查询未启用。"
+        return await run_group_history_read(deps, arguments, context)
+
+    def _resolve_investigation_model(self, context: ToolExecutionContext):
+        """调查执行器模型解析：专用覆盖 > 父请求路由；无效覆盖显式报错。
+
+        返回 (provider, model) 或错误字符串。
+        """
+        from quickquip.llm.config_document import resolve_model_provider
+
+        overrides = self.config.group_history
+        provider_id = overrides.investigation_provider_id or context.provider_id
+        provider = self.config.providers.get(provider_id)
+        if provider is None:
+            return f"调查渠道配置无效：provider {provider_id} 不存在"
+        if overrides.investigation_model:
+            model = overrides.investigation_model
+        elif provider_id == context.provider_id:
+            model = context.model
+        else:
+            model = provider.default_model
+        try:
+            resolved_provider = resolve_model_provider(self.config, provider_id, model)
+        except ValueError:
+            return (
+                f"调查模型配置无效：{provider_id}/{model} 不可用"
+                "（不存在或已停用），请修正 [group_history] 配置"
+            )
+        return resolved_provider, model
+
+    async def _tool_investigate_group_history(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> str:
+        from quickquip.llm.history_investigation import (
+            InvestigationLimits,
+            InvestigationTask,
+            run_history_investigation,
+        )
+        from quickquip.llm.token_estimate import estimate_tokens
+
+        if context.chat_type != "group":
+            return "该工具仅支持群聊使用。"
+        if not self._effective_history_enabled(context.group_id, context.chat_type):
+            return "本群未开启群聊历史查询，无法执行。"
+        state = getattr(context, "history", None)
+        if state is None or self.group_history_service is None:
+            return "群聊历史查询未启用。"
+
+        # 父 Loop 最多委派一次；重复调用返回既有当轮结果
+        if state.investigation_used:
+            return (
+                state.investigation_result_text
+                + "\n（本回答周期已委派过一次调查，以上为既有结果。）"
+            )
+        if state.allowance(INVESTIGATION_REPORT_TOKEN_CAP, 0) < MIN_PARENT_REPORT_SPACE:
+            return INVESTIGATION_BUDGET_REPLY
+
+        question = str(arguments.get("question", "")).strip()[:QUESTION_MAX_CHARS]
+        if not question:
+            return "缺少调查问题：question 必须写清要查证什么。"
+        task = InvestigationTask(
+            question=question,
+            context_note=str(arguments.get("context", "") or "").strip()[
+                :CONTEXT_NOTE_MAX_CHARS
+            ],
+            anchors=[
+                str(a).strip()
+                for a in (arguments.get("anchors") or [])[:MAX_ANCHORS]
+                if str(a).strip()
+            ],
+        )
+        for key, target in (("start", "start_ts"), ("end", "end_ts")):
+            raw = arguments.get(key)
+            if raw:
+                parsed = parse_history_time(str(raw))
+                if parsed is None:
+                    return "时间格式无法解析：请用 YYYY-MM-DD 或 ISO 8601（北京时间）。"
+                setattr(task, target, parsed.timestamp())
+
+        resolved = self._resolve_investigation_model(context)
+        if isinstance(resolved, str):
+            return resolved
+        provider, model = resolved
+
+        settings = self.config.group_history
+        limits = InvestigationLimits(
+            timeout_seconds=settings.investigation_timeout_seconds,
+            max_model_calls=settings.investigation_max_calls,
+            max_tool_calls=settings.investigation_max_calls * 2,
+        )
+        from quickquip.llm.request_budget import resolve_input_budget
+
+        # R04：子任务输入帽与渠道请求预算取小（模型窗口限制同样生效）
+        input_token_cap = min(
+            24_000,
+            resolve_input_budget(self.config, provider, model),
+        )
+        result = await run_history_investigation(
+            task=task,
+            provider=provider,
+            model=model,
+            runtime_config=self.config.runtime,
+            query_service=self.group_history_service,
+            group_id=context.group_id,
+            parent_scope_key=context.chat_scope or str(context.group_id),
+            build_provider_client=build_provider_client,
+            limits=limits,
+            input_token_cap=input_token_cap,
+            parent_cancel_check=state.parent_cancel_check,
+        )
+        # R02：报告按当时实际剩余额度渲染，而不是固定 2000
+        text = render_investigation_result(
+            result,
+            max(
+                64,
+                min(
+                    INVESTIGATION_REPORT_TOKEN_CAP,
+                    state.allowance(INVESTIGATION_REPORT_TOKEN_CAP, 0),
+                ),
+            ),
+        )
+        state.consume(estimate_tokens(text))
+        state.investigation_used = True
+        state.investigation_result_text = text
+        return text
 
     def bind_image_preprocessor(self, preprocessor: ImagePreprocessor | None) -> None:
         self.image_preprocessor = preprocessor
@@ -471,12 +743,17 @@ class ToolMixin(McpLifecycleMixin):
         except (TypeError, ValueError):
             limit = self.config.tools.discovery_search_limit
         limit = max(1, min(limit, self.config.tools.discovery_search_limit))
+        # 与循环侧启用集同口径（service 注入的 context.history 即裁决结果）：
+        # 双开群必须能在此搜到/点名历史工具，否则与信封公告自相矛盾
+        history_enabled = bool(getattr(context, "history", None))
         current_enabled = self._get_enabled_tool_names(
-            chat_type=context.chat_type, provider_id=context.provider_id
+            chat_type=context.chat_type, provider_id=context.provider_id,
+            history_enabled=history_enabled,
         )
         loaded_names = set(
             self._get_always_loaded_tool_names(
-                chat_type=context.chat_type, provider_id=context.provider_id
+                chat_type=context.chat_type, provider_id=context.provider_id,
+                history_enabled=history_enabled,
             )
         )
 
@@ -541,7 +818,8 @@ class ToolMixin(McpLifecycleMixin):
         page = max(1, page)
         limit = max(1, min(limit, 50))
         enabled_names = self._get_enabled_tool_names(
-            chat_type=context.chat_type, provider_id=context.provider_id
+            chat_type=context.chat_type, provider_id=context.provider_id,
+            history_enabled=bool(getattr(context, "history", None)),
         )
 
         if mode == "groups":

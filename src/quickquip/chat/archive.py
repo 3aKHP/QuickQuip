@@ -12,6 +12,11 @@
 
 去重：``dedupe_key`` 唯一——运行时写入用 ``m:<message_id>``；历史回灌
 等无 message_id 的来源用内容哈希。``INSERT OR IGNORE`` 使重复写入无害。
+
+#72 扩展（附加式，旧消费者可忽略）：``archive_meta`` 存归档 UUID（来源
+引用绑定它检测库替换）；``recalled_messages`` 撤回旁表按
+``(group_id, message_id)`` 幂等记录群撤回，查询侧据此屏蔽正文。撤回可
+先于消息本体入库；无 message_id 的旧回灌行无法关联撤回，属已知限制。
 """
 from __future__ import annotations
 
@@ -19,6 +24,7 @@ import hashlib
 import json
 import logging
 import sqlite3
+import uuid
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from enum import Enum
@@ -61,6 +67,10 @@ class ChatArchive:
         self._unavailable = False
         self._retry_init_after: float = 0.0
         self._dropped_since_unavailable = 0
+        # 撤回旁表写失败计数（#72 KHPilot NIT）：撤回屏蔽失效是隐私相关
+        # 降级，静默不可观测不行——stats() 暴露给巡检。
+        self._recall_write_failures = 0
+        self._archive_uuid: str = ""
         try:
             self._init_db()
         except sqlite3.Error as exc:
@@ -119,9 +129,93 @@ class ChatArchive:
                 "CREATE INDEX IF NOT EXISTS idx_archive_group_ts"
                 " ON archive_messages(group_id, ts)"
             )
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS archive_meta (
+                    key   TEXT PRIMARY KEY,
+                    value TEXT NOT NULL
+                )
+            """)
+            conn.execute("""
+                CREATE TABLE IF NOT EXISTS recalled_messages (
+                    group_id    TEXT NOT NULL,
+                    message_id  TEXT NOT NULL,
+                    recalled_at REAL NOT NULL,
+                    PRIMARY KEY (group_id, message_id)
+                )
+            """)
+            self._archive_uuid = self._ensure_archive_uuid(conn)
             conn.commit()
         finally:
             conn.close()
+
+    @staticmethod
+    def _ensure_archive_uuid(conn: sqlite3.Connection) -> str:
+        """首启动盖章持久归档 UUID；Bot 与 Web Admin 并发首启动时
+        ``INSERT OR IGNORE`` + 回读使两端得到同一值。库整体替换后 UUID
+        不同，来源引用据此明确失效。"""
+        row = conn.execute(
+            "SELECT value FROM archive_meta WHERE key = 'archive_uuid'"
+        ).fetchone()
+        if row is not None:
+            return str(row["value"])
+        conn.execute(
+            "INSERT OR IGNORE INTO archive_meta (key, value) VALUES ('archive_uuid', ?)",
+            (uuid.uuid4().hex,),
+        )
+        row = conn.execute(
+            "SELECT value FROM archive_meta WHERE key = 'archive_uuid'"
+        ).fetchone()
+        assert row is not None  # INSERT OR IGNORE 后必有行
+        return str(row["value"])
+
+    @property
+    def archive_uuid(self) -> str:
+        """归档库的持久 UUID（不可用时为空串，引用编解码按无效处理）。"""
+        return self._archive_uuid
+
+    def record_recall(self, group_id: int | str, message_id: int | str) -> bool:
+        """记录一条群撤回（旁表，幂等）。撤回可先于消息本体入库；
+        查询侧按 ``(group_id, message_id)`` 屏蔽已撤回消息的正文。"""
+        gid = _safe_group_id(group_id)
+        mid = str(message_id).strip()
+        if not mid:
+            return False
+        if self._unavailable:
+            self._maybe_retry_init()
+            if self._unavailable:
+                self._recall_write_failures += 1
+                return False
+        try:
+            conn = self._connect()
+            try:
+                cursor = conn.execute(
+                    """
+                    INSERT OR IGNORE INTO recalled_messages
+                        (group_id, message_id, recalled_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (gid, mid, time()),
+                )
+                conn.commit()
+                return cursor.rowcount > 0
+            finally:
+                conn.close()
+        except sqlite3.Error as exc:
+            self._recall_write_failures += 1
+            logger.warning(
+                "chat_archive: failed to record recall for group %s: %s", gid, exc
+            )
+            return False
+
+    def query_connection(self) -> sqlite3.Connection | None:
+        """供查询模块（history_query）复用的连接：与写入同一套 PRAGMA，
+        WAL 下读写并发安全。归档不可用时返回 None，由调用方决定降级语义。
+        连接由调用方负责关闭。"""
+        if self._unavailable:
+            self._maybe_retry_init()
+            if self._unavailable:
+                return None
+        return self._connect()
 
     def record(
         self,
@@ -349,7 +443,12 @@ class ChatArchive:
             groups = conn.execute(
                 "SELECT COUNT(DISTINCT group_id) AS n FROM archive_messages"
             ).fetchone()["n"]
-            return {"available": True, "messages": total, "groups": groups}
+            return {
+                "available": True,
+                "messages": total,
+                "groups": groups,
+                "recall_write_failures": self._recall_write_failures,
+            }
         except sqlite3.Error:
             return {"available": False}
         finally:

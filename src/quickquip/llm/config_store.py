@@ -20,6 +20,15 @@ DOCUMENT_ONLY_SETTINGS = {
     # 体量控线阈值无关系查询需求；文档式存储保持既有库 tools_settings
     # 列集不变（对照 parameters 的 DOCUMENT_ONLY_PARAMETERS 同款策略）。
     "tools": frozenset({"discovery_min_schema_tokens"}),
+    # #72 群聊历史查询全局面：整节无关系查询需求，全部走文档式存储，
+    # 既有库不新增 group_history_settings 表（空投影段跳过建表）。
+    "group_history": frozenset({
+        "enabled",
+        "investigation_provider_id",
+        "investigation_model",
+        "investigation_timeout_seconds",
+        "investigation_max_calls",
+    }),
 }
 # Adapter recovery policy is owned by the configuration document; it has no
 # relational lookup requirement. Keep the existing schema-4 parameter columns.
@@ -96,6 +105,9 @@ def declared_schema(*, legacy=False):
             fields.pop("client_cluster", None)
         if name == "mcp":
             fields["servers"] = {"type": "array"}
+        if not fields:
+            # 全量 document-only 的 section（如 group_history）：不建关系表。
+            continue
         statements.append(
             f'CREATE TABLE IF NOT EXISTS "{name}_settings" '
             f"(singleton INTEGER PRIMARY KEY CHECK(singleton=1), {_columns(fields)});"
@@ -312,7 +324,11 @@ def project_document(conn, document):
     from quickquip.llm.config_fields import field_registry
 
     registry = field_registry()
-    for name in registry["settings"]:
+    for name, section_fields in registry["settings"].items():
+        # 全量 document-only 的 section 没有关系表（declared_schema 跳过）。
+        hidden = DOCUMENT_ONLY_SETTINGS.get(name, ())
+        if all(key in hidden for key in section_fields):
+            continue
         conn.execute(f'DELETE FROM "{name}_settings"')
     for table in (
         "model_aliases",
@@ -364,6 +380,8 @@ def project_document(conn, document):
         conn.execute("INSERT INTO config_settings VALUES(?,?)", (name, dumps(settings)))
         projected = {k: v for k, v in settings.items()
                      if k not in DOCUMENT_ONLY_SETTINGS.get(name, ())}
+        if not projected:
+            continue
         _insert_fields(conn, f"{name}_settings", {"singleton": 1}, projected)
 
 

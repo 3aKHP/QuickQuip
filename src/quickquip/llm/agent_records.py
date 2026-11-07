@@ -134,6 +134,10 @@ class NativeOmissionReason(enum.StrEnum):
     SENSITIVE_BLOCK = "sensitive_block"
     RECALL_CLEANUP = "recall_cleanup"
     UNSUPPORTED_STRUCTURE = "unsupported_structure"
+    # ephemeral 工具触达后的 Loop：原生块可能携带临时载荷（工具参数或
+    # 引用其内容的 reasoning），业务落库省略原生副本，内存协议状态
+    # 保留至 Loop 结束（ADR-0005 / #72 §8.2）。
+    EPHEMERAL_POLICY = "ephemeral_policy"
 
 
 class RecallCleanupState(enum.StrEnum):

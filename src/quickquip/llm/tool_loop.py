@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import replace
+from typing import Callable
 
-from quickquip.llm.agent_records import ToolSkipReason
+from quickquip.llm.agent_records import NativeOmissionReason, ToolSkipReason
 from quickquip.llm.generated_images import collect_generated_images
 from quickquip.llm.provider import LLMRequest
 from quickquip.llm.provider.trace import trace_agent_loop
@@ -36,6 +37,7 @@ async def run_tool_call_loop(
     turn_recorder=None,
     request_guard=None,
     on_provider_activity=None,
+    result_space_probe: Callable[[LLMRequest], int] | None = None,
 ):
 
     client = build_provider_client(provider)
@@ -46,6 +48,11 @@ async def run_tool_call_loop(
     )
     current_request = request
     counted_rounds = 0
+    # ephemeral 工具触达标记（§8.2）：单调置位，此后本 Loop 的 Turn 原生
+    # 副本不再入业务持久层（工具参数与引用其内容的 reasoning 都可能携带
+    # 临时载荷）；内存协议状态不受影响。
+    ephemeral_touched = False
+    history_state = getattr(context, "history", None)
     discovery = ToolDiscovery(
         enabled=tool_discovery_enabled,
         tool_registry=tool_registry,
@@ -87,6 +94,13 @@ async def run_tool_call_loop(
         # 模型产出图片（Responses 内置生图 / Gemini inlineData）收进外发
         # 通道：与工具路径同上限同语义，后续调用失败不丢弃已产出图片。
         collect_generated_images(response, context)
+        # R03：触达检测先于任何记录分支——首个响应声明 ephemeral 工具但
+        # 被整批拒绝/提前结束时，原生副本同样必须省略
+        if not ephemeral_touched and response.tool_calls:
+            ephemeral_touched = any(
+                tool_registry.retention_of(call.name) == "ephemeral"
+                for call in response.tool_calls
+            )
         logger.info(
             "LLM completion: provider=%s model=%s finish_reason=%s tool_calls=%s round=%s",
             provider.id,
@@ -102,6 +116,11 @@ async def run_tool_call_loop(
                     declared_calls=[],
                     executable_calls=[],
                     has_more_rounds=False,
+                    # 最终轮恰是引用临时内容最密集的一轮（模型据检索结果
+                    # 合成答案），ephemeral 触达后原生副本同样必须省略
+                    native_state_omission=(
+                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                    ),
                 )
                 await turn_recorder.deliver_turn()
             return response
@@ -117,9 +136,15 @@ async def run_tool_call_loop(
             if turn_recorder is not None:
                 execution_ids = turn_recorder.on_turn(
                     response,
-                    declared_calls=list(response.tool_calls),
+                    declared_calls=[
+                        tool_registry.redacted_declaration(call)
+                        for call in response.tool_calls
+                    ],
                     executable_calls=[],
                     has_more_rounds=False,
+                    native_state_omission=(
+                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                    ),
                 )
                 turn_recorder.mark_interrupted("tool_round_limit")
                 for call in response.tool_calls:
@@ -158,9 +183,15 @@ async def run_tool_call_loop(
                     # not_executed(batch_limit)，notice 文本照常交付。
                     execution_ids = turn_recorder.on_turn(
                         response,
-                        declared_calls=list(response.tool_calls),
+                        declared_calls=[
+                            tool_registry.redacted_declaration(call)
+                            for call in response.tool_calls
+                        ],
                         executable_calls=[],
                         has_more_rounds=False,
+                        native_state_omission=(
+                            NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                        ),
                     )
                     await turn_recorder.deliver_turn()
                     for call in response.tool_calls:
@@ -184,6 +215,9 @@ async def run_tool_call_loop(
                     declared_calls=[],
                     executable_calls=[],
                     has_more_rounds=False,
+                    native_state_omission=(
+                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                    ),
                 )
                 await turn_recorder.deliver_turn()
             return response
@@ -196,9 +230,15 @@ async def run_tool_call_loop(
             if turn_recorder is not None:
                 execution_ids = turn_recorder.on_turn(
                     response,
-                    declared_calls=list(response.tool_calls),
+                    declared_calls=[
+                        tool_registry.redacted_declaration(call)
+                        for call in response.tool_calls
+                    ],
                     executable_calls=[],
                     has_more_rounds=False,
+                    native_state_omission=(
+                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                    ),
                 )
                 turn_recorder.mark_interrupted("search_failsafe_limit")
                 for call in response.tool_calls:
@@ -213,9 +253,15 @@ async def run_tool_call_loop(
         if turn_recorder is not None:
             execution_ids = turn_recorder.on_turn(
                 response,
-                declared_calls=list(response.tool_calls),
+                declared_calls=[
+                    tool_registry.redacted_declaration(call)
+                    for call in response.tool_calls
+                ],
                 executable_calls=selected_calls,
                 has_more_rounds=True,
+                native_state_omission=(
+                    NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                ),
             )
             await turn_recorder.deliver_turn()
             # 超出每轮执行预算的声明逐项 not_executed(limit)（§5.3）。
@@ -253,6 +299,10 @@ async def run_tool_call_loop(
         )
         tool_results: list[LLMToolResult] = []
         result_pipeline.begin_round()
+        if history_state is not None and result_space_probe is not None:
+            # 每轮刷新"当前请求剩余空间"（§8.1）：结果预算由当前 request
+            # 实况推导，工具不自行从初始请求猜测。
+            history_state.begin_round(result_space_probe(current_request))
         for call in selected_calls:
             if request_guard is not None:
                 request_guard(current_request)
@@ -308,7 +358,10 @@ async def run_tool_call_loop(
                     )
             tool_results.append(result)
             if turn_recorder is not None and execution_id is not None:
-                turn_recorder.on_tool_finished(execution_id, result)
+                turn_recorder.on_tool_finished(
+                    execution_id, result,
+                    retention=tool_registry.retention_of(call.name),
+                )
         tool_messages = [
             LLMConversationMessage(
                 role="tool",

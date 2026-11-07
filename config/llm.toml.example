@@ -129,6 +129,17 @@ discovery_search_limit = 5
 discovery_max_loaded_tools = 12
 always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "read_memory", "write_memory", "delete_memory", "search_web", "activate_skill"]
 
+# 群聊历史查询（#72）：LLM 按需搜索/阅读本群归档历史（只读，同群限定）。
+# 总默认关；群内 /llm history on|off 或 Web Admin 群设置可按群开关。
+[group_history]
+enabled = false
+# 专用调查执行器（复杂问题委派独立子任务）：留空 provider 跟随当前对话渠道、
+# 留空 model 用渠道默认模型；调用数/时限为该子任务的硬预算。
+investigation_provider_id = ""
+investigation_model = ""
+investigation_timeout_seconds = 240
+investigation_max_calls = 10
+
 [skills]
 # Skill 目录：每个子目录一个 Skill（SKILL.md + 可选 references/ + 可选
 # scripts/），目录名即 name。catalog（name+description 清单）常驻系统提示，

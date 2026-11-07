@@ -280,6 +280,8 @@ class TurnRequestAssembler:
     messages: list["LLMConversationMessage"] = field(default_factory=list)
 
     replay_budget: int | None = None
+    # #72：本请求的群历史双开关裁决结果（信封公告按它过滤延迟名单）。
+    history_enabled: bool = False
 
     def assemble(self) -> LLMRequest:
         """首轮和预算重建复用已消费的补丁，按最新历史重新去重。"""
@@ -321,6 +323,7 @@ class TurnRequestAssembler:
             participants=self.participants,
             mention_profiles=mention_profiles,
             provider_id=self.provider.id,
+            history_enabled=self.history_enabled,
         )
         self.envelope_parts['participants'] = (
             self.envelope_parts.get('participants', '')

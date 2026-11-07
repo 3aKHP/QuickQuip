@@ -176,3 +176,21 @@
 ```
 
 然后保存草稿并应用；等待配置任务完成并确认 Bot 实际加载版本。
+
+## 5. 群聊历史查询工具（#72）
+
+`search_group_history` / `read_group_history` / `investigate_group_history`
+三个工具默认登记在延迟池，但只在「`[group_history].enabled` 全局开 + 群级
+开关开」双开时对模型曝光（私聊恒不曝光）。群级开关存 LLM 运行库
+（`group_history_flags`），经 `/llm history on|off|reset` 或 Web Admin
+群设置写入；与 `config.db` 的群设置 override 分库存储。
+
+调查执行器（`investigate_group_history`）默认跟随当前对话渠道与模型，可在
+`[group_history]` 配置专用渠道/模型与预算（时限默认 240 秒、模型调用默认
+10 次）。执行期间同群后续 LLM 回复会排队；并发上限全局 2、每群 1，超限
+返回 busy 不排队。
+
+查询结果按临时载荷处理（ADR-0005）：正文与查询词不入业务持久层，落库只留
+调用事实与白名单元数据。性能参考：合成样本 100 万条下窄查询 p95 低于
+300ms（全部低于 500ms 建议线）；生产归档约 62 万条，介于 10 万/100 万
+样本档之间。
