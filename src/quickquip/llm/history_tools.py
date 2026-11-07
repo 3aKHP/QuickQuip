@@ -506,9 +506,10 @@ def _render_search_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolSta
     kept, trimmed, footer = _trim_to_budget(lines, header, footer, allowance)
     if not kept:
         return _BUDGET_REPLY
-    if trimmed and kept:
+    if trimmed and kept and outcome.has_more:
         # R09：按"最后实际交付的命中"重签续查游标，续页不跳过未交付行
-        # （kept 行按 hits 顺序新→旧为前缀，交付边界 = 第 kept 条）
+        # （kept 行按 hits 顺序新→旧为前缀，交付边界 = 第 kept 条）；
+        # has_more=False（查询层已证耗尽）不重签、不谎称可续查
         last_delivered = outcome.hits[min(len(kept), len(outcome.hits)) - 1]
         reissued = deps.query_service.reissue_search_after(
             state.session, outcome.internal_state, last_delivered
@@ -605,11 +606,13 @@ def _render_read_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolState
             f"（ref {ref}）"
         )
     header = "归档消息（时间升序）："
-    footer_parts = [_format_coverage(outcome.coverage)]
+    # 游标行置于覆盖信息之前：footer 被裁时续读句柄优先存活
+    footer_parts = []
     if outcome.older_cursor:
         footer_parts.append("older_cursor=" + outcome.older_cursor)
     if outcome.newer_cursor:
         footer_parts.append("newer_cursor=" + outcome.newer_cursor)
+    footer_parts.append(_format_coverage(outcome.coverage))
     footer = "\n".join(footer_parts)
     kept, trimmed, footer = _trim_to_budget(lines, header, footer, allowance)
     if not kept:
@@ -633,6 +636,7 @@ def _render_read_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolState
             )
     body = "\n".join([header, *kept, footer])
     if trimmed:
-        body += f"\n（因结果预算截断，仅显示前 {len(kept)} 条；用 newer_cursor 续读。）"
+        hint = "用 newer_cursor 续读" if "newer_cursor=" in footer else "以更早时间另开区间"
+        body += f"\n（因结果预算截断，仅显示前 {len(kept)} 条；{hint}。）"
     state.consume(estimate_tokens(body))
     return body

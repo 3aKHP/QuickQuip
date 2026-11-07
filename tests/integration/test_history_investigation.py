@@ -5,6 +5,7 @@
 """
 from __future__ import annotations
 
+import asyncio
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -277,3 +278,62 @@ async def test_unreferenced_finding_rejected_and_no_answer_form_ok(tmp_path):
     result2, _ = await _run(tmp_path, ok_script)
     assert result2.status == "completed"
     assert result2.findings == [] and "无法确认" in result2.unresolved
+
+
+class _SlowClient:
+    def __init__(self, delay: float):
+        self.delay = delay
+
+    async def complete(self, request):
+        await asyncio.sleep(self.delay)
+        return _FakeResponse(text="{}")
+
+
+@pytest.mark.asyncio
+async def test_timeout_during_provider_wait_degrades_partial(tmp_path):
+    """B1 回归：总时限落在 provider 等待窗口 → partial/timeout（非父失效）。"""
+    archive, service, _ = _archive_with_history(tmp_path)
+
+    async def _run_case():
+        return await run_history_investigation(
+            task=InvestigationTask(question="q"),
+            provider=_provider(),
+            model="test-model",
+            runtime_config=_runtime(),
+            query_service=service,
+            group_id=G1,
+            parent_scope_key=f"scope-{G1}",
+            build_provider_client=lambda prov: _SlowClient(0.4),
+            limits=InvestigationLimits(timeout_seconds=0.1, max_model_calls=4),
+        )
+
+    result = await _run_case()
+    assert result.status == "partial"
+    assert result.stop_reason == "timeout"
+
+
+@pytest.mark.asyncio
+async def test_watchdog_cancel_semantics_unit():
+    """B1 单元：外部取消裸上抛（交 asyncio.timeout 转 TimeoutError）；
+    看门狗检出的父失效转 ParentCancelled。"""
+    from quickquip.llm.history_investigation import run_with_parent_watchdog
+
+    async def _slow_ok():
+        await asyncio.sleep(0.3)
+        return "done"
+
+    healthy = lambda: None
+    # 外部超时：裸取消逃逸，asyncio.timeout 侧转为 TimeoutError
+    with pytest.raises(TimeoutError):
+        async with asyncio.timeout(0.05):
+            await run_with_parent_watchdog(_slow_ok(), healthy, interval=10.0)
+
+    async def _sleep_long():
+        await asyncio.sleep(1.0)
+
+    def _invalid():
+        raise ParentCancelled("session cleared")
+
+    # 看门狗检出父失效 → ParentCancelled（非裸取消）
+    with pytest.raises(ParentCancelled):
+        await run_with_parent_watchdog(_sleep_long(), _invalid, interval=0.05)

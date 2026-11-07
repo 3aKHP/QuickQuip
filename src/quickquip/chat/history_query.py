@@ -275,7 +275,8 @@ class HistoryQueryService:
             return set()
         conn = self.archive.query_connection()
         if conn is None:
-            return set()
+            # 归档不可用 = 撤回状态未知（S1 复审）：fail-closed，不交付证据
+            return None
         try:
             placeholders = ",".join("?" for _ in row_ids)
             rows = conn.execute(

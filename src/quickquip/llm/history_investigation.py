@@ -64,6 +64,8 @@ MAX_EVIDENCE_REFS = 8
 QUESTION_MAX_CHARS = 2000
 CONTEXT_MAX_CHARS = 2000
 MAX_ANCHORS = 8
+# 父失效看门狗轮询间隔（测试 monkeypatch 缩短）
+WATCHDOG_INTERVAL_S = 2.0
 
 
 class InvestigationDeadline(RuntimeError):
@@ -452,6 +454,42 @@ def _sub_usage_scope(group_key: str):
         yield
 
 
+async def run_with_parent_watchdog(work, parent_check, interval: float = WATCHDOG_INTERVAL_S):
+    """R05：调查全程观察父任务失效（会话清空即取消）。
+
+    取消来源判别用看门狗置位的显式标志（B1 复审）：watcher 触发
+    的取消 → ParentCancelled；其余裸取消原样上抛，交还外层
+    ``asyncio.timeout`` 正确转成 TimeoutError（总时限降级 partial）。
+    """
+    if parent_check is None:
+        return await work
+    task = asyncio.ensure_future(work)
+    cancelled_by_watchdog = False
+
+    async def _watch():
+        nonlocal cancelled_by_watchdog
+        while not task.done():
+            await asyncio.sleep(interval)
+            if task.done():
+                return
+            try:
+                parent_check()
+            except ParentCancelled:
+                cancelled_by_watchdog = True
+                task.cancel()
+                return
+
+    watcher = asyncio.create_task(_watch())
+    try:
+        return await task
+    except asyncio.CancelledError:
+        if cancelled_by_watchdog:
+            raise ParentCancelled("parent invalidated during investigation") from None
+        raise
+    finally:
+        watcher.cancel()
+
+
 async def run_history_investigation(
     *,
     task: InvestigationTask,
@@ -589,35 +627,6 @@ async def run_history_investigation(
             counting_client._inner = build_provider_client(prov)
             return counting_client
 
-        async def _watched(work):
-            """R05：等待 provider 期间也观察父任务失效（会话清空即取消）。"""
-            if parent_check is None:
-                return await work
-            task = asyncio.ensure_future(work)
-
-            async def _watch():
-                while not task.done():
-                    await asyncio.sleep(2.0)
-                    if task.done():
-                        return
-                    try:
-                        parent_check()
-                    except ParentCancelled:
-                        task.cancel()
-                        return
-
-            watcher = asyncio.create_task(_watch())
-            try:
-                return await task
-            except asyncio.CancelledError:
-                if not watcher.done():
-                    # 看门狗触发的取消 → 转为父取消语义上抛
-                    watcher.cancel()
-                    raise ParentCancelled("parent invalidated during investigation") from None
-                raise
-            finally:
-                watcher.cancel()
-
         response = None
         parsed = None
         error: str | None = None
@@ -627,7 +636,8 @@ async def run_history_investigation(
             # 父失效看门狗在等待期每 2 秒复核一次，取消传播
             async with asyncio.timeout(max(0.05, state.deadline - time.monotonic())):
                 with agent_loop_trace_boundary(parent_loop_id), _sub_usage_scope(parent_scope_key):
-                    response = await _watched(run_tool_call_loop(
+                    response = await run_with_parent_watchdog(
+                        run_tool_call_loop(
                         provider=provider,
                         request=request,
                         context=sub_context,
@@ -646,7 +656,9 @@ async def run_history_investigation(
                             SEARCH_GROUP_HISTORY_SPEC.name, READ_GROUP_HISTORY_SPEC.name,
                         ],
                         on_provider_activity=_guard_activity,
-                    ))
+                    ),
+                        parent_check,
+                    )
 
                     # R12：解析与修复留在子任务 usage/trace 作用域内——修复
                     # 调用仍按 history_investigation 归因，不混入父对话成本
