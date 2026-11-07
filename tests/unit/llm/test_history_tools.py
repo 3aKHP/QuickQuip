@@ -27,9 +27,11 @@ from quickquip.llm.history_tools import (
     HistoryToolState,
     SEARCH_RESULT_TOKEN_CAP,
     parse_history_time,
+    redact_count_arguments,
     redact_read_arguments,
     redact_recent_arguments,
     redact_search_arguments,
+    run_group_history_count,
     run_group_history_read,
     run_group_history_search,
 )
@@ -633,3 +635,679 @@ def test_trim_to_budget_zero_cap_returns_nothing():
 
     kept, trimmed, _ = _trim_to_budget(["行"], "头", "脚", 0)
     assert kept == [] and trimmed is False
+
+
+# ── count_group_history：证无通道（调查子面专用，此处直测 handler/渲染） ──
+
+
+class _RecordingStub:
+    """ RecordingQueryService 的最小鸭子面：仅提供回执登记。"""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.receipts: list[tuple] = []
+
+    def register_count_receipt(self, terms_text, window_text, count, *, coverage_note=""):
+        self.receipts.append((terms_text, window_text, count, coverage_note))
+        return "hr1c.deadbeef"
+
+    def count(self, group_id, *, terms, start_ts, end_ts):
+        return self.inner.count(
+            group_id, terms=terms, start_ts=start_ts, end_ts=end_ts
+        )
+
+
+def _count_deps(tmp_path: Path, *, recording=False):
+    deps = _deps(tmp_path)
+    if recording:
+        deps.query_service = _RecordingStub(deps.query_service)  # type: ignore[assignment]
+    return deps
+
+
+def _seed_count_archive(deps: HistoryToolDeps, *, count=3):
+    """铺一个有数据的归档（N01 后零计数断言必须有真实覆盖范围）。"""
+    archive = deps.query_service.inner.archive if isinstance(
+        deps.query_service, _RecordingStub
+    ) else _archive_for(deps)
+    now = time()
+    for i in range(count):
+        archive.record(
+            G1, f"成员{i}", f"复读{i}", ts=now - (count - i) * 3600,
+            user_id=str(i), message_id=f"c{i}",
+        )
+    return now
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recording", [False, True])
+async def test_count_zero_definitive_with_receipt(tmp_path: Path, recording: bool):
+    deps = _count_deps(tmp_path, recording=recording)
+    _seed_count_archive(deps)
+    state = HistoryToolState()
+    result = await run_group_history_count(
+        deps,
+        {"terms": ["从未出现的词"], "start": "2020-01-01"},
+        _context(history=state),
+    )
+    assert "共 0 条命中" in result
+    # N01：确定性断言限定在「已归档可读记录」，并附覆盖说明
+    assert "确定性结论" in result and "已归档可读记录中从未" in result
+    assert "归档覆盖" in result
+    if recording:
+        assert "回执 hr1c.deadbeef" in result
+        stub = deps.query_service
+        assert isinstance(stub, _RecordingStub)
+        assert stub.receipts and "连续性未知" in stub.receipts[0][3]
+    else:
+        assert "回执" not in result
+
+
+@pytest.mark.asyncio
+async def test_count_nonzero_is_not_row_evidence(tmp_path: Path):
+    deps = _count_deps(tmp_path, recording=True)
+    _seed_count_archive(deps, count=3)
+    state = HistoryToolState()
+    result = await run_group_history_count(
+        deps, {"terms": ["复读"], "start": "2000-01-01"}, _context(history=state)
+    )
+    assert "共 3 条命中" in result
+    assert "不是行级证据" in result and "search_group_history" in result
+    assert "回执 hr1c.deadbeef" in result
+    assert "归档覆盖" in result
+
+
+@pytest.mark.asyncio
+async def test_count_no_data_windows_never_issue_receipt(tmp_path: Path):
+    """N01：空库与采集前窗口是数据缺失，不是证无——不签回执。"""
+    deps = _count_deps(tmp_path, recording=True)
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+
+    empty = await run_group_history_count(
+        deps, {"terms": ["任意词"]}, _context(history=HistoryToolState())
+    )
+    assert "暂无归档记录" in empty
+    assert stub.receipts == []
+
+    _seed_count_archive(deps, count=2)
+    # 窗口完全早于归档起点：无数据不构成证无
+    before = await run_group_history_count(
+        deps,
+        {"terms": ["任意词"], "start": "2020-01-01", "end": "2020-02-01"},
+        _context(history=HistoryToolState()),
+    )
+    assert "没有交集" in before and "不构成" in before
+    assert stub.receipts == []
+
+
+@pytest.mark.asyncio
+async def test_count_recall_excluded_but_scoped(tmp_path: Path):
+    """仅有的命中全被撤回：可读记录计数为 0，措辞自带「已排除撤回」限定。"""
+    deps = _count_deps(tmp_path, recording=True)
+    _seed_count_archive(deps, count=1)
+    archive = deps.query_service.inner.archive
+    archive.record_recall(G1, "c0")
+    result = await run_group_history_count(
+        deps, {"terms": ["复读"], "start": "2020-01-01"},
+        _context(history=HistoryToolState()),
+    )
+    assert "共 0 条命中" in result
+    assert "未撤回" in result
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+    assert stub.receipts  # 回执照发：已归档可读记录的 0 是真实陈述
+
+
+@pytest.mark.asyncio
+async def test_count_receipt_window_in_beijing_time(tmp_path: Path):
+    """N03：带偏移的 ISO 输入换算北京时间入回执，end 标注不含。"""
+    from datetime import datetime as _dt
+
+    deps = _count_deps(tmp_path, recording=True)
+    now = _seed_count_archive(deps, count=1)
+    start_iso = _dt.fromtimestamp(now - 7200, tz=UTC).replace(
+        minute=0, second=0
+    ).isoformat()
+    end_iso = _dt.fromtimestamp(now + 3600, tz=UTC).replace(
+        minute=0, second=30
+    ).isoformat()
+    result = await run_group_history_count(
+        deps, {"terms": ["复读"], "start": start_iso, "end": end_iso},
+        _context(history=HistoryToolState()),
+    )
+    assert "共 1 条命中" in result
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+    window_text = stub.receipts[0][1]
+    # UTC 时刻在回执中必须以北京时间呈现（+8h）；零秒走分钟格式、
+    # 非零秒保留（N03 精度要求）
+    assert ":00:30" in window_text
+    assert "end 不含" in window_text
+    assert "（北京时间" in window_text
+    # 换算正确性：start 的北京时间小时 = UTC 小时 + 8
+    start_local_hour = (_dt.fromtimestamp(now - 7200, tz=UTC).hour + 8) % 24
+    assert f"{start_local_hour:02d}:00" in window_text
+
+
+@pytest.mark.asyncio
+async def test_count_budget_and_term_guards(tmp_path: Path):
+    """N02：额度耗尽拒绝执行；超长词项入口拒绝，不回显不登记。"""
+    deps = _count_deps(tmp_path, recording=True)
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+
+    long_terms = await run_group_history_count(
+        deps, {"terms": ["超" * 65]}, _context(history=HistoryToolState())
+    )
+    assert "词项过长" in long_terms
+    assert stub.receipts == []
+
+    _seed_count_archive(deps, count=1)
+    state = HistoryToolState()
+    state.direct_budget_tokens = 0
+    refused = await run_group_history_count(
+        deps, {"terms": ["复读"]}, _context(history=state)
+    )
+    assert "额度已用完" in refused
+    assert stub.receipts == []
+
+
+@pytest.mark.asyncio
+async def test_count_deadline_advises_narrowing_no_receipt(tmp_path: Path, monkeypatch):
+    from quickquip.chat.history_query import CountOutcome, QueryStatus
+
+    deps = _count_deps(tmp_path, recording=True)
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+
+    def _deadline(group_id, *, terms, start_ts, end_ts):
+        return CountOutcome(status=QueryStatus.PARTIAL, stop_reason="deadline")
+
+    monkeypatch.setattr(stub.inner, "count", _deadline)
+    result = await run_group_history_count(
+        deps, {"terms": ["任意词"]}, _context(history=HistoryToolState())
+    )
+    assert "未产生回执" in result and "缩小时间窗" in result
+    assert stub.receipts == []  # deadline 绝不签发回执
+
+
+@pytest.mark.asyncio
+async def test_count_clamps_long_range_and_reports_it(tmp_path: Path):
+    deps = _count_deps(tmp_path)
+    _seed_count_archive(deps, count=1)
+    state = HistoryToolState()
+    result = await run_group_history_count(
+        deps,
+        {"terms": ["词"], "start": "2020-01-01", "end": "2026-12-31"},
+        _context(history=state),
+    )
+    assert "最大跨度收敛为最近 180 天" in result
+    assert "分段计数" in result
+    assert "归档覆盖" in result
+
+
+@pytest.mark.asyncio
+async def test_count_gates_and_validation(tmp_path: Path):
+    deps = _deps(tmp_path)
+    assert "仅支持群聊" in await run_group_history_count(
+        deps, {"terms": ["a"]}, _context(chat_type="private")
+    )
+    disabled = _deps(tmp_path, enabled=False)
+    assert "未开启" in await run_group_history_count(
+        disabled, {"terms": ["a"]}, _context()
+    )
+    no_terms = await run_group_history_count(
+        deps, {"terms": []}, _context(history=HistoryToolState())
+    )
+    assert "缺少搜索词项" in no_terms
+    bad_time = await run_group_history_count(
+        deps, {"terms": ["a"], "start": "不是日期"}, _context(history=HistoryToolState())
+    )
+    assert "时间格式无法解析" in bad_time
+    bad_order = await run_group_history_count(
+        deps, {"terms": ["a"], "start": "2026-02-01", "end": "2026-01-01"},
+        _context(history=HistoryToolState()),
+    )
+    assert "结束时间需要晚于开始时间" in bad_order
+
+
+def test_redact_count_arguments_whitelist():
+    raw = json.dumps(
+        {"terms": ["内部词"], "start": "2026-11-01", "end": "2026-11-07"},
+        ensure_ascii=False,
+    )
+    redacted = json.loads(redact_count_arguments(raw))
+    assert redacted == {"mode": "count", "start": "2026-11-01", "end": "2026-11-07"}
+    assert "terms" not in redacted
+
+
+def test_render_investigation_result_includes_receipt_evidence():
+    from quickquip.llm.history_investigation import InvestigationFinding, InvestigationResult
+    from quickquip.llm.history_tools import render_investigation_result
+
+    result = InvestigationResult(
+        status="completed",
+        findings=[InvestigationFinding(
+            claim="「黑历史」在窗口内从未出现",
+            evidence_refs=["hr1c.deadbeef"],
+        )],
+        evidence={"hr1c.deadbeef": "计数核验：窗口 X 内共 0 条命中——从未出现（确定性结论）。"},
+    )
+    text = render_investigation_result(result)
+    assert "从未出现" in text
+    assert "hr1c.deadbeef" in text
+    assert "计数核验" in text
+
+
+# ── 工具帽配置接线与交接卫生（证无+预算修正 PR） ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_investigation_limits_read_configured_tool_calls(tmp_path, monkeypatch):
+    """max_tool_calls 来自 investigation_tool_calls 配置（默认 30，可覆盖）。"""
+    import quickquip.llm.history_investigation as investigation
+    from quickquip.llm.store import LLMStore
+
+    calls: list[dict] = []
+
+    class _Result:
+        status = "completed"
+        findings = []
+        unresolved = ""
+        suggested_followup = ""
+        evidence = {}
+        coverage_note = "归档覆盖：测试。"
+        stop_reason = "done"
+        elapsed_seconds = 1.0
+        model_calls = 1
+        tool_calls = 1
+        detail = ""
+
+    async def _fake_run(**kwargs):
+        calls.append(kwargs)
+        return _Result()
+
+    monkeypatch.setattr(investigation, "run_history_investigation", _fake_run)
+
+    from quickquip.chat.archive import ChatArchive
+    from quickquip.chat.history_query import HistoryQueryService
+    from quickquip.llm.config import GroupHistoryConfig
+
+    archive = ChatArchive(tmp_path / "a.db")
+    service = HistoryQueryService(archive)
+
+    # 默认值
+    config = _investigation_config()
+    host = _InvestigationHost(config, LLMStore(tmp_path / "d.db"), service)
+    await host._tool_investigate_group_history(
+        {"question": "q"}, _context(history=HistoryToolState())
+    )
+    assert calls[-1]["limits"].max_tool_calls == 30
+
+    # 显式覆盖
+    config2 = _investigation_config()
+    config2.group_history = GroupHistoryConfig(
+        enabled=True, investigation_tool_calls=7
+    )
+    host2 = _InvestigationHost(config2, LLMStore(tmp_path / "e.db"), service)
+    await host2._tool_investigate_group_history(
+        {"question": "q"}, _context(history=HistoryToolState())
+    )
+    assert calls[-1]["limits"].max_tool_calls == 7
+
+
+def test_prompts_teach_cross_session_followup_and_optional_leads():
+    """交接卫生：子任务提示词禁游标；报告渲染声明未决线索可选。"""
+    from quickquip.llm.history_investigation import InvestigationTask, _system_prompt
+    from quickquip.llm.history_tools import render_investigation_result
+
+    class _RecordingStub:
+        def coverage_note(self):
+            return "归档覆盖：测试。"
+
+    prompt = _system_prompt(_RecordingStub(), InvestigationTask(question="q"))
+    assert "不要写游标" in prompt
+    assert "另一个会话" in prompt
+    assert "hr1c" in prompt and "count_group_history" in prompt
+
+    from quickquip.llm.history_investigation import InvestigationFinding, InvestigationResult
+    report = render_investigation_result(InvestigationResult(
+        status="completed",
+        findings=[InvestigationFinding(claim="结论", evidence_refs=["hr1.deadbeef.1"])],
+        evidence={"hr1.deadbeef.1": "证据"},
+    ))
+    assert "可选线索" in report and "无需自动补查" in report
+
+
+# ── F01/F02：渲染截断的重签链路（门面转发 + 耗尽页不丢内容） ────────
+
+
+@pytest.mark.asyncio
+async def test_search_truncation_on_exhausted_page_continues(tmp_path: Path):
+    """F02（搜索）：查询层已证耗尽（has_more=False）但渲染截断丢弃了
+    命中时，仍必须重签续查游标；经 RecordingQueryService 门面转发
+    （F01：原 AttributeError）。续页从交付边界继续，不重不漏。"""
+    from quickquip.llm.history_investigation import RecordingQueryService
+
+    deps = _deps(tmp_path)
+    archive = _archive_for(deps)
+    deps.query_service = RecordingQueryService(deps.query_service, G1)  # type: ignore[assignment]
+    now = time()
+    for i in range(4):
+        archive.record(
+            G1, f"成员{i}", f"独有词{i}：" + "内" * 400,
+            ts=now - i * 60, user_id=str(i), message_id=f"x{i}",
+        )
+    state = HistoryToolState()
+    # 紧轮空间：预览行也只装得下 ~2 行，剩余命中被渲染截断丢弃
+    state.begin_round(800)
+    result = await run_group_history_search(
+        deps, {"terms": ["独有词"]}, _context(history=state)
+    )
+    assert "预算截断" in result
+    assert "工具执行失败" not in result
+    assert "cursor：" in result  # 耗尽页被截断也要有续查句柄
+
+    cursor = result.split("cursor：", 1)[1].strip().splitlines()[0].strip()
+    state.begin_round(8000)
+    state.direct_budget_tokens = DIRECT_HISTORY_LOOP_BUDGET
+    cont = await run_group_history_search(deps, {"cursor": cursor}, _context(history=state))
+    seen1 = {m for m in ("独有词0", "独有词1", "独有词2", "独有词3") if m in result}
+    seen2 = {m for m in ("独有词0", "独有词1", "独有词2", "独有词3") if m in cont}
+    assert seen1 and not seen1 & seen2
+    assert seen1 | seen2 == {"独有词0", "独有词1", "独有词2", "独有词3"}
+
+
+@pytest.mark.asyncio
+async def test_read_exhausted_window_render_clip_continues(tmp_path: Path):
+    """F02（阅读）：整窗一页取尽（查询层无游标）但渲染只装下前几行——
+    续读句柄仍须签发且从最后交付行继续（原：无游标，未交付行不可达）。"""
+    deps = _deps(tmp_path)
+    archive = _archive_for(deps)
+    now = time()
+    for i in range(12):
+        archive.record(
+            G1, f"行员{i}", f"行{i}：" + "字" * 90,
+            ts=now - (12 - i) * 60, user_id=str(i), message_id=f"r{i}",
+        )
+    state = HistoryToolState()
+    state.direct_budget_tokens = 400
+    result = await run_group_history_read(
+        deps,
+        {"start": "2000-01-01", "end": "2100-01-01"},
+        _context(history=state),
+    )
+    assert "预算截断" in result
+    assert "newer_cursor=" in result  # 修复点：耗尽页 + 渲染截断 → 重签
+
+    import re
+
+    cursor = re.search(r"newer_cursor=(\S+)", result).group(1)
+    state.direct_budget_tokens = DIRECT_HISTORY_LOOP_BUDGET
+    state.begin_round(8000)
+    cont = await run_group_history_read(
+        deps, {"cursor": cursor}, _context(history=state)
+    )
+    first_rows = {f"行{i}" for i in range(12) if f"行{i}：" in result}
+    cont_rows = {f"行{i}" for i in range(12) if f"行{i}：" in cont}
+    assert first_rows and cont_rows
+    assert not first_rows & cont_rows
+    assert first_rows | cont_rows == {f"行{i}" for i in range(12)}
+
+
+@pytest.mark.asyncio
+async def test_read_fragment_resumes_at_rendered_boundary(tmp_path: Path):
+    """F02（偏移精度）：片段行被渲染层二次裁剪时，续读从「实际交付的
+    正文位置」继续，不跳过被裁掉的正文（原：跳到查询层片段全长）。"""
+    deps = _deps(tmp_path)
+    archive = _archive_for(deps)
+    now = time()
+    text = "".join(f"〔标{i:03d}记〕" + "字" * 92 for i in range(60))
+    archive.record(G1, "作者", text, ts=now - 60, user_id="1", message_id="long1")
+    state = HistoryToolState()
+    result = await run_group_history_read(
+        deps,
+        {"start": "2000-01-01", "end": "2100-01-01"},
+        _context(history=state),
+    )
+    import re
+
+    assert "newer_cursor=" in result and "预算截断" in result
+    markers1 = [int(m) for m in re.findall(r"〔标(\d{3})记〕", result)]
+    cursor = re.search(r"newer_cursor=(\S+)", result).group(1)
+    state.direct_budget_tokens = DIRECT_HISTORY_LOOP_BUDGET
+    state.begin_round(8000)
+    cont = await run_group_history_read(
+        deps, {"cursor": cursor}, _context(history=state)
+    )
+    markers2 = [int(m) for m in re.findall(r"〔标(\d{3})记〕", cont)]
+    # 无缺漏/无重复：续页首标记紧接首屏末标记（±3 容忍标记内裁剪），
+    # 且旧缺陷（跳 ~18 块）会被 min > max+3 捕获
+    assert markers1 and markers2
+    assert not set(markers1) & set(markers2)
+    assert min(markers2) <= max(markers1) + 3
+    assert 59 in markers2  # 续读抵达消息尾部
+
+
+def _marker_block(index: int) -> str:
+    """每 100 字符一个唯一序号标记块（与集成测试同构，用于验证续读边界）。"""
+    return f"〔标{index:03d}记〕" + "字" * 92
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("clip_position", ["query_fragment", "render_midtext"])
+async def test_read_reissue_offset_bases_agree(tmp_path: Path, clip_position: str):
+    """KHPilot SF:两种裁切位置的重签偏移基准必须一致——无论正文被
+    查询层切成片段( fragment 分支)还是被渲染层裁在完整消息正文内部
+    (elif 分支),续读都从「实际交付的原始文本位置」继续,不重不漏。
+    两个分支的 char_offset 都必须是原始消息文本内的绝对偏移。"""
+    import re
+
+    deps = _deps(tmp_path)
+    archive = _archive_for(deps)
+    now = time()
+    marker_text = "".join(_marker_block(i) for i in range(60))
+    if clip_position == "query_fragment":
+        # 单条 6000 字消息：查询层先切 4800 字片段 → fragment 分支
+        archive.record(
+            G1, "作者", marker_text, ts=now - 60, user_id="1", message_id="m0"
+        )
+    else:
+        # 3000 字消息（< 查询层 4800 字帽，不产生片段）+ 紧随其后的
+        # 短消息迫使预算在长消息行内被裁 → elif 分支（完整消息被渲染
+        # 层裁在正文内部）
+        archive.record(
+            G1, "作者", marker_text[:3000], ts=now - 60, user_id="1", message_id="m0"
+        )
+        archive.record(
+            G1, "跟帖", "后续短消息", ts=now - 30, user_id="2", message_id="m1"
+        )
+    state = HistoryToolState()
+    if clip_position == "render_midtext":
+        # 收紧预算：完整长消息行在正文内部被渲染层裁掉（elif 分支）
+        state.direct_budget_tokens = 700
+    first = await run_group_history_read(
+        deps, {"start": "2000-01-01", "end": "2100-01-01"},
+        _context(history=state),
+    )
+    assert "预算截断" in first and "newer_cursor=" in first
+
+    def _body_of(page: str) -> str:
+        m = re.search(r"：(.*)", page.splitlines()[1], re.S)
+        return (m.group(1) if m else "").split("…（长消息片段")[0]
+
+    body1 = _body_of(first)
+    # 交付正文的尾部 24 字在原始全文中的位置 = 续读必须接续的绝对偏移
+    tail = body1.rstrip("…")[-24:]
+    raw = marker_text if clip_position == "query_fragment" else marker_text[:3000]
+    delivered_end = raw.index(tail) + len(tail)
+
+    cursor = re.search(r"newer_cursor=(\S+)", first).group(1)
+    state.direct_budget_tokens = DIRECT_HISTORY_LOOP_BUDGET
+    state.begin_round(8000)
+    second = await run_group_history_read(
+        deps, {"cursor": cursor}, _context(history=state)
+    )
+    if clip_position == "render_midtext":
+        # 续读头必须是同一条消息、从交付边界继续
+        assert "作者" in second.splitlines()[1]
+    body2 = _body_of(second)
+    assert body2[:16] == raw[delivered_end:delivered_end + 16], (
+        f"{clip_position}: 续读未从实际交付边界继续"
+        f"(期望 {raw[delivered_end:delivered_end+16]!r}, 实得 {body2[:16]!r})"
+    )
+    # 无重复交付
+    assert tail not in body2
+
+
+# ── 复审 S01/S02:多页基址链、零交付、半开区间边界、极小额度 ────────
+
+
+def _page_body(page: str) -> str:
+    """从阅读结果提取首条消息的已交付正文(剥片段标记/ref 后缀/裁剪省略号)。"""
+    import re
+
+    m = re.search(r"：(.*)", page.splitlines()[1], re.S)
+    body = (m.group(1) if m else "")
+    body = body.split("…（长消息片段")[0]
+    body = body.split("（ref ")[0]
+    return body.rstrip("…")
+
+
+@pytest.mark.asyncio
+async def test_read_multipage_chain_reaches_tail_no_repeat(tmp_path: Path):
+    """S01:8000 字长消息跨 ≥3 页连续阅读——续页在查询层整条交付
+    (无 fragment)但渲染层再裁时,基址必须保留。相邻页按「上一页正文
+    尾部在原文中的位置」逐字符验证接续(标记块可能跨页拆分,集合比对
+    会漏记拆分块),全链无重复、尾部可达。"""
+    import re
+
+    deps = _deps(tmp_path)
+    archive = _archive_for(deps)
+    now = time()
+    raw = "".join(_marker_block(i) for i in range(80))
+    archive.record(G1, "作者", raw, ts=now - 60, user_id="1", message_id="big1")
+    state = HistoryToolState()
+    pages: list[str] = []
+    arguments = {"start": "2000-01-01", "end": "2100-01-01"}
+    while len(pages) < 6:
+        state.direct_budget_tokens = DIRECT_HISTORY_LOOP_BUDGET
+        state.begin_round(8000)
+        page = await run_group_history_read(deps, arguments, _context(history=state))
+        pages.append(page)
+        match = re.search(r"newer_cursor=(\S+)", page)
+        if not match:
+            break
+        arguments = {"cursor": match.group(1)}
+    assert len(pages) >= 3, f"8000 字消息按默认预算应跨 ≥3 页(实际 {len(pages)})"
+
+    seen_markers: list[int] = []
+    delivered_end = 0
+    for index, page in enumerate(pages):
+        body = _page_body(page)
+        markers = [int(m) for m in re.findall(r"〔标(\d{3})记〕", body)]
+        assert not set(markers) & set(seen_markers), f"第 {index+1} 页重复交付"
+        seen_markers.extend(markers)
+        tail = body[-24:] if len(body) >= 24 else body
+        assert tail and tail in raw
+        if index > 0:
+            # 相邻页精确接续:上一页交付边界之后的 16 字原文字符
+            assert body[:16] == raw[delivered_end:delivered_end + 16], (
+                f"第 {index+1} 页未从上一页交付边界继续"
+            )
+        delivered_end = raw.index(tail) + len(tail)
+    # 尾部可达:最后一页可见最后一块标记
+    assert 79 in seen_markers
+
+
+@pytest.mark.asyncio
+async def test_read_tiny_delivery_resumes_row_not_skip(tmp_path: Path):
+    """S01 零交付边界:预算只够前缀+极少量正文时,下一页必须从交付
+    边界继续(显式 resume),不得把微量交付后的行跳成空页。"""
+    import re
+
+    deps = _deps(tmp_path)
+    archive = _archive_for(deps)
+    now = time()
+    raw = "".join(_marker_block(i) for i in range(60))
+    archive.record(G1, "作者", raw, ts=now - 60, user_id="1", message_id="z1")
+    state = HistoryToolState()
+    state.direct_budget_tokens = 60  # 前缀 + 极少量正文
+    first = await run_group_history_read(
+        deps, {"start": "2000-01-01", "end": "2100-01-01"},
+        _context(history=state),
+    )
+    match = re.search(r"newer_cursor=(\S+)", first)
+    assert match, "微量交付也必须签发回到该行的续读游标"
+    body1 = _page_body(first)
+    tail = body1[-24:] if len(body1) >= 24 else body1
+    delivered_end = raw.index(tail) + len(tail)
+    state.direct_budget_tokens = DIRECT_HISTORY_LOOP_BUDGET
+    state.begin_round(8000)
+    second = await run_group_history_read(
+        deps, {"cursor": match.group(1)}, _context(history=state)
+    )
+    # 未被跳过:不是空页,且从上一页交付边界精确继续
+    assert "没有可读的归档消息" not in second
+    body2 = _page_body(second)
+    assert body2[:16] == raw[delivered_end:delivered_end + 16]
+
+
+@pytest.mark.asyncio
+async def test_count_half_open_window_boundaries(tmp_path: Path):
+    """S02:[start,end) 半开语义——start == latest(含该记录)必须可查且
+    签回执;end == earliest(不含)才是无数据。"""
+    from datetime import datetime as _dt
+
+    from quickquip.llm.history_tools import BEIJING_TZ
+
+    deps = _count_deps(tmp_path, recording=True)
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+    archive = stub.inner.archive
+    moment = _dt(2026, 1, 1, 8, 0, 0, tzinfo=BEIJING_TZ)
+    archive.record(
+        G1, "作者", "唯一记录", ts=moment.timestamp(), user_id="1", message_id="b1"
+    )
+    state = HistoryToolState()
+    inclusive = await run_group_history_count(
+        deps,
+        {"terms": ["唯一"], "start": "2026-01-01T08:00:00+08:00",
+         "end": "2026-01-01T08:00:01+08:00"},
+        _context(history=state),
+    )
+    assert "共 1 条命中" in inclusive  # 修复前:被误判无交集
+    assert stub.receipts  # 应签发回执
+
+    stub.receipts.clear()
+    state2 = HistoryToolState()
+    exclusive = await run_group_history_count(
+        deps,
+        {"terms": ["唯一"], "start": "2026-01-01T07:59:00+08:00",
+         "end": "2026-01-01T08:00:00+08:00"},
+        _context(history=state2),
+    )
+    assert "没有交集" in exclusive  # end == earliest:窗口不含任何记录
+    assert not stub.receipts
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("tiny", [1, 20, 50])
+async def test_count_tiny_positive_allowance_refuses_cleanly(
+    tmp_path: Path, tiny: int
+):
+    """复审 nit:极小正额度装不下有效封套 → 受控拒绝,不交付半截
+    结果、不签回执(不再宣称任意额度都是硬帽)。"""
+    deps = _count_deps(tmp_path, recording=True)
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+    _seed_count_archive(deps, count=1)
+    from quickquip.llm.history_tools import _BUDGET_REPLY
+
+    state = HistoryToolState()
+    state.direct_budget_tokens = tiny
+    result = await run_group_history_count(
+        deps, {"terms": ["复读"]}, _context(history=state)
+    )
+    assert result == _BUDGET_REPLY or "额度已用完" in result
+    assert not stub.receipts

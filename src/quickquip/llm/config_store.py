@@ -28,6 +28,7 @@ DOCUMENT_ONLY_SETTINGS = {
         "investigation_model",
         "investigation_timeout_seconds",
         "investigation_max_calls",
+        "investigation_tool_calls",
     }),
 }
 # Adapter recovery policy is owned by the configuration document; it has no

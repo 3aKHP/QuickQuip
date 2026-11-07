@@ -135,10 +135,13 @@ always_loaded = ["tool_search", "tool_list", "get_identity", "list_memories", "r
 enabled = false
 # 专用调查执行器（复杂问题委派独立子任务）：留空 provider 跟随当前对话渠道、
 # 留空 model 用渠道默认模型；调用数/时限为该子任务的硬预算。
+# investigation_tool_calls = 子任务内历史工具（搜索/阅读/计数）总次数，
+# 默认 30（每轮可并行多个工具，按实测密度 ~2.5 次/轮 × 模型调用帽估出）。
 investigation_provider_id = ""
 investigation_model = ""
 investigation_timeout_seconds = 240
 investigation_max_calls = 10
+investigation_tool_calls = 30
 
 [skills]
 # Skill 目录：每个子目录一个 Skill（SKILL.md + 可选 references/ + 可选

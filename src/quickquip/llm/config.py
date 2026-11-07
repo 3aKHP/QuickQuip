@@ -157,9 +157,9 @@ class GroupHistoryConfig:
     """[group_history] 段（#72）：LLM 按需群聊历史查询的全局面。
 
     默认关闭；群级开关存 LLM 运行库（group_history_settings 表），
-    None 继承本段 enabled。investigation_* 供专用调查执行器（C 线），
-    B 线落地配置但暂无消费入口。整个 section 为 document-only：
-    无关系查询需求，保持既有库列集不变（对照 #340 兼容策略）。
+    None 继承本段 enabled。investigation_* 供专用调查执行器（C 线）。
+    整个 section 为 document-only：无关系查询需求，保持既有库列集
+    不变（对照 #340 兼容策略）。
     """
 
     enabled: bool = False
@@ -167,6 +167,7 @@ class GroupHistoryConfig:
     investigation_model: str = ""
     investigation_timeout_seconds: int = 240
     investigation_max_calls: int = 10
+    investigation_tool_calls: int = 30
 
 
 @dataclass(slots=True)

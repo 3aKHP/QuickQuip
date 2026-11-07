@@ -902,6 +902,11 @@
                     "maximum": 3600,
                     "minimum": 1,
                     "type": "integer"
+                  },
+                  "investigation_tool_calls": {
+                    "maximum": 128,
+                    "minimum": 1,
+                    "type": "integer"
                   }
                 },
                 "type": "object"

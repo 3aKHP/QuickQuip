@@ -625,7 +625,7 @@ class ToolMixin(McpLifecycleMixin):
         limits = InvestigationLimits(
             timeout_seconds=settings.investigation_timeout_seconds,
             max_model_calls=settings.investigation_max_calls,
-            max_tool_calls=settings.investigation_max_calls * 2,
+            max_tool_calls=settings.investigation_tool_calls,
         )
         from quickquip.llm.request_budget import resolve_input_budget
 

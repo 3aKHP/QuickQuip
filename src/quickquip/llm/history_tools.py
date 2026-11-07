@@ -24,6 +24,7 @@ from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.history_query import (
+    ArchivedMessage,
     HistoryQueryService,
     HistorySession,
     QueryStatus,
@@ -61,6 +62,11 @@ MAX_ANCHORS = 8
 INVESTIGATION_BUDGET_REPLY = (
     "剩余结果空间不足以接收调查报告，请基于已获取的内容作答，或下次再问。"
 )
+
+# count 结果自身很小，但词项回显与覆盖行需要余量（N02 预算接入）
+COUNT_RESULT_TOKEN_CAP = 480
+# 单词项长度帽：count 的词项会回显进结果与回执（N02 防参数回显突破预算）
+COUNT_TERM_MAX_CHARS = 64
 
 _PRIVATE_CHAT_REPLY = "该工具仅支持群聊使用。"
 _DISABLED_REPLY = "本群未开启群聊历史查询，无法执行。"
@@ -162,6 +168,20 @@ def redact_search_arguments(arguments_json: str) -> str:
     except json.JSONDecodeError:
         args = {}
     payload: dict[str, Any] = {"mode": "search" if not args.get("cursor") else "continue"}
+    for key in ("start", "end"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            payload[key] = value.strip()[:32]
+    return json.dumps(payload, ensure_ascii=False)
+
+
+def redact_count_arguments(arguments_json: str) -> str:
+    """count 声明只留模式与时间范围；词项不落库（与 search 同口径）。"""
+    try:
+        args = json.loads(arguments_json or "{}")
+    except json.JSONDecodeError:
+        args = {}
+    payload: dict[str, Any] = {"mode": "count"}
     for key in ("start", "end"):
         value = args.get(key)
         if isinstance(value, str) and value.strip():
@@ -303,6 +323,34 @@ SEARCH_GROUP_HISTORY_SPEC = LLMToolSpec(
     },
 )
 
+COUNT_GROUP_HISTORY_SPEC = LLMToolSpec(
+    name="count_group_history",
+    description=(
+        "统计当前群归档窗口内命中任一搜索词的消息总数（全量扫描，"
+        "不受常规搜索分页限制）。计数为 0 即这些词在该窗口的已归档、"
+        "未撤回可读记录中从未出现（确定性结论，以结果附带的归档覆盖"
+        "说明为准——停机缺漏不在归档内；回执引用可直接写进调查报告"
+        "的 evidence_refs）；计数 > 0 只证明出现过，定位具体消息仍需 "
+        "search_group_history。时间用 YYYY-MM-DD 或 ISO 8601（北京时间）；"
+        f"缺省查最近 {DEFAULT_WINDOW_DAYS} 天，跨度最大 {MAX_RANGE_DAYS} 天，"
+        "更早区间请分段计数。只读。"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "terms": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "1-5 个搜索词项，任一命中即算匹配",
+            },
+            "start": {"type": "string", "description": "起始时间（含）"},
+            "end": {"type": "string", "description": "结束时间（不含），缺省为现在"},
+        },
+        "required": [],
+    },
+)
+
+
 INVESTIGATE_GROUP_HISTORY_SPEC = LLMToolSpec(
     name="investigate_group_history",
     description=(
@@ -368,6 +416,13 @@ def render_investigation_result(result, token_cap: int = INVESTIGATION_REPORT_TO
     if result.detail:
         footer_parts.append(result.detail)
     footer = "\n".join(footer_parts)
+    # 交接卫生（计入报告预算，紧预算时可被裁掉）：声明未决线索为可选，
+    # 压制外层以更高单 call 成本盲目接续补查——措辞放结果侧而非工具
+    # schema 侧，延迟面体量线不涨
+    footer += (
+        "\n（结论均附证据，可直接引用作答；「未决/建议后续」是可选线索，"
+        "事实足够时无需自动补查。）"
+    )
     kept, trimmed, footer = _trim_to_budget(lines, header, footer, token_cap)
     body = "\n".join([header, *kept, footer])
     if trimmed:
@@ -506,10 +561,12 @@ def _render_search_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolSta
     kept, trimmed, footer = _trim_to_budget(lines, header, footer, allowance)
     if not kept:
         return _BUDGET_REPLY
-    if trimmed and kept and outcome.has_more:
-        # R09：按"最后实际交付的命中"重签续查游标，续页不跳过未交付行
-        # （kept 行按 hits 顺序新→旧为前缀，交付边界 = 第 kept 条）；
-        # has_more=False（查询层已证耗尽）不重签、不谎称可续查
+    # R09+F02：渲染截断丢弃了查询层已交付的命中时也必须重签——即使
+    # 查询层已证窗口耗尽（has_more=False），被裁掉的命中仍需可续达。
+    # 重签从"最后实际交付的命中"起（kept 行按 hits 顺序新→旧为前缀）；
+    # 未截断时原游标本就有效，不重签、不谎称可续查
+    lost_hits = len(kept) < len(outcome.hits)
+    if trimmed and kept and (outcome.has_more or lost_hits):
         last_delivered = outcome.hits[min(len(kept), len(outcome.hits)) - 1]
         reissued = deps.query_service.reissue_search_after(
             state.session, outcome.internal_state, last_delivered
@@ -521,6 +578,175 @@ def _render_search_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolSta
         body += f"\n（因结果预算截断，仅显示前 {len(kept)} 条命中。）"
     state.consume(estimate_tokens(body))
     return body
+
+
+async def run_group_history_count(deps: HistoryToolDeps, arguments, context) -> str:
+    if context.chat_type != "group":
+        return _PRIVATE_CHAT_REPLY
+    group_id = context.group_id
+    if not deps.is_enabled(group_id):
+        return _DISABLED_REPLY
+    state: HistoryToolState | None = getattr(context, "history", None)
+    if state is None:
+        return _DISABLED_REPLY
+
+    raw_terms = arguments.get("terms") or []
+    terms = [str(t).strip() for t in raw_terms if str(t).strip()]
+    if not terms:
+        return "缺少搜索词项：terms 至少提供一个非空词。"
+    # N02：词项会回显进结果与回执，超长词项是预算旁路，入口直接拒绝
+    if any(len(t) > COUNT_TERM_MAX_CHARS for t in terms):
+        return f"搜索词项过长（单个 ≤ {COUNT_TERM_MAX_CHARS} 字符），请精简后重试。"
+
+    # 时间语义与 search 完全一致（缺省 7 天、最大跨度 180 天钳制）；
+    # 钳制事实显式写进回执，长区间由模型分段计数，不静默截断
+    now = datetime.now(tz=BEIJING_TZ)
+    start = (
+        parse_history_time(str(arguments.get("start") or ""))
+        if arguments.get("start") else None
+    )
+    end = parse_history_time(str(arguments.get("end") or "")) if arguments.get("end") else None
+    if (arguments.get("start") and start is None) or (
+        arguments.get("end") and end is None
+    ):
+        return "时间格式无法解析：请用 YYYY-MM-DD 或 ISO 8601（北京时间）。"
+    end_dt = end or now
+    start_dt = start or (end_dt - timedelta(days=DEFAULT_WINDOW_DAYS))
+    if end_dt <= start_dt:
+        return "结束时间需要晚于开始时间。"
+    clamped = False
+    if end_dt - start_dt > timedelta(days=MAX_RANGE_DAYS):
+        start_dt = end_dt - timedelta(days=MAX_RANGE_DAYS)
+        clamped = True
+
+    outcome = await asyncio.to_thread(
+        deps.query_service.count,
+        group_id,
+        terms=terms,
+        start_ts=start_dt.timestamp(),
+        end_ts=end_dt.timestamp(),
+    )
+    return _render_count_outcome(deps, outcome, state, terms, start_dt, end_dt, clamped)
+
+
+def _count_window_text(start_dt: datetime, end_dt: datetime) -> str:
+    """回执/结果的时间区间文案：统一换算北京时间（N03——原时区小时
+    直接标注「北京时间」会把 UTC 边界写成差 8 小时的证据区间），
+    含秒输入保留秒，end 标注不含。"""
+
+    def _fmt(moment: datetime) -> str:
+        local = moment.astimezone(BEIJING_TZ)
+        pattern = "%Y-%m-%d %H:%M:%S" if local.second else "%Y-%m-%d %H:%M"
+        return f"{local:{pattern}}"
+
+    return f"{_fmt(start_dt)} 至 {_fmt(end_dt)}（北京时间，end 不含）"
+
+
+def _render_count_outcome(
+    deps: HistoryToolDeps,
+    outcome,
+    state: HistoryToolState,
+    terms: list[str],
+    start_dt: datetime,
+    end_dt: datetime,
+    clamped: bool,
+) -> str:
+    if outcome.status is QueryStatus.INVALID_REQUEST:
+        return "请求参数无效，请检查词项与时间范围。"
+    if outcome.status is QueryStatus.UNAVAILABLE:
+        return "群聊归档暂时不可用，请稍后再试。"
+    if outcome.status is QueryStatus.PARTIAL:
+        return (
+            "无法在时限内完成计数（窗口过大或归档繁忙），本次未产生回执；"
+            "请缩小时间窗后重试。\n" + _format_coverage(outcome.coverage)
+        )
+
+    # N01：计数只证明「已存档且未撤回的可读记录」中的缺席。窗口与
+    # 归档数据无交集（空库 / 采集前 / 全部撤回之外的"无数据"）时，
+    # 0 条反映的是数据缺失而非内容缺席——不签回执，不构成证无
+    coverage = outcome.coverage
+    coverage_line = _format_coverage(coverage)
+    if coverage is not None and coverage.total_messages == 0:
+        return "本群暂无归档记录，无法做任何计数核验。\n" + coverage_line
+    if (
+        coverage is not None
+        and coverage.earliest_ts is not None
+        and coverage.latest_ts is not None
+        and (
+            end_dt.timestamp() <= coverage.earliest_ts
+            or start_dt.timestamp() > coverage.latest_ts
+        )
+    ):
+        return (
+            "该窗口与归档覆盖范围没有交集（早于归档起点或晚于最新记录），"
+            "窗口内没有可检索的数据，计数不构成「从未出现」的证据；"
+            "请对准归档覆盖的时间段。\n" + coverage_line
+        )
+
+    # N02+复审 nit：查询前检查可用额度；词项长度已在入口设帽。计数
+    # 数字是本工具的核心载荷——主行装不下时受控拒绝（_BUDGET_REPLY），
+    # 不交付被裁掉数字的半截结果，也不签发不可完整交付的回执
+    allowance = state.allowance(COUNT_RESULT_TOKEN_CAP, batch_pending=0)
+    if allowance <= 0:
+        return _BUDGET_REPLY
+
+    terms_text = "、".join(f"「{t}」" for t in terms[:5])
+    window_text = _count_window_text(start_dt, end_dt)
+    clamp_note = (
+        "窗口已按最大跨度收敛为最近 180 天；更早区间请分段计数。"
+        if clamped else ""
+    )
+    # 回执登记面由宿主注入：调查子面是 RecordingQueryService（可作
+    # evidence_refs），直接面不注册本工具，此处鸭子类型即可。
+    # 以等长占位符先入包（真实 ref 同为 hr1c.+8 hex），整包入帽后才
+    # 登记并替换——回执永远随完整交付的结果签发
+    register = getattr(deps.query_service, "register_count_receipt", None)
+    receipt_placeholder = "（回执 hr1c.00000000）" if register is not None else ""
+
+    header = f"计数核验{receipt_placeholder}："
+    if outcome.count == 0:
+        main = (
+            f"窗口 {window_text} 内{terms_text}"
+            "共 0 条命中（全量扫描已归档且未撤回的记录，非抽样）。"
+            "0 条为确定性结论：这些词在该窗口的已归档可读记录中从未"
+            "出现（以归档覆盖为准，停机缺漏不在其内，见下）。"
+        )
+    else:
+        main = (
+            f"窗口 {window_text} 内{terms_text}"
+            f"共 {outcome.count} 条命中（全量扫描已归档且未撤回的记录）。"
+            "计数只证明出现过，不是行级证据；定位具体消息请用 "
+            "search_group_history。"
+        )
+    footer_parts = [coverage_line]
+    if clamp_note:
+        footer_parts.append(clamp_note)
+    footer = "\n".join(footer_parts)
+    kept, trimmed, footer = _trim_to_budget([main], header, footer, allowance)
+    if not kept or (trimmed and kept[0] != main):
+        # 主行被裁（数字可能丢失）或整行装不下：受控拒绝
+        return _BUDGET_REPLY
+    if register is not None:
+        receipt_ref = register(
+            terms_text, window_text, int(outcome.count or 0),
+            coverage_note=_compact_coverage_note(coverage),
+        )
+        if receipt_ref:
+            header = header.replace(receipt_placeholder, f"（回执 {receipt_ref}）")
+    body = "\n".join([header, *kept, footer])
+    state.consume(estimate_tokens(body))
+    return body
+
+
+def _compact_coverage_note(coverage) -> str:
+    """回执内嵌的紧凑覆盖说明（N01：证据自带范围限定）。"""
+    if coverage is None:
+        return "归档覆盖暂不可知"
+    if coverage.total_messages == 0 or coverage.earliest_ts is None:
+        return "本群暂无归档记录"
+    earliest = datetime.fromtimestamp(coverage.earliest_ts, tz=BEIJING_TZ)
+    latest = datetime.fromtimestamp(coverage.latest_ts, tz=BEIJING_TZ)
+    return f"归档覆盖 {earliest:%Y-%m-%d} 至 {latest:%Y-%m-%d}，连续性未知"
 
 
 async def run_group_history_read(deps: HistoryToolDeps, arguments, context) -> str:
@@ -592,6 +818,9 @@ def _render_read_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolState
 
     allowance = state.allowance(READ_RESULT_TOKEN_CAP, batch_pending=0)
     lines = []
+    # F02：逐行记录 (消息, 前缀长度)——重签偏移按"渲染后实际交付的
+    # 正文字符"计，而不是查询层消息对象的全长（否则跳过被裁掉的正文）
+    line_meta: list[tuple[ArchivedMessage, int]] = []
     for message in outcome.messages:
         text = message.text
         if outcome.fragment is not None and message.row_id == outcome.fragment[0]:
@@ -600,11 +829,12 @@ def _render_read_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolState
             text += f" [图片x{message.image_count}]"
         # R08：每条可引用消息携带来源引用（时间浏览也能拿到可提交的 ref）
         ref = deps.query_service.encode_ref(message.row_id)
-        lines.append(
+        prefix = (
             f"[{_format_ts(message.ts)}] "
-            f"{_speaker_line(message.user_id, message.sender_name)}：{text}"
-            f"（ref {ref}）"
+            f"{_speaker_line(message.user_id, message.sender_name)}："
         )
+        lines.append(f"{prefix}{text}（ref {ref}）")
+        line_meta.append((message, len(prefix)))
     header = "归档消息（时间升序）："
     # 游标行置于覆盖信息之前：footer 被裁时续读句柄优先存活
     footer_parts = []
@@ -618,22 +848,56 @@ def _render_read_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolState
     if not kept:
         return _BUDGET_REPLY
     if trimmed and kept:
-        # R09：newer 续读从"最后实际交付的消息"重签，续页不跳过未交付行
-        delivered_count = min(len(kept), len(outcome.messages))
-        last_delivered = outcome.messages[delivered_count - 1]
-        offset = 0
-        if (
+        # R09+F02+S01：newer 续读从"最后实际交付的正文位置"重签。偏移 =
+        # 行基址 + 渲染层真实交付字符（kept 行与原行比对，扣除 _clip_line
+        # 追加的省略号）。行基址三种来源：查询层片段行自带片段基址；
+        # 续读头整条交付时基址在 outcome.resume_head（此时无 fragment，
+        # 旧实现丢失基址导致多页长消息复读同段）；普通行基址为 0。
+        index = min(len(kept), len(lines)) - 1
+        last_message, prefix_len = line_meta[index]
+        clipped = kept[-1] != lines[index]
+        delivered_content = len(kept[-1]) - (1 if clipped else 0)
+        delivered_text = min(
+            len(last_message.text), max(0, delivered_content - prefix_len)
+        )
+        is_fragment_row = (
             outcome.fragment is not None
-            and last_delivered.row_id == outcome.fragment[0]
+            and last_message.row_id == outcome.fragment[0]
+        )
+        resume_head_base = None
+        if (
+            outcome.resume_head is not None
+            and last_message.row_id == outcome.resume_head[0]
         ):
-            offset = outcome.fragment[1] + len(last_delivered.text)
+            resume_head_base = outcome.resume_head[1]
+        if is_fragment_row:
+            # 片段行：查询层裁过该消息，剩余部分必然存在，恒续读该行
+            resume_row: int | None = last_message.row_id
+            offset = outcome.fragment[1] + delivered_text
+        elif resume_head_base is not None and delivered_text < len(last_message.text):
+            # 续读头被渲染层再裁：基址 + 交付量（S01 主场景）
+            resume_row = last_message.row_id
+            offset = resume_head_base + delivered_text
+        elif delivered_text < len(last_message.text):
+            # 普通行被裁在正文内部（含零交付：回到该行开头，不跳过）
+            resume_row = last_message.row_id
+            offset = delivered_text
+        else:
+            resume_row = None
+            offset = 0
         reissued = deps.query_service.reissue_read_newer_after(
-            state.session, outcome.newer_state, last_delivered, char_offset=offset
+            state.session, outcome.newer_state, last_message,
+            char_offset=offset, resume_row_id=resume_row,
         )
         if reissued:
-            footer = footer.replace(
-                "newer_cursor=" + (outcome.newer_cursor or ""), "newer_cursor=" + reissued
-            )
+            if outcome.newer_cursor:
+                footer = footer.replace(
+                    "newer_cursor=" + outcome.newer_cursor,
+                    "newer_cursor=" + reissued,
+                )
+            else:
+                # 查询层已耗尽未签令牌（F02）：渲染截断产生的新句柄前插
+                footer = "newer_cursor=" + reissued + "\n" + footer
     body = "\n".join([header, *kept, footer])
     if trimmed:
         hint = "用 newer_cursor 续读" if "newer_cursor=" in footer else "以更早时间另开区间"

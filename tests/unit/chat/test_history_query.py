@@ -495,3 +495,107 @@ def test_read_db_error_is_unavailable_not_empty(tmp_path, monkeypatch):
     out = service.read_range(G1, HistorySession(), start_ts=_ts(-5), end_ts=_ts(10))
     assert out.status is QueryStatus.UNAVAILABLE
     assert out.detail == "database_error"
+
+
+def test_count_definitive_zero_and_group_window_isolation(tmp_path: Path):
+    """证无通道：0 条是确定性结论；群隔离与窗口边界与 search 同口径。"""
+    service, archive = _make_service(tmp_path)
+    archive.record(G1, "张三", "复读机启动", ts=_ts(0), user_id="1", message_id="a1")
+    archive.record(G1, "李四", "无关内容", ts=_ts(1), user_id="2", message_id="a2")
+    archive.record(G2, "王五", "复读机启动", ts=_ts(2), user_id="3", message_id="a3")
+
+    zero = service.count(G1, terms=["从未出现的词"], start_ts=_ts(-5), end_ts=_ts(10))
+    assert zero.status is QueryStatus.OK
+    assert zero.count == 0
+
+    hit = service.count(G1, terms=["复读机"], start_ts=_ts(-5), end_ts=_ts(10))
+    assert hit.status is QueryStatus.OK and hit.count == 1  # G2 同文不计入
+
+    # 窗口边界：start 含、end 不含（与 search 一致）
+    bounded = service.count(G1, terms=["复读机"], start_ts=_ts(0), end_ts=_ts(1))
+    assert bounded.count == 1
+    after = service.count(G1, terms=["复读机"], start_ts=_ts(1), end_ts=_ts(10))
+    assert after.count == 0
+
+
+def test_count_semantics_match_exhausted_search(tmp_path: Path):
+    """COUNT 谓词 == 逐页搜索穷尽谓词：变体折叠、ASCII 大小写、通配符
+    转义、撤回排除全同口径（count 不是 search 的近似）。"""
+    service, archive = _make_service(tmp_path)
+    rows = [
+        ("m1", "张三", "Straße 很窄"),
+        ("m2", "李四", "STRASSE 很宽"),
+        ("m3", "王五", "sqlite 锁"),
+        ("m4", "赵六", "SQLite 锁"),
+        ("m5", "钱七", "涨了100%真的"),
+        ("m6", "孙八", "SQLite 锁"),  # 将被撤回
+    ]
+    for i, (mid, name, text) in enumerate(rows):
+        archive.record(G1, name, text, ts=_ts(i), user_id=str(i), message_id=mid)
+    archive.record_recall(G1, "m6")
+    session = HistorySession()
+
+    def _exhaustive_hits(terms: list[str]) -> int:
+        outcome = service.search(
+            G1, session, terms=terms, start_ts=_ts(-5), end_ts=_ts(10), max_hits=5
+        )
+        seen = len(outcome.hits)
+        while outcome.cursor_token:
+            outcome = service.search_continue(
+                G1, session, cursor_token=outcome.cursor_token
+            )
+            seen += len(outcome.hits)
+        return seen
+
+    for terms in (["Straße"], ["strasse"], ["sqlite"], ["100%"], ["锁"], ["SQLite", " StraßE "]):
+        counted = service.count(G1, terms=terms, start_ts=_ts(-5), end_ts=_ts(10))
+        assert counted.status is QueryStatus.OK, terms
+        assert counted.count == _exhaustive_hits(terms), terms
+
+
+def test_count_validation_and_unavailable(tmp_path: Path):
+    service, archive = _make_service(tmp_path)
+    archive.record(G1, "张三", "内容", ts=_ts(0), user_id="1", message_id="v1")
+
+    assert service.count(G1, terms=[], start_ts=_ts(-5), end_ts=_ts(10)).status \
+        is QueryStatus.INVALID_REQUEST
+    assert service.count(
+        G1, terms=["a"] * 6, start_ts=_ts(-5), end_ts=_ts(10)
+    ).detail == "too_many_terms"
+    assert service.count(G1, terms=["a"], start_ts=_ts(10), end_ts=_ts(-5)).detail \
+        == "bad_window"
+    assert service.count("not-a-group", terms=["a"], start_ts=_ts(-5), end_ts=_ts(10)) \
+        .detail == "bad_group"
+
+    def _broken():
+        return None
+
+    original = archive.query_connection
+    archive.query_connection = _broken  # type: ignore[method-assign]
+    try:
+        out = service.count(G1, terms=["a"], start_ts=_ts(-5), end_ts=_ts(10))
+    finally:
+        archive.query_connection = original  # type: ignore[method-assign]
+    assert out.status is QueryStatus.UNAVAILABLE
+
+
+def test_count_deadline_is_partial_with_no_number(tmp_path: Path):
+    """时限触顶：COUNT 原子中止，绝无部分数字；PARTIAL + stop_reason。"""
+    service, archive = _make_service(tmp_path, query_deadline_s=0.0)
+    for i in range(800):
+        archive.record(
+            G1, "张三", f"批量内容{i}填充行避免索引短路", ts=_ts(i), user_id="1",
+            message_id=f"dl{i}",
+        )
+    out = service.count(G1, terms=["批量内容"], start_ts=_ts(-5), end_ts=_ts(10_000))
+    assert out.status is QueryStatus.PARTIAL
+    assert out.stop_reason == "deadline"
+    assert out.count is None
+
+
+def test_decode_ref_rejects_receipt_shaped_refs(tmp_path: Path):
+    """hr1c 回执引用与消息引用命名空间不碰撞：decode_ref 一律拒绝。"""
+    service, _archive = _make_service(tmp_path)
+    assert service.decode_ref("hr1c.deadbeef") is None
+    assert service.decode_ref("hr1c.deadbeef.123") is None
+    assert service.decode_ref("hr1") is None

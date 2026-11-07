@@ -214,6 +214,11 @@ export const SETTINGS_FIELD_LABELS: Record<string, Record<string, FieldLabel>> =
       label: '调查执行器模型', hint: '留空＝跟随渠道默认模型。' },
     investigation_timeout_seconds: { label: '调查总时限', unit: '秒' },
     investigation_max_calls: { label: '调查模型调用数上限', unit: '次' },
+    investigation_tool_calls: {
+      label: '调查历史工具调用数上限',
+      unit: '次',
+      hint: '子任务内搜索/阅读/计数工具的总次数（每轮可并行多个）。',
+    },
   },
   skills: {
     enabled: { label: '启用 Skill' },

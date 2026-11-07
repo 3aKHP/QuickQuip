@@ -146,11 +146,28 @@ class SearchOutcome:
 
 
 @dataclass
+class CountOutcome:
+    """全窗口计数结果（证无通道）。count=None 表示未得出数字
+    （PARTIAL/deadline：时限内未扫完，绝不给出部分计数）；count=0
+    与逐页搜索穷尽口径一致，是确定性证无。"""
+
+    status: QueryStatus
+    count: int | None = None
+    stop_reason: str | None = None  # "deadline"
+    coverage: CoverageInfo | None = None
+    detail: str = ""
+
+
+@dataclass
 class ReadOutcome:
     status: QueryStatus
     messages: list[ArchivedMessage] = field(default_factory=list)  # 升序
     # 最后一条为片段时的描述：(row_id, 本次片段起点, 全文长度)
     fragment: tuple[int, int, int] | None = None
+    # 续读头基址（S01）：本页首条是上一页片段的剩余部分时为
+    # (row_id, 原文基址)。剩余正文整条交付时不再产生 fragment，
+    # 基址只能由此字段传递——渲染层重签偏移必须叠加它。
+    resume_head: tuple[int, int] | None = None
     older_cursor: str | None = None  # 向更早方向续读
     newer_cursor: str | None = None  # 向更新方向续读
     stop_reason: str | None = None  # "message_cap" | "char_cap" | "window_end"
@@ -352,6 +369,102 @@ class HistoryQueryService:
             return SearchOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_cursor")
         return self._run_search(session, state)
 
+    def count(
+        self,
+        group_id: int | str,
+        *,
+        terms: list[str],
+        start_ts: float,
+        end_ts: float,
+    ) -> CountOutcome:
+        """全窗口计数：单条 ``COUNT(*)``，谓词/快照口径与 ``search`` 完全
+        一致（LIKE 变体 + 撤回排除 + 快照上界），**不受扫描帽**——这是
+        调查执行器的证无通道（0 条 = 窗口内从未出现）。时限内未扫完返回
+        PARTIAL（COUNT 原子，无部分数字）；无游标、无会话状态。
+        """
+        gid = self._try_group(group_id)
+        if gid is None:
+            return CountOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_group")
+        clean_terms = [str(t).strip() for t in terms if str(t).strip()]
+        if not clean_terms:
+            return CountOutcome(status=QueryStatus.INVALID_REQUEST, detail="empty_terms")
+        if len(clean_terms) > MAX_TERMS:
+            return CountOutcome(status=QueryStatus.INVALID_REQUEST, detail="too_many_terms")
+        if end_ts <= start_ts:
+            return CountOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_window")
+        snapshot = self._current_snapshot()
+        if snapshot is None:
+            return CountOutcome(
+                status=QueryStatus.UNAVAILABLE, detail="archive_unavailable"
+            )
+
+        flat_variants = [v for t in clean_terms for v in _term_variants(t)]
+        like_clauses = " OR ".join("m.text LIKE ? ESCAPE '\\'" for _ in flat_variants)
+        like_params = [f"%{_like_escape(v)}%" for v in flat_variants]
+
+        deadline_at = monotonic() + self.query_deadline_s
+        deadline_hit = threading.Event()
+        conn = self.archive.query_connection()
+        if conn is None:
+            return CountOutcome(
+                status=QueryStatus.UNAVAILABLE,
+                coverage=self.coverage(gid),
+                detail="archive_unavailable",
+            )
+
+        def _guard() -> int:
+            if monotonic() > deadline_at:
+                deadline_hit.set()
+                return 1
+            return 0
+
+        try:
+            conn.set_progress_handler(_guard, 2000)
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS c
+                FROM archive_messages m
+                WHERE m.group_id = ?
+                  AND m.ts >= ? AND m.ts < ?
+                  AND m.id <= ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM recalled_messages r
+                      WHERE r.group_id = m.group_id
+                        AND r.message_id = m.message_id
+                  )
+                  AND ({like_clauses})
+                """,
+                (gid, float(start_ts), float(end_ts), snapshot, *like_params),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            if deadline_hit.is_set():
+                return CountOutcome(
+                    status=QueryStatus.PARTIAL,
+                    stop_reason="deadline",
+                    coverage=self.coverage(gid),
+                    detail="count_deadline",
+                )
+            return CountOutcome(
+                status=QueryStatus.UNAVAILABLE,
+                coverage=self.coverage(gid),
+                detail="database_busy",
+            )
+        except sqlite3.Error:
+            return CountOutcome(
+                status=QueryStatus.UNAVAILABLE,
+                coverage=self.coverage(gid),
+                detail="database_error",
+            )
+        finally:
+            conn.set_progress_handler(None, 0)
+            conn.close()
+
+        return CountOutcome(
+            status=QueryStatus.OK,
+            count=int(row["c"]),
+            coverage=self.coverage(gid),
+        )
+
     def _run_search(self, session: HistorySession, state: dict[str, Any]) -> SearchOutcome:
         gid: str = state["group_id"]
         terms: list[str] = state["terms"]
@@ -503,16 +616,22 @@ class HistoryQueryService:
     def reissue_read_newer_after(
         self, session: HistorySession, source_state: dict[str, Any] | None,
         last_message: ArchivedMessage, *, char_offset: int = 0,
+        resume_row_id: int | None = None,
     ) -> str | None:
         """从"最后实际交付的消息"重签 newer 续读游标（R09）。
 
         ``char_offset`` > 0 表示最后交付行是片段，续读从该偏移起。
+        ``resume_row_id`` 显式指定续读头（S01：正文零交付时偏移为 0
+        但仍须回到该行，不能用 0 偏移推断"整条已读"；None 时沿用
+        char_offset>0 的推断，保持旧调用兼容）。
         """
         if not source_state:
             return None
         state = dict(source_state)
         state["last_key"] = [last_message.ts, last_message.row_id]
-        state["resume_row_id"] = last_message.row_id if char_offset > 0 else None
+        if resume_row_id is None:
+            resume_row_id = last_message.row_id if char_offset > 0 else None
+        state["resume_row_id"] = resume_row_id
         state["char_offset"] = char_offset
         return session.issue(state)
 
@@ -943,7 +1062,7 @@ class HistoryQueryService:
         # 窗口探针说"没有更多整条"时，预算截断（片段/顺延）仍意味着
         # 有未交付内容：一样必须签发续读游标
         needs_newer = (not newer_exhausted) or truncated_last or leftover > 0
-        if needs_newer and messages:
+        if messages:
             last = messages[-1]
             resume_row_id = None
             char_offset = 0
@@ -951,6 +1070,9 @@ class HistoryQueryService:
                 # 续读从片段剩余部分开始（resume 行 = 片段行本身）
                 resume_row_id = fragment[0]
                 char_offset = fragment[1] + len(last.text)
+            # F02：续读状态恒随结果携带（即使查询层已判定窗口耗尽、
+            # 不签发游标令牌）——渲染层预算截断掉的内容仍在窗口内，
+            # 重签时需要这份带 snapshot/window 的完整状态作底稿
             newer_state_copy = {
                 "kind": "read",
                 "group_id": gid,
@@ -963,11 +1085,18 @@ class HistoryQueryService:
                 "max_chars": int(max_chars),
                 "window": list(window) if window else None,
             }
-            newer_cursor = session.issue(dict(newer_state_copy))
+            if needs_newer:
+                newer_cursor = session.issue(dict(newer_state_copy))
         return ReadOutcome(
             status=QueryStatus.OK,
             messages=messages,
             fragment=fragment,
+            # S01：续读头基址无论是否产生 fragment 都要随结果传递
+            # （剩余正文整条交付时 fragment=None，基址只剩这里能带出）
+            resume_head=(
+                (fragment_start[0], fragment_start[1])
+                if fragment_start is not None else None
+            ),
             older_cursor=older_cursor,
             newer_cursor=newer_cursor,
             stop_reason=stop_reason,

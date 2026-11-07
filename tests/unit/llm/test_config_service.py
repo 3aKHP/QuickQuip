@@ -582,3 +582,55 @@ def test_import_preview_reports_format_1_pricing_upgrade(service):
     assert preview["warnings"][0]["code"] == "pricing_upgraded"
     assert preview["warnings"][0]["details"]["kind"] == "unmatched_dropped"
     assert preview["document"]["pricing"] == []
+
+
+def test_tool_calls_field_works_with_pre_feature_group_history_settings(tmp_path, monkeypatch):
+    """既有配置库的 group_history 段不含 investigation_tool_calls(本 PR 新增),
+    初始化不得建 group_history_settings 表或判 schema 漂移;字段经文档式存储
+    保存与重载(DOCUMENT_ONLY_SETTINGS 全段投影,对照 #340 兼容策略)。"""
+    import quickquip.llm.config_fields as config_fields
+    from quickquip.llm.config_document import compile_document
+    from quickquip.llm.config_store import expected_schema_objects, projection_consistent
+
+    current_registry = config_fields.field_registry
+
+    def pre_feature_registry():
+        registry = current_registry()
+        registry["settings"]["group_history"] = {
+            k: v for k, v in registry["settings"]["group_history"].items()
+            if k != "investigation_tool_calls"
+        }
+        return registry
+
+    service = ConfigService(tmp_path / "config.db")
+    with monkeypatch.context() as patch:
+        patch.setattr(config_fields, "field_registry", pre_feature_registry)
+        expected_schema_objects.cache_clear()
+        original = service.initialize()
+    expected_schema_objects.cache_clear()
+    with sqlite3.connect(service.path) as connection:
+        original_schema = connection.execute(
+            "SELECT name,sql FROM sqlite_master ORDER BY name"
+        ).fetchall()
+        tables = {
+            row[0] for row in connection.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            )
+        }
+    assert "group_history_settings" not in tables
+
+    # 现行注册表下重复初始化必须接受既有库结构(不判 unsupported_schema)
+    assert service.initialize() == original
+    document = service.read()["document"]
+    document["settings"]["group_history"]["investigation_tool_calls"] = 24
+    saved = service.replace(document, original["revision"])
+    service.store.verify()
+    with service.store.connect() as connection:
+        projection_consistent(connection)
+        assert [tuple(row) for row in connection.execute(
+            "SELECT name,sql FROM sqlite_master ORDER BY name"
+        )] == original_schema
+    loaded = ConfigService(service.path).read()
+    assert loaded == saved
+    compiled = compile_document(loaded["document"], tmp_path)
+    assert compiled.group_history.investigation_tool_calls == 24
