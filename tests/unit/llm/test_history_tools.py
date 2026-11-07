@@ -27,9 +27,11 @@ from quickquip.llm.history_tools import (
     HistoryToolState,
     SEARCH_RESULT_TOKEN_CAP,
     parse_history_time,
+    redact_count_arguments,
     redact_read_arguments,
     redact_recent_arguments,
     redact_search_arguments,
+    run_group_history_count,
     run_group_history_read,
     run_group_history_search,
 )
@@ -633,3 +635,150 @@ def test_trim_to_budget_zero_cap_returns_nothing():
 
     kept, trimmed, _ = _trim_to_budget(["行"], "头", "脚", 0)
     assert kept == [] and trimmed is False
+
+
+# ── count_group_history：证无通道（调查子面专用，此处直测 handler/渲染） ──
+
+
+class _RecordingStub:
+    """ RecordingQueryService 的最小鸭子面：仅提供回执登记。"""
+
+    def __init__(self, inner):
+        self.inner = inner
+        self.receipts: list[tuple] = []
+
+    def register_count_receipt(self, terms_text, window_text, count):
+        self.receipts.append((terms_text, window_text, count))
+        return "hr1c.deadbeef"
+
+    def count(self, group_id, *, terms, start_ts, end_ts):
+        return self.inner.count(
+            group_id, terms=terms, start_ts=start_ts, end_ts=end_ts
+        )
+
+
+def _count_deps(tmp_path: Path, *, recording=False):
+    deps = _deps(tmp_path)
+    if recording:
+        deps.query_service = _RecordingStub(deps.query_service)  # type: ignore[assignment]
+    return deps
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("recording", [False, True])
+async def test_count_zero_definitive_with_receipt(tmp_path: Path, recording: bool):
+    deps = _count_deps(tmp_path, recording=recording)
+    state = HistoryToolState()
+    result = await run_group_history_count(
+        deps,
+        {"terms": ["从未出现的词"], "start": "2026-01-01", "end": "2026-01-31"},
+        _context(history=state),
+    )
+    assert "共 0 条命中" in result
+    assert "确定性结论" in result and "从未出现" in result
+    if recording:
+        assert "回执 hr1c.deadbeef" in result
+    else:
+        assert "回执" not in result
+
+
+@pytest.mark.asyncio
+async def test_count_nonzero_is_not_row_evidence(tmp_path: Path):
+    deps = _count_deps(tmp_path, recording=True)
+    archive = _archive_for(_deps(tmp_path))  # 独立归档，避免共享状态
+    now = time()
+    for i in range(3):
+        archive.record(G1, f"成员{i}", f"复读{i}", ts=now - i * 60,
+                       user_id=str(i), message_id=f"c{i}")
+    state = HistoryToolState()
+    result = await run_group_history_count(
+        deps, {"terms": ["复读"], "start": "2000-01-01"}, _context(history=state)
+    )
+    assert "共 3 条命中" in result
+    assert "不是行级证据" in result and "search_group_history" in result
+    assert "回执 hr1c.deadbeef" in result
+
+
+@pytest.mark.asyncio
+async def test_count_deadline_advises_narrowing_no_receipt(tmp_path: Path, monkeypatch):
+    from quickquip.chat.history_query import CountOutcome, QueryStatus
+
+    deps = _count_deps(tmp_path, recording=True)
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+
+    def _deadline(group_id, *, terms, start_ts, end_ts):
+        return CountOutcome(status=QueryStatus.PARTIAL, stop_reason="deadline")
+
+    monkeypatch.setattr(stub.inner, "count", _deadline)
+    result = await run_group_history_count(
+        deps, {"terms": ["任意词"]}, _context(history=HistoryToolState())
+    )
+    assert "未产生回执" in result and "缩小时间窗" in result
+    assert stub.receipts == []  # deadline 绝不签发回执
+
+
+@pytest.mark.asyncio
+async def test_count_clamps_long_range_and_reports_it(tmp_path: Path):
+    deps = _count_deps(tmp_path)
+    state = HistoryToolState()
+    result = await run_group_history_count(
+        deps,
+        {"terms": ["词"], "start": "2020-01-01", "end": "2026-11-01"},
+        _context(history=state),
+    )
+    assert "最大跨度收敛为最近 180 天" in result
+    assert "分段计数" in result
+
+
+@pytest.mark.asyncio
+async def test_count_gates_and_validation(tmp_path: Path):
+    deps = _deps(tmp_path)
+    assert "仅支持群聊" in await run_group_history_count(
+        deps, {"terms": ["a"]}, _context(chat_type="private")
+    )
+    disabled = _deps(tmp_path, enabled=False)
+    assert "未开启" in await run_group_history_count(
+        disabled, {"terms": ["a"]}, _context()
+    )
+    no_terms = await run_group_history_count(
+        deps, {"terms": []}, _context(history=HistoryToolState())
+    )
+    assert "缺少搜索词项" in no_terms
+    bad_time = await run_group_history_count(
+        deps, {"terms": ["a"], "start": "不是日期"}, _context(history=HistoryToolState())
+    )
+    assert "时间格式无法解析" in bad_time
+    bad_order = await run_group_history_count(
+        deps, {"terms": ["a"], "start": "2026-02-01", "end": "2026-01-01"},
+        _context(history=HistoryToolState()),
+    )
+    assert "结束时间需要晚于开始时间" in bad_order
+
+
+def test_redact_count_arguments_whitelist():
+    raw = json.dumps(
+        {"terms": ["内部词"], "start": "2026-11-01", "end": "2026-11-07"},
+        ensure_ascii=False,
+    )
+    redacted = json.loads(redact_count_arguments(raw))
+    assert redacted == {"mode": "count", "start": "2026-11-01", "end": "2026-11-07"}
+    assert "terms" not in redacted
+
+
+def test_render_investigation_result_includes_receipt_evidence():
+    from quickquip.llm.history_investigation import InvestigationFinding, InvestigationResult
+    from quickquip.llm.history_tools import render_investigation_result
+
+    result = InvestigationResult(
+        status="completed",
+        findings=[InvestigationFinding(
+            claim="「黑历史」在窗口内从未出现",
+            evidence_refs=["hr1c.deadbeef"],
+        )],
+        evidence={"hr1c.deadbeef": "计数核验：窗口 X 内共 0 条命中——从未出现（确定性结论）。"},
+    )
+    text = render_investigation_result(result)
+    assert "从未出现" in text
+    assert "hr1c.deadbeef" in text
+    assert "计数核验" in text

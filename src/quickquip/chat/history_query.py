@@ -146,6 +146,19 @@ class SearchOutcome:
 
 
 @dataclass
+class CountOutcome:
+    """全窗口计数结果（证无通道）。count=None 表示未得出数字
+    （PARTIAL/deadline：时限内未扫完，绝不给出部分计数）；count=0
+    与逐页搜索穷尽口径一致，是确定性证无。"""
+
+    status: QueryStatus
+    count: int | None = None
+    stop_reason: str | None = None  # "deadline"
+    coverage: CoverageInfo | None = None
+    detail: str = ""
+
+
+@dataclass
 class ReadOutcome:
     status: QueryStatus
     messages: list[ArchivedMessage] = field(default_factory=list)  # 升序
@@ -351,6 +364,102 @@ class HistoryQueryService:
         if state is None or state.get("kind") != "search":
             return SearchOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_cursor")
         return self._run_search(session, state)
+
+    def count(
+        self,
+        group_id: int | str,
+        *,
+        terms: list[str],
+        start_ts: float,
+        end_ts: float,
+    ) -> CountOutcome:
+        """全窗口计数：单条 ``COUNT(*)``，谓词/快照口径与 ``search`` 完全
+        一致（LIKE 变体 + 撤回排除 + 快照上界），**不受扫描帽**——这是
+        调查执行器的证无通道（0 条 = 窗口内从未出现）。时限内未扫完返回
+        PARTIAL（COUNT 原子，无部分数字）；无游标、无会话状态。
+        """
+        gid = self._try_group(group_id)
+        if gid is None:
+            return CountOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_group")
+        clean_terms = [str(t).strip() for t in terms if str(t).strip()]
+        if not clean_terms:
+            return CountOutcome(status=QueryStatus.INVALID_REQUEST, detail="empty_terms")
+        if len(clean_terms) > MAX_TERMS:
+            return CountOutcome(status=QueryStatus.INVALID_REQUEST, detail="too_many_terms")
+        if end_ts <= start_ts:
+            return CountOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_window")
+        snapshot = self._current_snapshot()
+        if snapshot is None:
+            return CountOutcome(
+                status=QueryStatus.UNAVAILABLE, detail="archive_unavailable"
+            )
+
+        flat_variants = [v for t in clean_terms for v in _term_variants(t)]
+        like_clauses = " OR ".join("m.text LIKE ? ESCAPE '\\'" for _ in flat_variants)
+        like_params = [f"%{_like_escape(v)}%" for v in flat_variants]
+
+        deadline_at = monotonic() + self.query_deadline_s
+        deadline_hit = threading.Event()
+        conn = self.archive.query_connection()
+        if conn is None:
+            return CountOutcome(
+                status=QueryStatus.UNAVAILABLE,
+                coverage=self.coverage(gid),
+                detail="archive_unavailable",
+            )
+
+        def _guard() -> int:
+            if monotonic() > deadline_at:
+                deadline_hit.set()
+                return 1
+            return 0
+
+        try:
+            conn.set_progress_handler(_guard, 2000)
+            row = conn.execute(
+                f"""
+                SELECT COUNT(*) AS c
+                FROM archive_messages m
+                WHERE m.group_id = ?
+                  AND m.ts >= ? AND m.ts < ?
+                  AND m.id <= ?
+                  AND NOT EXISTS (
+                      SELECT 1 FROM recalled_messages r
+                      WHERE r.group_id = m.group_id
+                        AND r.message_id = m.message_id
+                  )
+                  AND ({like_clauses})
+                """,
+                (gid, float(start_ts), float(end_ts), snapshot, *like_params),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            if deadline_hit.is_set():
+                return CountOutcome(
+                    status=QueryStatus.PARTIAL,
+                    stop_reason="deadline",
+                    coverage=self.coverage(gid),
+                    detail="count_deadline",
+                )
+            return CountOutcome(
+                status=QueryStatus.UNAVAILABLE,
+                coverage=self.coverage(gid),
+                detail="database_busy",
+            )
+        except sqlite3.Error:
+            return CountOutcome(
+                status=QueryStatus.UNAVAILABLE,
+                coverage=self.coverage(gid),
+                detail="database_error",
+            )
+        finally:
+            conn.set_progress_handler(None, 0)
+            conn.close()
+
+        return CountOutcome(
+            status=QueryStatus.OK,
+            count=int(row["c"]),
+            coverage=self.coverage(gid),
+        )
 
     def _run_search(self, session: HistorySession, state: dict[str, Any]) -> SearchOutcome:
         gid: str = state["group_id"]

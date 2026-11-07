@@ -338,3 +338,71 @@ async def test_watchdog_cancel_semantics_unit():
     # 看门狗检出父失效 → ParentCancelled（非裸取消）
     with pytest.raises(ParentCancelled):
         await run_with_parent_watchdog(_sleep_long(), _invalid, interval=0.05)
+
+
+# ── 计数证无通道：回执作为 evidence_refs 的合法形态 ─────────────────
+
+
+@pytest.mark.asyncio
+async def test_count_receipt_as_evidence(tmp_path: Path, monkeypatch):
+    """count=0 回执可独立支撑「从未出现」结论：completed + 证据含回执文本。"""
+    monkeypatch.setattr(
+        "quickquip.llm.history_investigation.secrets.token_hex",
+        lambda n: "deadbeef",
+    )
+    script = [
+        _FakeResponse(tool_calls=[LLMToolCall(
+            id="c1", name="count_group_history",
+            arguments_json=json.dumps({"terms": ["从未出现的黑料"]}),
+        )]),
+        _FakeResponse(text=json.dumps({
+            "findings": [{
+                "claim": "「从未出现的黑料」在归档窗口内 0 次出现",
+                "evidence_refs": ["hr1c.deadbeef"],
+            }],
+            "unresolved": "",
+            "suggested_followup": "",
+        }, ensure_ascii=False)),
+    ]
+    result, client = await _run(tmp_path, script)
+    assert result.status == "completed"
+    assert result.findings[0].evidence_refs == ["hr1c.deadbeef"]
+    assert "hr1c.deadbeef" in result.evidence
+    receipt_text = result.evidence["hr1c.deadbeef"]
+    assert "0 条" in receipt_text and "确定性" in receipt_text
+    assert result.tool_calls == 1
+    # 子任务请求里确实向模型交付过回执引用
+    last_request = client.requests[-1]
+    assert any(
+        "hr1c.deadbeef" in str(part) for part in getattr(last_request, "messages", [])
+    )
+
+
+@pytest.mark.asyncio
+async def test_fabricated_count_receipt_rejected_then_repaired(tmp_path: Path):
+    """伪造 hr1c 与伪造消息引用同罪：校验拒绝，走预算内修复。"""
+    archive, service, ref = _archive_with_history(tmp_path)
+    good_ref = service.encode_ref(6)  # 搜索首页命中的最新行（已读）
+    script = [
+        _FakeResponse(tool_calls=[LLMToolCall(
+            id="c1", name="search_group_history",
+            arguments_json=json.dumps({"terms": ["部署方案"]}),
+        )]),
+        _FakeResponse(text=json.dumps({
+            "findings": [{
+                "claim": "某词从未出现",
+                "evidence_refs": ["hr1c.00000000"],
+            }],
+            "unresolved": "",
+        }, ensure_ascii=False)),
+        _FakeResponse(text=json.dumps({
+            "findings": [{
+                "claim": "成员5 参与了讨论",
+                "evidence_refs": [good_ref],
+            }],
+            "unresolved": "",
+        }, ensure_ascii=False)),
+    ]
+    result, _ = await _run(tmp_path, script)
+    assert result.status == "completed"
+    assert result.findings[0].evidence_refs == [good_ref]

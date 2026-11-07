@@ -169,6 +169,20 @@ def redact_search_arguments(arguments_json: str) -> str:
     return json.dumps(payload, ensure_ascii=False)
 
 
+def redact_count_arguments(arguments_json: str) -> str:
+    """count 声明只留模式与时间范围；词项不落库（与 search 同口径）。"""
+    try:
+        args = json.loads(arguments_json or "{}")
+    except json.JSONDecodeError:
+        args = {}
+    payload: dict[str, Any] = {"mode": "count"}
+    for key in ("start", "end"):
+        value = args.get(key)
+        if isinstance(value, str) and value.strip():
+            payload[key] = value.strip()[:32]
+    return json.dumps(payload, ensure_ascii=False)
+
+
 def redact_read_arguments(arguments_json: str) -> str:
     """持久化声明只留模式/方向/时间范围与引用计数；锚点正文不落库。"""
     try:
@@ -302,6 +316,33 @@ SEARCH_GROUP_HISTORY_SPEC = LLMToolSpec(
         "required": [],
     },
 )
+
+COUNT_GROUP_HISTORY_SPEC = LLMToolSpec(
+    name="count_group_history",
+    description=(
+        "统计当前群归档窗口内命中任一搜索词的消息总数（全量扫描，"
+        "不受常规搜索分页限制）。计数为 0 即这些词在该窗口从未出现"
+        "（确定性结论，回执引用可直接写进调查报告的 evidence_refs）；"
+        "计数 > 0 只证明出现过，定位具体消息仍需 search_group_history。"
+        "时间用 YYYY-MM-DD 或 ISO 8601（北京时间）；缺省查最近 "
+        f"{DEFAULT_WINDOW_DAYS} 天，跨度最大 {MAX_RANGE_DAYS} 天，"
+        "更早区间请分段计数。只读。"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "terms": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "1-5 个搜索词项，任一命中即算匹配",
+            },
+            "start": {"type": "string", "description": "起始时间（含）"},
+            "end": {"type": "string", "description": "结束时间（不含），缺省为现在"},
+        },
+        "required": [],
+    },
+)
+
 
 INVESTIGATE_GROUP_HISTORY_SPEC = LLMToolSpec(
     name="investigate_group_history",
@@ -519,6 +560,101 @@ def _render_search_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolSta
     body = "\n".join([header, *kept, footer])
     if trimmed:
         body += f"\n（因结果预算截断，仅显示前 {len(kept)} 条命中。）"
+    state.consume(estimate_tokens(body))
+    return body
+
+
+async def run_group_history_count(deps: HistoryToolDeps, arguments, context) -> str:
+    if context.chat_type != "group":
+        return _PRIVATE_CHAT_REPLY
+    group_id = context.group_id
+    if not deps.is_enabled(group_id):
+        return _DISABLED_REPLY
+    state: HistoryToolState | None = getattr(context, "history", None)
+    if state is None:
+        return _DISABLED_REPLY
+
+    raw_terms = arguments.get("terms") or []
+    terms = [str(t).strip() for t in raw_terms if str(t).strip()]
+    if not terms:
+        return "缺少搜索词项：terms 至少提供一个非空词。"
+
+    # 时间语义与 search 完全一致（缺省 7 天、最大跨度 180 天钳制）；
+    # 钳制事实显式写进回执，长区间由模型分段计数，不静默截断
+    now = datetime.now(tz=BEIJING_TZ)
+    start = (
+        parse_history_time(str(arguments.get("start") or ""))
+        if arguments.get("start") else None
+    )
+    end = parse_history_time(str(arguments.get("end") or "")) if arguments.get("end") else None
+    if (arguments.get("start") and start is None) or (
+        arguments.get("end") and end is None
+    ):
+        return "时间格式无法解析：请用 YYYY-MM-DD 或 ISO 8601（北京时间）。"
+    end_dt = end or now
+    start_dt = start or (end_dt - timedelta(days=DEFAULT_WINDOW_DAYS))
+    if end_dt <= start_dt:
+        return "结束时间需要晚于开始时间。"
+    clamped = False
+    if end_dt - start_dt > timedelta(days=MAX_RANGE_DAYS):
+        start_dt = end_dt - timedelta(days=MAX_RANGE_DAYS)
+        clamped = True
+
+    outcome = await asyncio.to_thread(
+        deps.query_service.count,
+        group_id,
+        terms=terms,
+        start_ts=start_dt.timestamp(),
+        end_ts=end_dt.timestamp(),
+    )
+    return _render_count_outcome(deps, outcome, state, terms, start_dt, end_dt, clamped)
+
+
+def _render_count_outcome(
+    deps: HistoryToolDeps,
+    outcome,
+    state: HistoryToolState,
+    terms: list[str],
+    start_dt: datetime,
+    end_dt: datetime,
+    clamped: bool,
+) -> str:
+    if outcome.status is QueryStatus.INVALID_REQUEST:
+        return "请求参数无效，请检查词项与时间范围。"
+    if outcome.status is QueryStatus.UNAVAILABLE:
+        return "群聊归档暂时不可用，请稍后再试。"
+    if outcome.status is QueryStatus.PARTIAL:
+        return (
+            "无法在时限内完成计数（窗口过大或归档繁忙），本次未产生回执；"
+            "请缩小时间窗后重试。\n" + _format_coverage(outcome.coverage)
+        )
+
+    terms_text = "、".join(f"「{t}」" for t in terms[:5])
+    window_text = f"{start_dt:%Y-%m-%d %H:%M} 至 {end_dt:%Y-%m-%d %H:%M}（北京时间）"
+    clamp_note = (
+        "\n（窗口已按最大跨度收敛为最近 180 天；更早区间请分段计数。）"
+        if clamped else ""
+    )
+    # 回执登记面由宿主注入：调查子面是 RecordingQueryService（可作
+    # evidence_refs），直接面不注册本工具，此处鸭子类型即可
+    register = getattr(deps.query_service, "register_count_receipt", None)
+    receipt_ref = register(terms_text, window_text, int(outcome.count or 0)) \
+        if register is not None else None
+    receipt_clause = f"（回执 {receipt_ref}）" if receipt_ref else ""
+
+    if outcome.count == 0:
+        body = (
+            f"计数核验{receipt_clause}：窗口 {window_text} 内{terms_text}"
+            "共 0 条命中（全量扫描、已排除撤回消息，非抽样）。"
+            "0 条为确定性结论：这些词在该窗口内从未出现。"
+        ) + clamp_note
+    else:
+        body = (
+            f"计数核验{receipt_clause}：窗口 {window_text} 内{terms_text}"
+            f"共 {outcome.count} 条命中（全量扫描、已排除撤回消息）。"
+            "计数只证明出现过，不是行级证据；定位具体消息请用 "
+            "search_group_history。"
+        ) + clamp_note
     state.consume(estimate_tokens(body))
     return body
 
