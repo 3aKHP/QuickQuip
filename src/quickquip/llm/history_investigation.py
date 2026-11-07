@@ -203,25 +203,32 @@ class RecordingQueryService:
         )
 
     def register_count_receipt(
-        self, terms_text: str, window_text: str, count: int
+        self, terms_text: str, window_text: str, count: int,
+        *, coverage_note: str = "",
     ) -> str:
         """登记计数回执并返回引用（``hr1c.<hex8>``）。
 
         回执文本过敏感滤后入册：它会被渲染进最终报告（跨过工具结果
         管线），登记侧即保证与消息证据同一过滤口径。0 条与非 0 条的
-        措辞携带不同证据力语义（确定性证无 vs 仅证明出现过）。
+        措辞携带不同证据力语义，且 0 条必须限定在「已归档可读记录」
+        范围内并内嵌覆盖说明（N01：数据缺失不得转写成否定事实）。
+        入参均有界（词项长度帽 + 窗口文案 + 紧凑覆盖行），模板总体
+        有界，无需再裁剪。
         """
         from quickquip.common.sensitive_filter import SCRUB_PLACEHOLDER, get_filter
 
+        coverage_clause = f"；{coverage_note}" if coverage_note else ""
         if count == 0:
             summary = (
                 f"计数核验：窗口 {window_text} 内{terms_text}共 0 条命中"
-                "（全量扫描、已排除撤回消息）——该窗口内从未出现（确定性结论）。"
+                "（全量扫描已归档且未撤回的记录，非抽样）——该窗口的"
+                f"已归档可读记录中从未出现（确定性结论{coverage_clause}）。"
             )
         else:
             summary = (
                 f"计数核验：窗口 {window_text} 内{terms_text}共 {count} 条命中"
-                "（全量扫描、已排除撤回消息；仅证明出现过，非行级证据）。"
+                f"（全量扫描已归档且未撤回的记录；仅证明出现过，非行级证据"
+                f"{coverage_clause}）。"
             )
         sensitive = get_filter()
         if sensitive.is_loaded:
@@ -256,6 +263,21 @@ class RecordingQueryService:
         )
         self._record(outcome.messages)
         return outcome
+
+    # F01：渲染层截断后经门面重签续页游标（R09）——转发必须落在本
+    # 子任务自有的 session（传入的 session 形参与父/外部会话无关，
+    # 镜像签名仅保持 history_tools 按位置传参兼容）
+    def reissue_search_after(self, session, source_state, last_hit):
+        return self._inner.reissue_search_after(
+            self._session, source_state, last_hit
+        )
+
+    def reissue_read_newer_after(
+        self, session, source_state, last_message, *, char_offset=0
+    ):
+        return self._inner.reissue_read_newer_after(
+            self._session, source_state, last_message, char_offset=char_offset
+        )
 
     def coverage_note(self) -> str:
         coverage = self._inner.coverage(self._group)
@@ -427,8 +449,10 @@ def _system_prompt(recording: RecordingQueryService, task: InvestigationTask) ->
         "1. 先用 search_group_history 按不同措辞搜索关键词；命中太少就换词、"
         "放宽时间窗或翻页（cursor）。\n"
         "2. 需要证明某词在区间内从未出现（或只需要总数）时，用 "
-        "count_group_history 全量计数：0 条是确定性结论，回执 hr1c.… 可直接"
-        "作为该结论的 evidence_refs；正数只证明出现过，定位仍靠搜索。\n"
+        "count_group_history 全量计数：0 条即该窗口的已归档可读记录中"
+        "从未出现（确定性结论，以结果附带的归档覆盖说明为准），回执 "
+        "hr1c.… 可直接作为该结论的 evidence_refs；正数只证明出现过，"
+        "定位仍靠搜索。窗口早于归档起点等无数据情形不构成证无。\n"
         "3. 用 read_group_history 按引用展开命中前后的上下文，核对谁在什么"
         "时间说了什么；结论变化要追时间线（多读几个时段）。\n"
         "4. 只把「你实际读到过」的消息引用（hr1.…）或计数回执（hr1c.…）"
@@ -659,6 +683,11 @@ async def run_history_investigation(
             notice = _tool_budget_notice()
             if notice:
                 return notice
+            # N02：count 同样受直查预算约束——耗尽后的调用会被渲染层
+            # 拒绝（_BUDGET_REPLY），refusal 语义置位
+            if sub_history_state.direct_budget_tokens <= 0:
+                if not state.budget_limited:
+                    state.budget_limited = "history_budget"
             return await run_group_history_count(deps, arguments, context)
 
         registry = ToolRegistry()
@@ -756,6 +785,7 @@ async def run_history_investigation(
                         on_provider_activity=_guard_activity,
                     ),
                         parent_check,
+                        interval=WATCHDOG_INTERVAL_S,
                     )
 
                     # R12：解析与修复留在子任务 usage/trace 作用域内——修复
@@ -795,8 +825,18 @@ async def run_history_investigation(
                                 allow_tool_calls=False,
                                 tool_choice="none",
                             )
-                            # 修复调用走同一计数 client：计入模型调用帽与 token 预算
-                            repaired = await counting_client.complete(repair_request)
+                            # 修复调用走同一计数 client：计入模型调用帽与
+                            # token 预算。F03：这段 await 同样受父失效看门狗
+                            # 监控（原来只有工具循环被看护，修复等待期间
+                            # 父会话清空不能及时取消），修复完成后补一次
+                            # 显式复查再进交付路径
+                            repaired = await run_with_parent_watchdog(
+                                counting_client.complete(repair_request),
+                                parent_check,
+                                interval=WATCHDOG_INTERVAL_S,
+                            )
+                            if parent_check is not None:
+                                parent_check()
                             parsed = _parse_report(repaired.text or "")
                             error = _validate_report(parsed, recording)
                         except (InvestigationDeadline, ParentCancelled):

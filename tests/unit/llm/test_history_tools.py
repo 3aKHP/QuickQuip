@@ -647,8 +647,8 @@ class _RecordingStub:
         self.inner = inner
         self.receipts: list[tuple] = []
 
-    def register_count_receipt(self, terms_text, window_text, count):
-        self.receipts.append((terms_text, window_text, count))
+    def register_count_receipt(self, terms_text, window_text, count, *, coverage_note=""):
+        self.receipts.append((terms_text, window_text, count, coverage_note))
         return "hr1c.deadbeef"
 
     def count(self, group_id, *, terms, start_ts, end_ts):
@@ -664,20 +664,40 @@ def _count_deps(tmp_path: Path, *, recording=False):
     return deps
 
 
+def _seed_count_archive(deps: HistoryToolDeps, *, count=3):
+    """铺一个有数据的归档（N01 后零计数断言必须有真实覆盖范围）。"""
+    archive = deps.query_service.inner.archive if isinstance(
+        deps.query_service, _RecordingStub
+    ) else _archive_for(deps)
+    now = time()
+    for i in range(count):
+        archive.record(
+            G1, f"成员{i}", f"复读{i}", ts=now - (count - i) * 3600,
+            user_id=str(i), message_id=f"c{i}",
+        )
+    return now
+
+
 @pytest.mark.asyncio
 @pytest.mark.parametrize("recording", [False, True])
 async def test_count_zero_definitive_with_receipt(tmp_path: Path, recording: bool):
     deps = _count_deps(tmp_path, recording=recording)
+    _seed_count_archive(deps)
     state = HistoryToolState()
     result = await run_group_history_count(
         deps,
-        {"terms": ["从未出现的词"], "start": "2026-01-01", "end": "2026-01-31"},
+        {"terms": ["从未出现的词"], "start": "2020-01-01"},
         _context(history=state),
     )
     assert "共 0 条命中" in result
-    assert "确定性结论" in result and "从未出现" in result
+    # N01：确定性断言限定在「已归档可读记录」，并附覆盖说明
+    assert "确定性结论" in result and "已归档可读记录中从未" in result
+    assert "归档覆盖" in result
     if recording:
         assert "回执 hr1c.deadbeef" in result
+        stub = deps.query_service
+        assert isinstance(stub, _RecordingStub)
+        assert stub.receipts and "连续性未知" in stub.receipts[0][3]
     else:
         assert "回执" not in result
 
@@ -685,11 +705,7 @@ async def test_count_zero_definitive_with_receipt(tmp_path: Path, recording: boo
 @pytest.mark.asyncio
 async def test_count_nonzero_is_not_row_evidence(tmp_path: Path):
     deps = _count_deps(tmp_path, recording=True)
-    archive = _archive_for(_deps(tmp_path))  # 独立归档，避免共享状态
-    now = time()
-    for i in range(3):
-        archive.record(G1, f"成员{i}", f"复读{i}", ts=now - i * 60,
-                       user_id=str(i), message_id=f"c{i}")
+    _seed_count_archive(deps, count=3)
     state = HistoryToolState()
     result = await run_group_history_count(
         deps, {"terms": ["复读"], "start": "2000-01-01"}, _context(history=state)
@@ -697,6 +713,103 @@ async def test_count_nonzero_is_not_row_evidence(tmp_path: Path):
     assert "共 3 条命中" in result
     assert "不是行级证据" in result and "search_group_history" in result
     assert "回执 hr1c.deadbeef" in result
+    assert "归档覆盖" in result
+
+
+@pytest.mark.asyncio
+async def test_count_no_data_windows_never_issue_receipt(tmp_path: Path):
+    """N01：空库与采集前窗口是数据缺失，不是证无——不签回执。"""
+    deps = _count_deps(tmp_path, recording=True)
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+
+    empty = await run_group_history_count(
+        deps, {"terms": ["任意词"]}, _context(history=HistoryToolState())
+    )
+    assert "暂无归档记录" in empty
+    assert stub.receipts == []
+
+    _seed_count_archive(deps, count=2)
+    # 窗口完全早于归档起点：无数据不构成证无
+    before = await run_group_history_count(
+        deps,
+        {"terms": ["任意词"], "start": "2020-01-01", "end": "2020-02-01"},
+        _context(history=HistoryToolState()),
+    )
+    assert "没有交集" in before and "不构成" in before
+    assert stub.receipts == []
+
+
+@pytest.mark.asyncio
+async def test_count_recall_excluded_but_scoped(tmp_path: Path):
+    """仅有的命中全被撤回：可读记录计数为 0，措辞自带「已排除撤回」限定。"""
+    deps = _count_deps(tmp_path, recording=True)
+    _seed_count_archive(deps, count=1)
+    archive = deps.query_service.inner.archive
+    archive.record_recall(G1, "c0")
+    result = await run_group_history_count(
+        deps, {"terms": ["复读"], "start": "2020-01-01"},
+        _context(history=HistoryToolState()),
+    )
+    assert "共 0 条命中" in result
+    assert "未撤回" in result
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+    assert stub.receipts  # 回执照发：已归档可读记录的 0 是真实陈述
+
+
+@pytest.mark.asyncio
+async def test_count_receipt_window_in_beijing_time(tmp_path: Path):
+    """N03：带偏移的 ISO 输入换算北京时间入回执，end 标注不含。"""
+    from datetime import datetime as _dt
+
+    deps = _count_deps(tmp_path, recording=True)
+    now = _seed_count_archive(deps, count=1)
+    start_iso = _dt.fromtimestamp(now - 7200, tz=UTC).replace(
+        minute=0, second=0
+    ).isoformat()
+    end_iso = _dt.fromtimestamp(now + 3600, tz=UTC).replace(
+        minute=0, second=30
+    ).isoformat()
+    result = await run_group_history_count(
+        deps, {"terms": ["复读"], "start": start_iso, "end": end_iso},
+        _context(history=HistoryToolState()),
+    )
+    assert "共 1 条命中" in result
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+    window_text = stub.receipts[0][1]
+    # UTC 时刻在回执中必须以北京时间呈现（+8h）；零秒走分钟格式、
+    # 非零秒保留（N03 精度要求）
+    assert ":00:30" in window_text
+    assert "end 不含" in window_text
+    assert "（北京时间" in window_text
+    # 换算正确性：start 的北京时间小时 = UTC 小时 + 8
+    start_local_hour = (_dt.fromtimestamp(now - 7200, tz=UTC).hour + 8) % 24
+    assert f"{start_local_hour:02d}:00" in window_text
+
+
+@pytest.mark.asyncio
+async def test_count_budget_and_term_guards(tmp_path: Path):
+    """N02：额度耗尽拒绝执行；超长词项入口拒绝，不回显不登记。"""
+    deps = _count_deps(tmp_path, recording=True)
+    stub = deps.query_service
+    assert isinstance(stub, _RecordingStub)
+
+    long_terms = await run_group_history_count(
+        deps, {"terms": ["超" * 65]}, _context(history=HistoryToolState())
+    )
+    assert "词项过长" in long_terms
+    assert stub.receipts == []
+
+    _seed_count_archive(deps, count=1)
+    state = HistoryToolState()
+    state.direct_budget_tokens = 0
+    refused = await run_group_history_count(
+        deps, {"terms": ["复读"]}, _context(history=state)
+    )
+    assert "额度已用完" in refused
+    assert stub.receipts == []
 
 
 @pytest.mark.asyncio
@@ -721,14 +834,16 @@ async def test_count_deadline_advises_narrowing_no_receipt(tmp_path: Path, monke
 @pytest.mark.asyncio
 async def test_count_clamps_long_range_and_reports_it(tmp_path: Path):
     deps = _count_deps(tmp_path)
+    _seed_count_archive(deps, count=1)
     state = HistoryToolState()
     result = await run_group_history_count(
         deps,
-        {"terms": ["词"], "start": "2020-01-01", "end": "2026-11-01"},
+        {"terms": ["词"], "start": "2020-01-01", "end": "2026-12-31"},
         _context(history=state),
     )
     assert "最大跨度收敛为最近 180 天" in result
     assert "分段计数" in result
+    assert "归档覆盖" in result
 
 
 @pytest.mark.asyncio
@@ -862,3 +977,113 @@ def test_prompts_teach_cross_session_followup_and_optional_leads():
         evidence={"hr1.deadbeef.1": "证据"},
     ))
     assert "可选线索" in report and "无需自动补查" in report
+
+
+# ── F01/F02：渲染截断的重签链路（门面转发 + 耗尽页不丢内容） ────────
+
+
+@pytest.mark.asyncio
+async def test_search_truncation_on_exhausted_page_continues(tmp_path: Path):
+    """F02（搜索）：查询层已证耗尽（has_more=False）但渲染截断丢弃了
+    命中时，仍必须重签续查游标；经 RecordingQueryService 门面转发
+    （F01：原 AttributeError）。续页从交付边界继续，不重不漏。"""
+    from quickquip.llm.history_investigation import RecordingQueryService
+
+    deps = _deps(tmp_path)
+    archive = _archive_for(deps)
+    deps.query_service = RecordingQueryService(deps.query_service, G1)  # type: ignore[assignment]
+    now = time()
+    for i in range(4):
+        archive.record(
+            G1, f"成员{i}", f"独有词{i}：" + "内" * 400,
+            ts=now - i * 60, user_id=str(i), message_id=f"x{i}",
+        )
+    state = HistoryToolState()
+    # 紧轮空间：预览行也只装得下 ~2 行，剩余命中被渲染截断丢弃
+    state.begin_round(800)
+    result = await run_group_history_search(
+        deps, {"terms": ["独有词"]}, _context(history=state)
+    )
+    assert "预算截断" in result
+    assert "工具执行失败" not in result
+    assert "cursor：" in result  # 耗尽页被截断也要有续查句柄
+
+    cursor = result.split("cursor：", 1)[1].strip().splitlines()[0].strip()
+    state.begin_round(8000)
+    state.direct_budget_tokens = DIRECT_HISTORY_LOOP_BUDGET
+    cont = await run_group_history_search(deps, {"cursor": cursor}, _context(history=state))
+    seen1 = {m for m in ("独有词0", "独有词1", "独有词2", "独有词3") if m in result}
+    seen2 = {m for m in ("独有词0", "独有词1", "独有词2", "独有词3") if m in cont}
+    assert seen1 and not seen1 & seen2
+    assert seen1 | seen2 == {"独有词0", "独有词1", "独有词2", "独有词3"}
+
+
+@pytest.mark.asyncio
+async def test_read_exhausted_window_render_clip_continues(tmp_path: Path):
+    """F02（阅读）：整窗一页取尽（查询层无游标）但渲染只装下前几行——
+    续读句柄仍须签发且从最后交付行继续（原：无游标，未交付行不可达）。"""
+    deps = _deps(tmp_path)
+    archive = _archive_for(deps)
+    now = time()
+    for i in range(12):
+        archive.record(
+            G1, f"行员{i}", f"行{i}：" + "字" * 90,
+            ts=now - (12 - i) * 60, user_id=str(i), message_id=f"r{i}",
+        )
+    state = HistoryToolState()
+    state.direct_budget_tokens = 400
+    result = await run_group_history_read(
+        deps,
+        {"start": "2000-01-01", "end": "2100-01-01"},
+        _context(history=state),
+    )
+    assert "预算截断" in result
+    assert "newer_cursor=" in result  # 修复点：耗尽页 + 渲染截断 → 重签
+
+    import re
+
+    cursor = re.search(r"newer_cursor=(\S+)", result).group(1)
+    state.direct_budget_tokens = DIRECT_HISTORY_LOOP_BUDGET
+    state.begin_round(8000)
+    cont = await run_group_history_read(
+        deps, {"cursor": cursor}, _context(history=state)
+    )
+    first_rows = {f"行{i}" for i in range(12) if f"行{i}：" in result}
+    cont_rows = {f"行{i}" for i in range(12) if f"行{i}：" in cont}
+    assert first_rows and cont_rows
+    assert not first_rows & cont_rows
+    assert first_rows | cont_rows == {f"行{i}" for i in range(12)}
+
+
+@pytest.mark.asyncio
+async def test_read_fragment_resumes_at_rendered_boundary(tmp_path: Path):
+    """F02（偏移精度）：片段行被渲染层二次裁剪时，续读从「实际交付的
+    正文位置」继续，不跳过被裁掉的正文（原：跳到查询层片段全长）。"""
+    deps = _deps(tmp_path)
+    archive = _archive_for(deps)
+    now = time()
+    text = "".join(f"〔标{i:03d}记〕" + "字" * 92 for i in range(60))
+    archive.record(G1, "作者", text, ts=now - 60, user_id="1", message_id="long1")
+    state = HistoryToolState()
+    result = await run_group_history_read(
+        deps,
+        {"start": "2000-01-01", "end": "2100-01-01"},
+        _context(history=state),
+    )
+    import re
+
+    assert "newer_cursor=" in result and "预算截断" in result
+    markers1 = [int(m) for m in re.findall(r"〔标(\d{3})记〕", result)]
+    cursor = re.search(r"newer_cursor=(\S+)", result).group(1)
+    state.direct_budget_tokens = DIRECT_HISTORY_LOOP_BUDGET
+    state.begin_round(8000)
+    cont = await run_group_history_read(
+        deps, {"cursor": cursor}, _context(history=state)
+    )
+    markers2 = [int(m) for m in re.findall(r"〔标(\d{3})记〕", cont)]
+    # 无缺漏/无重复：续页首标记紧接首屏末标记（±3 容忍标记内裁剪），
+    # 且旧缺陷（跳 ~18 块）会被 min > max+3 捕获
+    assert markers1 and markers2
+    assert not set(markers1) & set(markers2)
+    assert min(markers2) <= max(markers1) + 3
+    assert 59 in markers2  # 续读抵达消息尾部

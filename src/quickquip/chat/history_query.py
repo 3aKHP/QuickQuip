@@ -1052,7 +1052,7 @@ class HistoryQueryService:
         # 窗口探针说"没有更多整条"时，预算截断（片段/顺延）仍意味着
         # 有未交付内容：一样必须签发续读游标
         needs_newer = (not newer_exhausted) or truncated_last or leftover > 0
-        if needs_newer and messages:
+        if messages:
             last = messages[-1]
             resume_row_id = None
             char_offset = 0
@@ -1060,6 +1060,9 @@ class HistoryQueryService:
                 # 续读从片段剩余部分开始（resume 行 = 片段行本身）
                 resume_row_id = fragment[0]
                 char_offset = fragment[1] + len(last.text)
+            # F02：续读状态恒随结果携带（即使查询层已判定窗口耗尽、
+            # 不签发游标令牌）——渲染层预算截断掉的内容仍在窗口内，
+            # 重签时需要这份带 snapshot/window 的完整状态作底稿
             newer_state_copy = {
                 "kind": "read",
                 "group_id": gid,
@@ -1072,7 +1075,8 @@ class HistoryQueryService:
                 "max_chars": int(max_chars),
                 "window": list(window) if window else None,
             }
-            newer_cursor = session.issue(dict(newer_state_copy))
+            if needs_newer:
+                newer_cursor = session.issue(dict(newer_state_copy))
         return ReadOutcome(
             status=QueryStatus.OK,
             messages=messages,

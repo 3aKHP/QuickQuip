@@ -56,15 +56,21 @@ class _FakeResponse:
 
 
 class _FakeClient:
-    def __init__(self, script: list[_FakeResponse]):
+    def __init__(self, script: list, delays: list[float] | None = None):
         self.script = list(script)
         self.requests: list = []
+        self.delays = list(delays or [])
 
     async def complete(self, request):
         self.requests.append(request)
+        if self.delays:
+            await asyncio.sleep(self.delays.pop(0))
         if not self.script:
             raise AssertionError("脚本耗尽：模型调用超出预期")
-        return self.script.pop(0)
+        item = self.script.pop(0)
+        if callable(item):
+            return item(request)
+        return item
 
 
 def _provider() -> ProviderConfig:
@@ -80,9 +86,10 @@ def _runtime() -> RuntimeConfig:
 
 
 async def _run(tmp_path, script, *, task=None, limits=None, parent_check=None,
-               group=G1):
-    archive, service, _ = _archive_with_history(tmp_path)
-    client = _FakeClient(script)
+               group=G1, service=None, delays=None):
+    if service is None:
+        _, service, _ = _archive_with_history(tmp_path)
+    client = _FakeClient(script, delays=delays)
 
     def _build(prov):
         return client
@@ -436,3 +443,105 @@ async def test_history_budget_exhaustion_labels_partial(tmp_path, monkeypatch):
     assert result.status == "partial"
     assert result.stop_reason == "history_budget"
     assert "未能读取" in result.unresolved
+
+
+# ── F01/F02/F03：跨层分页链路与生命周期（第二轮 CR） ────────────────
+
+
+def _marker_block(index: int) -> str:
+    """每 100 字符一个唯一序号标记块，用于验证续读无缺漏。"""
+    return f"〔标{index:03d}记〕" + "字" * 92
+
+
+def _page_markers(text: str) -> list[int]:
+    import re
+
+    return [int(m) for m in re.findall(r"〔标(\d{3})记〕", text)]
+
+
+@pytest.mark.asyncio
+async def test_sub_agent_long_message_continues_without_gap(tmp_path: Path):
+    """F01+F02（读路径）跨层：真实 runner 内锚点读长消息被预算截断——
+    续读游标经 RecordingQueryService 重签（原 AttributeError），且从
+    渲染层实际交付位置继续（原跳到查询层片段全长，跳过未交付正文）。"""
+    import re as _re
+
+    archive = ChatArchive(tmp_path / "archive.db")
+    now = time()
+    long_text = "".join(_marker_block(i) for i in range(60))
+    archive.record(G1, "作者", long_text, ts=now - 60, user_id="1", message_id="long1")
+    service = HistoryQueryService(archive)
+    ref = service.encode_ref(1)
+
+    def _continue_with_cursor(request):
+        cursor = None
+        for message in getattr(request, "messages", []):
+            content = getattr(message, "content", "") or ""
+            match = _re.search(r"newer_cursor=(\S+)", content)
+            if match:
+                cursor = match.group(1)
+        assert cursor, "首屏长消息阅读必须签发 newer_cursor（修复前耗尽/截断路径不签）"
+        return _FakeResponse(tool_calls=[LLMToolCall(
+            id="c2", name="read_group_history",
+            arguments_json=json.dumps({"cursor": cursor}),
+        )])
+
+    script = [
+        _FakeResponse(tool_calls=[LLMToolCall(
+            id="c1", name="read_group_history",
+            arguments_json=json.dumps({"anchor": ref, "direction": "around"}),
+        )]),
+        _continue_with_cursor,
+        _FakeResponse(text=json.dumps({
+            "findings": [], "unresolved": "测试收尾",
+        }, ensure_ascii=False)),
+    ]
+    result, client = await _run(tmp_path, script, service=service)
+
+    assert result.status == "completed"
+    assert result.tool_calls == 2
+    tool_texts: list[str] = []
+    for request in client.requests:
+        for message in getattr(request, "messages", []):
+            content = getattr(message, "content", "") or ""
+            if "归档消息" in content and content not in tool_texts:
+                tool_texts.append(content)
+    assert len(tool_texts) == 2  # 首屏 + 续页（跨请求重复携带需去重）
+    first, second = tool_texts
+    assert "工具执行失败" not in first and "工具执行失败" not in second
+
+    markers1, markers2 = _page_markers(first), _page_markers(second)
+    # 无重复交付（集合不相交）+ 无大段跳过（旧缺陷会跳 ~18 个标记块）；
+    # 允许 ±3 的边界模糊（裁剪可能落在标记内部）
+    assert not set(markers1) & set(markers2)
+    assert markers2 and markers1
+    assert min(markers2) <= max(markers1) + 3
+    # 续读抵达消息尾部（最后一个标记块可见）
+    assert 59 in markers2
+
+
+@pytest.mark.asyncio
+async def test_repair_await_watched_by_parent_watchdog(tmp_path, monkeypatch):
+    """F03：报告修复等待期间父失效必须及时取消——不是等总时限。"""
+    import quickquip.llm.history_investigation as investigation
+
+    monkeypatch.setattr(investigation, "WATCHDOG_INTERVAL_S", 0.05)
+    bad = json.dumps({
+        "findings": [{"claim": "编造", "evidence_refs": ["hr1.deadbeef.999"]}],
+    }, ensure_ascii=False)
+    script = [
+        _FakeResponse(text=bad),
+        _FakeResponse(text=bad),  # 修复响应（实际会被父取消打断）
+    ]
+
+    def _invalid_parent():
+        raise ParentCancelled("session invalidated")
+
+    with pytest.raises(ParentCancelled):
+        await _run(
+            tmp_path, script,
+            parent_check=_invalid_parent,
+            delays=[0.0, 0.5],  # 修复调用等待 0.5s，远超 0.05s 检查周期
+        )
+    # 许可已释放（后续调查可立即进入），且没有第三次模型调用
+    assert not investigation._group_permits
