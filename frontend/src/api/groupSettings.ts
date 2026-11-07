@@ -14,6 +14,7 @@ export type GroupOverrideField =
   | 'allow_prefix'
   | 'allow_at'
   | 'history_limit'
+  | 'history_enabled'
   | 'reasoning_effort'
 
 /** 单字段取值：布尔开关 / 字符串 id 或前缀 / 数值上限；null 见下方三态约定 */
@@ -40,6 +41,8 @@ export interface GroupOverrideDraft {
   allow_prefix: boolean | null
   allow_at: boolean | null
   history_limit: number | null
+  /** #72 群历史查询开关（llm.db；null = 继承全局 [group_history].enabled） */
+  history_enabled: boolean | null
   /** 思考档位覆盖：六档词表之一；null = 跟随 provider 配置档 */
   reasoning_effort: string | null
 }
@@ -88,6 +91,7 @@ export interface GroupSettingsDefaults {
   allow_prefix?: boolean
   allow_at?: boolean
   history_limit?: number
+  history_enabled?: boolean
 }
 
 export interface GroupSettingsOptions {

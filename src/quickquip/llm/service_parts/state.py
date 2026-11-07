@@ -92,6 +92,34 @@ class StateMixin:
     def set_group_memory_enabled(self, group_id: int | str, enabled: bool) -> None:
         self.set_chat_memory_enabled(group_id, enabled, chat_type="group")
 
+    def set_group_history_enabled(self, group_id: int | str, enabled: bool | None) -> None:
+        """#72 群历史开关（llm.db group_history_flags）；None = 清除本群覆盖。"""
+        self.store.set_group_history_flag(group_id, enabled)
+
+    def format_history_status(self, group_id: int | str, chat_type: str = "group") -> str:
+        if chat_type != "group":
+            return "群聊历史查询仅支持群聊使用。"
+        override = self.store.get_group_history_flag(group_id)
+        effective = self._effective_history_enabled(group_id, chat_type)
+        global_on = self.config.group_history.enabled
+        if override is None:
+            state_line = (
+                f"群聊历史查询：{'开启' if effective else '关闭'}"
+                f"（继承全局默认{'开启' if global_on else '关闭'}）"
+            )
+            if not global_on:
+                state_line += (
+                    "\n提示：当前全局 [group_history].enabled 关闭，"
+                    "可由管理员在群内开启本群覆盖。"
+                )
+        else:
+            state_line = (
+                f"群聊历史查询：{'开启' if effective else '关闭'}（本群显式设置）"
+            )
+        if getattr(self, "group_history_service", None) is None:
+            state_line += "\n注意：历史查询服务未绑定（应用装配异常），暂不可用。"
+        return state_line
+
     def set_chat_auto_memory_enabled(
         self, chat_id: int | str, enabled: bool | None, chat_type: str = "group"
     ) -> None:

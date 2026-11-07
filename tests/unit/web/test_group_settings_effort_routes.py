@@ -44,6 +44,7 @@ def test_options_providers_carry_reasoning_effort(monkeypatch, tmp_path):
         providers=fake_providers,
         personas={},
         triggers=types.SimpleNamespace(default_prefix="/", allow_prefix=True, allow_at=True),
+        group_history=types.SimpleNamespace(enabled=False),
         load_error=None,
     )
     monkeypatch.setattr(routes, "compile_document", lambda document, **kwargs: fake_cfg)

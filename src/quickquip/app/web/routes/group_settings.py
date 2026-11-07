@@ -52,6 +52,9 @@ class GroupSettingsBody(BaseModel):
     allow_prefix: bool | None = None
     allow_at: bool | None = None
     history_limit: int | None = Field(default=None, ge=0, le=200)
+    # #72 群历史查询开关（存 llm.db group_history_flags；null = 清除本群覆盖
+    # 继承全局）。仅群聊 scope 可写；私有 scope 发送该字段返回 422。
+    history_enabled: bool | None = None
     # 思考档位覆盖（六档词表单源 REASONING_EFFORT_CHOICES；null = 跟随 provider 配置档）
     reasoning_effort: str | None = None
 
@@ -101,6 +104,7 @@ def get_options():
         "allow_prefix": cfg.triggers.allow_prefix,
         "allow_at": cfg.triggers.allow_at,
         "history_limit": cfg.runtime.history_limit,
+        "history_enabled": cfg.group_history.enabled,
     }
     return {
         "providers": providers,
@@ -127,6 +131,7 @@ def _format_group_entry(group_id: str, row) -> dict:
         "allow_prefix": None,
         "allow_at": None,
         "history_limit": None,
+        "history_enabled": None,
         "reasoning_effort": None,
         "updated_at": None,
     }
@@ -164,6 +169,14 @@ def _format_group_entry(group_id: str, row) -> dict:
     return entry
 
 
+def _merge_history_flags(entries: list[dict]) -> None:
+    """把 llm.db 群历史开关并入列表条目（group 专属，private 恒 None）。"""
+    flags = LLMStore(_DB).list_group_history_flags() if _DB.exists() else {}
+    for entry in entries:
+        if entry["type"] == "group":
+            entry["history_enabled"] = flags.get(entry["group_id"])
+
+
 @router.get("/group-settings")
 def list_group_settings():
     # Collect all known active group IDs from stats_tracker.
@@ -192,6 +205,7 @@ def list_group_settings():
     for entry in result:
         if entry["type"] == "private":
             entry["session_active"] = states.get(entry["group_id"], False)
+    _merge_history_flags(result)
     return {"groups": result}
 
 
@@ -201,6 +215,11 @@ def get_group_settings(group_id: str):
     store = _store()
     override = store.get_group_settings(group_id)
     result = asdict(override)
+    result["history_enabled"] = (
+        LLMStore(_DB).get_group_history_flag(group_id)
+        if not group_id.startswith("private:") and _DB.exists()
+        else None
+    )
     if group_id.startswith("private:"):
         result["session_active"] = LLMStore(_DB).private_chat_active(group_id.split(":", 1)[1])
     return result
@@ -210,9 +229,15 @@ def get_group_settings(group_id: str):
 def put_group_settings(group_id: str, body: GroupSettingsBody, request: Request):
     _validate_group_id(group_id)
     payload = body.model_dump(exclude_unset=True)
-    if not payload:
+    history_enabled = payload.pop("history_enabled", None)
+    if "history_enabled" in body.model_fields_set and group_id.startswith("private:"):
+        raise HTTPException(status_code=422, detail="history_enabled is group-only")
+    if not payload and "history_enabled" not in body.model_fields_set:
         raise HTTPException(status_code=400, detail="no fields to update")
-    get_config_service().update_group_override(group_id, **payload)
+    if "history_enabled" in body.model_fields_set:
+        LLMStore(_DB).set_group_history_flag(group_id, history_enabled)
+    if payload:
+        get_config_service().update_group_override(group_id, **payload)
     logger.info("group_settings updated: group=%s fields=%s", group_id, list(payload.keys()))
     audit_logger.log(
         request,

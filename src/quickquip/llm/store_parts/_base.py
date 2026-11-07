@@ -258,3 +258,16 @@ class _StoreBase:
                 """,
                 (key, 1 if enabled else 0, _utc_now()),
             )
+
+    def list_group_history_flags(self) -> dict[str, bool]:
+        """全部群级显式开关（Web Admin 列表合并用）；库不可用返回空。"""
+        if self._unavailable:
+            return {}
+        try:
+            with self._connect() as conn:
+                rows = conn.execute(
+                    "SELECT group_id, enabled FROM group_history_flags"
+                ).fetchall()
+            return {row["group_id"]: bool(row["enabled"]) for row in rows}
+        except sqlite3.Error:
+            return {}
