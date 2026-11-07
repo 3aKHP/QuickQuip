@@ -153,6 +153,23 @@ class SkillsConfig:
 
 
 @dataclass(slots=True)
+class GroupHistoryConfig:
+    """[group_history] 段（#72）：LLM 按需群聊历史查询的全局面。
+
+    默认关闭；群级开关存 LLM 运行库（group_history_settings 表），
+    None 继承本段 enabled。investigation_* 供专用调查执行器（C 线），
+    B 线落地配置但暂无消费入口。整个 section 为 document-only：
+    无关系查询需求，保持既有库列集不变（对照 #340 兼容策略）。
+    """
+
+    enabled: bool = False
+    investigation_provider_id: str = ""
+    investigation_model: str = ""
+    investigation_timeout_seconds: int = 240
+    investigation_max_calls: int = 10
+
+
+@dataclass(slots=True)
 class MCPServerConfig:
     id: str
     transport: str = "stdio"
@@ -379,6 +396,7 @@ class LLMConfig:
     quick_judge: QuickJudgeConfig = field(default_factory=QuickJudgeConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     skills: SkillsConfig = field(default_factory=SkillsConfig)
+    group_history: GroupHistoryConfig = field(default_factory=GroupHistoryConfig)
     mcp: MCPConfig = field(default_factory=MCPConfig)
     providers: dict[str, ProviderConfig] = field(default_factory=dict)
     personas: dict[str, PersonaConfig] = field(default_factory=dict)

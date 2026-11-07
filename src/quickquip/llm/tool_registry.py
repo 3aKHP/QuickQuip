@@ -53,6 +53,12 @@ class RegisteredTool:
     category: str = ""
     keywords: list[str] | None = None
     always_loaded: bool = False
+    # 结果保留政策（ADR-0005）："bounded"（默认）或 "ephemeral"（正文不
+    # 入业务持久层，tool_loop 据此把 retention 传给记录器）。
+    result_retention: str = "bounded"
+    # 持久化声明参数的脱敏器（ephemeral 工具必配）：入参为原始
+    # arguments_json，返回可落库的白名单 JSON；None = 原样保留。
+    redact_arguments: Callable[[str], str] | None = None
 
 
 def _collect_schema_argument_names(schema: dict[str, Any]) -> list[str]:
@@ -184,6 +190,8 @@ class ToolRegistry:
         category: str = "",
         keywords: list[str] | None = None,
         always_loaded: bool = False,
+        result_retention: str = "bounded",
+        redact_arguments: Callable[[str], str] | None = None,
     ) -> None:
         self._tools[spec.name] = RegisteredTool(
             spec=spec,
@@ -192,6 +200,24 @@ class ToolRegistry:
             category=category,
             keywords=list(keywords or []),
             always_loaded=always_loaded,
+            result_retention=result_retention,
+            redact_arguments=redact_arguments,
+        )
+
+    def retention_of(self, name: str) -> str:
+        registered = self._tools.get(name)
+        return registered.result_retention if registered else "bounded"
+
+    def redacted_declaration(self, call: LLMToolCall) -> LLMToolCall:
+        """返回用于持久化声明的调用副本：ephemeral 工具的参数换白名单
+        JSON（当前请求内的协议配对仍用原参数，不受影响）。"""
+        registered = self._tools.get(call.name)
+        if registered is None or registered.redact_arguments is None:
+            return call
+        return LLMToolCall(
+            id=call.id,
+            name=call.name,
+            arguments_json=registered.redact_arguments(call.arguments_json or "{}"),
         )
 
     def unregister(self, name: str) -> None:

@@ -16,6 +16,7 @@ from quickquip.llm.config import (
     QuickJudgeConfig,
     RuntimeConfig,
     ToolsConfig,
+    GroupHistoryConfig,
     SkillsConfig,
     MCPServerConfig,
     MCPConfig,
@@ -532,6 +533,7 @@ def _load_llm_config(path: str | Path) -> LLMConfig:
     triggers_raw = expand_env_value(as_dict(data.get("triggers")))
     tools_raw = expand_env_value(as_dict(data.get("tools")))
     skills_raw = expand_env_value(as_dict(data.get("skills")))
+    group_history_raw = expand_env_value(as_dict(data.get("group_history")))
     mcp_raw = expand_env_value(as_dict(data.get("mcp")))
     daily_summary_raw = expand_env_value(as_dict(data.get("daily_summary")))
     daily_briefing_raw = expand_env_value(as_dict(data.get("daily_briefing")))
@@ -701,6 +703,19 @@ def _load_llm_config(path: str | Path) -> LLMConfig:
                 for item in tools_raw.get("always_loaded", [])
                 if str(item).strip()
             ],
+        ),
+        group_history=GroupHistoryConfig(
+            enabled=as_bool(group_history_raw.get("enabled", False), default=False),
+            investigation_provider_id=str(
+                group_history_raw.get("investigation_provider_id", "")
+            ).strip(),
+            investigation_model=str(group_history_raw.get("investigation_model", "")).strip(),
+            investigation_timeout_seconds=max(
+                1, min(int(group_history_raw.get("investigation_timeout_seconds", 240)), 3600)
+            ),
+            investigation_max_calls=max(
+                1, min(int(group_history_raw.get("investigation_max_calls", 10)), 32)
+            ),
         ),
         skills=SkillsConfig(
             enabled=as_bool(skills_raw.get("enabled", True), default=True),

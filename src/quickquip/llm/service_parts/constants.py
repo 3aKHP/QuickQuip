@@ -42,6 +42,8 @@ DEFAULT_ALWAYS_LOADED_TOOLS = [
 # get_group_stats / get_rule_status / get_health_status 已移出默认面（生产 0 调用），
 # 仍注册并经 config.tools.enabled opt-in；前两者在 PRIVATE_UNAVAILABLE_TOOLS 中，
 # 私聊面同样经 opt-in 后才会被过滤。
+# 群历史双工具（#72）登记进默认面（延迟池候选），但只在「全局配置 + 群开关」
+# 双开的面曝光（_get_enabled_tool_names 的 history_enabled 过滤）。
 DEFAULT_ENABLED_TOOLS = [
     TOOL_SEARCH_NAME,
     TOOL_LIST_NAME,
@@ -52,6 +54,8 @@ DEFAULT_ENABLED_TOOLS = [
     "delete_memory",
     SEARCH_TOOL_NAME,
     "search_recent_messages",
+    "search_group_history",
+    "read_group_history",
     "get_llm_status",
     ACTIVATE_SKILL_TOOL_NAME,
     READ_SKILL_RESOURCE_TOOL_NAME,

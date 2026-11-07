@@ -92,6 +92,10 @@ class ToolExecutionContext:
     chat_type: str = "group"
     sender_role: str = "unknown"
     memory_sources: dict[str, dict[str, str]] = field(default_factory=dict)
+    # 请求级群聊历史能力（#72）：HistoryToolState，随本 context 生命周期
+    # 存亡；None = 本请求未启用（工具面已过滤，handler 双重校验兜底）。
+    # 以 Any 引用避免 llm.tools ↔ llm.history_tools 循环导入。
+    history: object | None = None
     # 工具产出、需要直接发给用户的外发图片（与回喂模型的 images 语义相反）。
     # 每次请求新建的 context 即累加器，service 在工具循环结束后统一收进回复结果。
     outbound_images: list[LLMInlineImage] = field(default_factory=list)

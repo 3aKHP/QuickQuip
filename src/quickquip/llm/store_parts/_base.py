@@ -197,6 +197,12 @@ class _StoreBase:
 
                 CREATE INDEX IF NOT EXISTS idx_epoch_events_scope
                 ON epoch_events(scope_key, id);
+
+                CREATE TABLE IF NOT EXISTS group_history_flags (
+                    group_id   TEXT PRIMARY KEY,
+                    enabled    INTEGER NOT NULL,
+                    updated_at TEXT NOT NULL
+                );
                 """
             )
             # Serialize column discovery and ALTER for concurrent Bot/Web upgrades.
@@ -217,3 +223,38 @@ class _StoreBase:
                 conn.execute("ALTER TABLE conversation_messages ADD COLUMN message_id TEXT")
             if "raw_content" not in conversation_columns:
                 conn.execute("ALTER TABLE conversation_messages ADD COLUMN raw_content TEXT")
+
+    # ── 群历史开关（#72）：群级启用状态存运行库，None 继承全局配置 ──
+
+    def get_group_history_flag(self, group_id: int | str) -> bool | None:
+        """True/False = 群显式开关；None = 无记录，继承 [group_history].enabled。"""
+        if self._unavailable:
+            return None
+        try:
+            with self._connect() as conn:
+                row = conn.execute(
+                    "SELECT enabled FROM group_history_flags WHERE group_id = ?",
+                    (str(group_id),),
+                ).fetchone()
+            return None if row is None else bool(row["enabled"])
+        except sqlite3.Error:
+            return None
+
+    def set_group_history_flag(self, group_id: int | str, enabled: bool | None) -> None:
+        """写群级开关；None 删除记录回到继承全局。"""
+        if self._unavailable:
+            raise RuntimeError("LLMStore 数据库不可用")
+        key = str(group_id)
+        with self._connect() as conn:
+            if enabled is None:
+                conn.execute("DELETE FROM group_history_flags WHERE group_id = ?", (key,))
+                return
+            conn.execute(
+                """
+                INSERT INTO group_history_flags (group_id, enabled, updated_at)
+                VALUES (?, ?, ?)
+                ON CONFLICT(group_id) DO UPDATE SET
+                    enabled = excluded.enabled, updated_at = excluded.updated_at
+                """,
+                (key, 1 if enabled else 0, _utc_now()),
+            )

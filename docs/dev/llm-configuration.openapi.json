@@ -881,6 +881,31 @@
                 },
                 "type": "object"
               },
+              "group_history": {
+                "additionalProperties": false,
+                "properties": {
+                  "enabled": {
+                    "type": "boolean"
+                  },
+                  "investigation_max_calls": {
+                    "maximum": 32,
+                    "minimum": 1,
+                    "type": "integer"
+                  },
+                  "investigation_model": {
+                    "type": "string"
+                  },
+                  "investigation_provider_id": {
+                    "type": "string"
+                  },
+                  "investigation_timeout_seconds": {
+                    "maximum": 3600,
+                    "minimum": 1,
+                    "type": "integer"
+                  }
+                },
+                "type": "object"
+              },
               "image_preprocessing": {
                 "additionalProperties": false,
                 "properties": {

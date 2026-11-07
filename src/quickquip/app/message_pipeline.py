@@ -49,6 +49,7 @@ from quickquip.chat.config import (
     RECENT_CONTEXT_TTL_SECONDS,
 )
 from quickquip.chat.archive import ChatArchive
+from quickquip.chat.history_query import HistoryQueryService
 from quickquip.chat.daily_summary import (
     DailySummaryEnabledGroups,
     DailySummaryStore,
@@ -130,6 +131,9 @@ awakening_state = _get_awakening_state()
 # 聊天归档（1.15.2 A 线）：唯一消息归档源，日报/词云/简报/周月报共用；
 # 全群 always-on，永不删除（详见 quickquip.chat.archive 模块契约）。
 chat_archive = ChatArchive()
+# #72：归档之上的同群只读查询门面，LLM 群历史工具经此访问（默认关闭，
+# 群级开关存 llm.db group_history_flags）。
+group_history_service = HistoryQueryService(chat_archive)
 daily_store = DailySummaryStore()
 daily_enabled_groups = DailySummaryEnabledGroups()
 daily_briefing_enabled_groups = DailyBriefingEnabledGroups()
@@ -181,6 +185,7 @@ def _ensure_llm_bindings() -> None:
     svc.bind_group_stats_tracker(stats_tracker)
     svc.bind_rule_switch(rule_switch)
     svc.bind_recent_message_buffer(recent_messages)
+    svc.bind_group_history(group_history_service)
     _llm_bindings_done = True
 
 

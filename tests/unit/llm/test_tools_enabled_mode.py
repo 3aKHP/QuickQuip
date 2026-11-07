@@ -3,7 +3,13 @@ from __future__ import annotations
 import logging
 
 from quickquip.llm.config import LLMConfig, ProviderConfig, ToolsConfig, load_llm_config
+from quickquip.llm.history_tools import HISTORY_TOOLS
 from quickquip.llm.service_parts.constants import DEFAULT_ENABLED_TOOLS
+
+# #72 后默认面含群历史工具，但历史双开关未开时被 _get_enabled_tool_names
+# 过滤；「完整默认面」断言需以 history_enabled=True 调用，其余场景按
+# 关闭口径 = DEFAULT_ENABLED_TOOLS − HISTORY_TOOLS。
+DEFAULT_FACE_HISTORY_OFF = [n for n in DEFAULT_ENABLED_TOOLS if n not in HISTORY_TOOLS]
 from quickquip.llm.service_parts.tools import ToolMixin
 from quickquip.llm.tool_registry import ToolRegistry
 from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
@@ -39,14 +45,20 @@ def _tools(enabled: list[str], mode: str = "append") -> ToolsConfig:
 def test_empty_enabled_keeps_default_plus_mcp():
     host = _FakeHost(_tools([]), {"mcp_a", "mcp_b"})
     names = host._get_enabled_tool_names()
-    assert set(DEFAULT_ENABLED_TOOLS) <= set(names)
+    # 历史双开关默认关：默认面按关闭口径裁剪
+    assert set(DEFAULT_FACE_HISTORY_OFF) <= set(names)
     assert {"mcp_a", "mcp_b"} <= set(names)
+    # 双开后完整默认面可见
+    assert set(DEFAULT_ENABLED_TOOLS) <= set(
+        host._get_enabled_tool_names(history_enabled=True)
+    )
+    assert not set(HISTORY_TOOLS) & set(names)
 
 
 def test_append_mode_unions_defaults_mcp_and_extras():
     host = _FakeHost(_tools(["draw_svg", "search_web"]), {"mcp_a"})
     names = host._get_enabled_tool_names()
-    assert set(DEFAULT_ENABLED_TOOLS) <= set(names)
+    assert set(DEFAULT_FACE_HISTORY_OFF) <= set(names)
     assert "mcp_a" in names
     assert "draw_svg" in names
     assert names.count("search_web") == 1  # 去重保序
