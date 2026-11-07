@@ -322,7 +322,8 @@ async def test_watchdog_cancel_semantics_unit():
         await asyncio.sleep(0.3)
         return "done"
 
-    healthy = lambda: None
+    def healthy():
+        return None
     # 外部超时：裸取消逃逸，asyncio.timeout 侧转为 TimeoutError
     with pytest.raises(TimeoutError):
         async with asyncio.timeout(0.05):
