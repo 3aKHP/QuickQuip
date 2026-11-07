@@ -273,10 +273,12 @@ class RecordingQueryService:
         )
 
     def reissue_read_newer_after(
-        self, session, source_state, last_message, *, char_offset=0
+        self, session, source_state, last_message, *, char_offset=0,
+        resume_row_id=None,
     ):
         return self._inner.reissue_read_newer_after(
-            self._session, source_state, last_message, char_offset=char_offset
+            self._session, source_state, last_message, char_offset=char_offset,
+            resume_row_id=resume_row_id,
         )
 
     def coverage_note(self) -> str:

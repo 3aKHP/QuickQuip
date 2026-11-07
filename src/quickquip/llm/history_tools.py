@@ -674,7 +674,7 @@ def _render_count_outcome(
         and coverage.latest_ts is not None
         and (
             end_dt.timestamp() <= coverage.earliest_ts
-            or start_dt.timestamp() >= coverage.latest_ts
+            or start_dt.timestamp() > coverage.latest_ts
         )
     ):
         return (
@@ -683,7 +683,9 @@ def _render_count_outcome(
             "请对准归档覆盖的时间段。\n" + coverage_line
         )
 
-    # N02：查询前检查可用额度；词项长度已在入口设帽，回执为有界模板
+    # N02+复审 nit：查询前检查可用额度；词项长度已在入口设帽。计数
+    # 数字是本工具的核心载荷——主行装不下时受控拒绝（_BUDGET_REPLY），
+    # 不交付被裁掉数字的半截结果，也不签发不可完整交付的回执
     allowance = state.allowance(COUNT_RESULT_TOKEN_CAP, batch_pending=0)
     if allowance <= 0:
         return _BUDGET_REPLY
@@ -695,15 +697,13 @@ def _render_count_outcome(
         if clamped else ""
     )
     # 回执登记面由宿主注入：调查子面是 RecordingQueryService（可作
-    # evidence_refs），直接面不注册本工具，此处鸭子类型即可
+    # evidence_refs），直接面不注册本工具，此处鸭子类型即可。
+    # 以等长占位符先入包（真实 ref 同为 hr1c.+8 hex），整包入帽后才
+    # 登记并替换——回执永远随完整交付的结果签发
     register = getattr(deps.query_service, "register_count_receipt", None)
-    receipt_ref = register(
-        terms_text, window_text, int(outcome.count or 0),
-        coverage_note=_compact_coverage_note(coverage),
-    ) if register is not None else None
-    receipt_clause = f"（回执 {receipt_ref}）" if receipt_ref else ""
+    receipt_placeholder = "（回执 hr1c.00000000）" if register is not None else ""
 
-    header = f"计数核验{receipt_clause}："
+    header = f"计数核验{receipt_placeholder}："
     if outcome.count == 0:
         main = (
             f"窗口 {window_text} 内{terms_text}"
@@ -723,11 +723,17 @@ def _render_count_outcome(
         footer_parts.append(clamp_note)
     footer = "\n".join(footer_parts)
     kept, trimmed, footer = _trim_to_budget([main], header, footer, allowance)
-    if not kept:
+    if not kept or (trimmed and kept[0] != main):
+        # 主行被裁（数字可能丢失）或整行装不下：受控拒绝
         return _BUDGET_REPLY
+    if register is not None:
+        receipt_ref = register(
+            terms_text, window_text, int(outcome.count or 0),
+            coverage_note=_compact_coverage_note(coverage),
+        )
+        if receipt_ref:
+            header = header.replace(receipt_placeholder, f"（回执 {receipt_ref}）")
     body = "\n".join([header, *kept, footer])
-    if trimmed:
-        body += "\n（因结果预算截断，计数说明不完整。）"
     state.consume(estimate_tokens(body))
     return body
 
@@ -842,9 +848,11 @@ def _render_read_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolState
     if not kept:
         return _BUDGET_REPLY
     if trimmed and kept:
-        # R09+F02：newer 续读从"最后实际交付的正文位置"重签。偏移来源
-        # 是渲染层真实交付量（kept 行与原行比对，扣除 _clip_line 追加的
-        # 省略号），不是查询层片段的全长
+        # R09+F02+S01：newer 续读从"最后实际交付的正文位置"重签。偏移 =
+        # 行基址 + 渲染层真实交付字符（kept 行与原行比对，扣除 _clip_line
+        # 追加的省略号）。行基址三种来源：查询层片段行自带片段基址；
+        # 续读头整条交付时基址在 outcome.resume_head（此时无 fragment，
+        # 旧实现丢失基址导致多页长消息复读同段）；普通行基址为 0。
         index = min(len(kept), len(lines)) - 1
         last_message, prefix_len = line_meta[index]
         clipped = kept[-1] != lines[index]
@@ -852,18 +860,34 @@ def _render_read_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolState
         delivered_text = min(
             len(last_message.text), max(0, delivered_content - prefix_len)
         )
-        offset = 0
-        if (
+        is_fragment_row = (
             outcome.fragment is not None
             and last_message.row_id == outcome.fragment[0]
+        )
+        resume_head_base = None
+        if (
+            outcome.resume_head is not None
+            and last_message.row_id == outcome.resume_head[0]
         ):
-            # 片段行：续读从片段起点 + 本次实际交付的正文
+            resume_head_base = outcome.resume_head[1]
+        if is_fragment_row:
+            # 片段行：查询层裁过该消息，剩余部分必然存在，恒续读该行
+            resume_row: int | None = last_message.row_id
             offset = outcome.fragment[1] + delivered_text
+        elif resume_head_base is not None and delivered_text < len(last_message.text):
+            # 续读头被渲染层再裁：基址 + 交付量（S01 主场景）
+            resume_row = last_message.row_id
+            offset = resume_head_base + delivered_text
         elif delivered_text < len(last_message.text):
-            # 行被裁在正文内部：该消息剩余部分按片段续读，不整条跳过
+            # 普通行被裁在正文内部（含零交付：回到该行开头，不跳过）
+            resume_row = last_message.row_id
             offset = delivered_text
+        else:
+            resume_row = None
+            offset = 0
         reissued = deps.query_service.reissue_read_newer_after(
-            state.session, outcome.newer_state, last_message, char_offset=offset
+            state.session, outcome.newer_state, last_message,
+            char_offset=offset, resume_row_id=resume_row,
         )
         if reissued:
             if outcome.newer_cursor:

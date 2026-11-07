@@ -164,6 +164,10 @@ class ReadOutcome:
     messages: list[ArchivedMessage] = field(default_factory=list)  # 升序
     # 最后一条为片段时的描述：(row_id, 本次片段起点, 全文长度)
     fragment: tuple[int, int, int] | None = None
+    # 续读头基址（S01）：本页首条是上一页片段的剩余部分时为
+    # (row_id, 原文基址)。剩余正文整条交付时不再产生 fragment，
+    # 基址只能由此字段传递——渲染层重签偏移必须叠加它。
+    resume_head: tuple[int, int] | None = None
     older_cursor: str | None = None  # 向更早方向续读
     newer_cursor: str | None = None  # 向更新方向续读
     stop_reason: str | None = None  # "message_cap" | "char_cap" | "window_end"
@@ -612,16 +616,22 @@ class HistoryQueryService:
     def reissue_read_newer_after(
         self, session: HistorySession, source_state: dict[str, Any] | None,
         last_message: ArchivedMessage, *, char_offset: int = 0,
+        resume_row_id: int | None = None,
     ) -> str | None:
         """从"最后实际交付的消息"重签 newer 续读游标（R09）。
 
         ``char_offset`` > 0 表示最后交付行是片段，续读从该偏移起。
+        ``resume_row_id`` 显式指定续读头（S01：正文零交付时偏移为 0
+        但仍须回到该行，不能用 0 偏移推断"整条已读"；None 时沿用
+        char_offset>0 的推断，保持旧调用兼容）。
         """
         if not source_state:
             return None
         state = dict(source_state)
         state["last_key"] = [last_message.ts, last_message.row_id]
-        state["resume_row_id"] = last_message.row_id if char_offset > 0 else None
+        if resume_row_id is None:
+            resume_row_id = last_message.row_id if char_offset > 0 else None
+        state["resume_row_id"] = resume_row_id
         state["char_offset"] = char_offset
         return session.issue(state)
 
@@ -1081,6 +1091,12 @@ class HistoryQueryService:
             status=QueryStatus.OK,
             messages=messages,
             fragment=fragment,
+            # S01：续读头基址无论是否产生 fragment 都要随结果传递
+            # （剩余正文整条交付时 fragment=None，基址只剩这里能带出）
+            resume_head=(
+                (fragment_start[0], fragment_start[1])
+                if fragment_start is not None else None
+            ),
             older_cursor=older_cursor,
             newer_cursor=newer_cursor,
             stop_reason=stop_reason,
