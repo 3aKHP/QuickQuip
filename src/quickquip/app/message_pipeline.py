@@ -212,6 +212,15 @@ def record_chat_message(
     )
 
 
+def record_group_recall(group_id: int | str, message_id: int | str) -> None:
+    """群撤回旁表记录（#72）：历史查询按此屏蔽已撤回消息的正文。
+
+    撤回可先于归档行写入；无 message_id 的旧回灌行无法关联撤回，属
+    已知限制。失败只记日志（旁表缺失时查询侧按未撤回处理）。
+    """
+    chat_archive.record_recall(group_id, message_id)
+
+
 def save_all() -> None:
     stats_tracker.save(STATS_PATH)
     rule_switch.save(RULE_SWITCH_PATH)

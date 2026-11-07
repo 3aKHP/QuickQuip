@@ -1,6 +1,10 @@
 from __future__ import annotations
 
-from quickquip.app.message_pipeline import _ensure_llm_bindings, get_llm_service
+from quickquip.app.message_pipeline import (
+    _ensure_llm_bindings,
+    get_llm_service,
+    record_group_recall,
+)
 
 
 def register_recall_handlers(on_notice):
@@ -20,7 +24,10 @@ def register_recall_handlers(on_notice):
             return
 
         if notice_type == "group_recall":
-            scope_key = str(event.group_id)
+            group_id = event.group_id
+            scope_key = str(group_id)
+            # 群撤回同时落归档旁表：历史查询据此屏蔽该消息正文（#72）。
+            record_group_recall(group_id, message_id)
         else:
             user_id = str(event.user_id)
             scope_key = svc.build_chat_scope_key(user_id, chat_type="private")
