@@ -253,6 +253,10 @@ def put_group_settings(group_id: str, body: GroupSettingsBody, request: Request)
 def delete_group_settings(group_id: str, request: Request):
     _validate_group_id(group_id)
     deleted = get_config_service().delete_group_override(group_id)
+    # R07：历史开关独立存 llm.db，"清空全部覆盖"必须一并清理，否则
+    # 用户收到成功但历史权限仍保持开启
+    if not group_id.startswith("private:") and _DB.exists():
+        LLMStore(_DB).set_group_history_flag(group_id, None)
     logger.warning("group_settings cleared: group=%s deleted=%d", group_id, deleted)
     audit_logger.log(
         request,

@@ -39,6 +39,7 @@ from quickquip.llm.store_parts.agent_records import (
     UserTriggerPayload,
 )
 from quickquip.llm.service_parts.agent_runtime import RecorderConfig, TurnRecorder
+from quickquip.llm.token_estimate import estimate_tokens
 from quickquip.llm.tools import LLMToolCall, LLMToolSpec, ToolExecutionContext
 from quickquip.llm.tool_registry import ToolRegistry
 
@@ -484,3 +485,154 @@ async def test_final_turn_native_state_omitted_after_ephemeral_tool(tmp_path, mo
             assert row["native_omission_reason"] == "ephemeral_policy"
     finally:
         conn.close()
+
+
+# ── R01 回归：调查工具生产入口（真实 handler → 解析 → runner 接线） ──
+
+
+from quickquip.llm.service_parts.tools import ToolMixin as _ToolMixin
+
+
+class _InvestigationHost(_ToolMixin):
+    """最小宿主：只供调查 handler 的依赖面（GPT 外审 R01 生产路径）。"""
+
+    def __init__(self, config, store, query_service):
+        self.config = config
+        self.store = store
+        self.group_history_service = query_service
+        self._identity_repository = None
+
+
+def _investigation_config(provider_id="p1", model=None):
+    from quickquip.llm.config import LLMConfig, ProviderConfig, GroupHistoryConfig
+
+    provider = ProviderConfig(
+        id=provider_id, protocol="openai", base_url="http://localhost",
+        api_key_env="K", default_model="m1", enabled=True, models=["m1", "m2"],
+    )
+    return LLMConfig(
+        providers={provider.id: provider},
+        group_history=GroupHistoryConfig(enabled=True, investigation_model=model or ""),
+    )
+
+
+@pytest.mark.asyncio
+async def test_investigate_tool_entry_resolves_and_runs(tmp_path, monkeypatch):
+    """生产入口全链：handler → 模型解析（元组解包）→ runner 接线 → 渲染。"""
+    import quickquip.llm.history_investigation as investigation
+    from quickquip.llm.config import LLMConfig, ProviderConfig
+    from quickquip.chat.archive import ChatArchive
+    from quickquip.chat.history_query import HistoryQueryService
+    from quickquip.llm.store import LLMStore
+
+    config = _investigation_config()
+    archive = ChatArchive(tmp_path / "a.db")
+    archive.record("1000000000", "成员", "内容", ts=1_700_000_000, user_id="1", message_id="m1")
+    service = HistoryQueryService(archive)
+    host = _InvestigationHost(config, LLMStore(tmp_path / "llm.db"), service)
+
+    calls: list[dict] = {}
+
+    class _Result:
+        status = "completed"
+        findings = []
+        unresolved = ""
+        suggested_followup = ""
+        evidence = {}
+        coverage_note = "归档覆盖：测试。"
+        stop_reason = "done"
+        elapsed_seconds = 1.0
+        model_calls = 1
+        tool_calls = 1
+        detail = ""
+
+    async def _fake_run(**kwargs):
+        calls.update(kwargs)
+        return _Result()
+
+    monkeypatch.setattr(investigation, "run_history_investigation", _fake_run)
+
+    state = HistoryToolState()
+    context = _context(history=state)
+    result = await host._tool_investigate_group_history(
+        {"question": "部署方案怎么定的？"}, context
+    )
+    # R01 核心：不抛 TypeError，provider/model 正确传入 runner
+    assert "历史调查报告" in result
+    assert calls["provider"].id == "p1"
+    assert calls["model"] == "m1"
+    assert state.investigation_used is True
+    # 重复调用返回既有结果，不再启动子任务
+    calls.clear()
+    again = await host._tool_investigate_group_history({"question": "再查"}, context)
+    assert "既有结果" in again and not calls
+
+
+@pytest.mark.asyncio
+async def test_investigate_tool_entry_override_and_errors(tmp_path, monkeypatch):
+    import quickquip.llm.history_investigation as investigation
+    from quickquip.chat.archive import ChatArchive
+    from quickquip.chat.history_query import HistoryQueryService
+    from quickquip.llm.store import LLMStore
+
+    archive = ChatArchive(tmp_path / "a.db")
+    service = HistoryQueryService(archive)
+
+    # 专用模型覆盖：走指定模型
+    config = _investigation_config(model="m2")
+    host = _InvestigationHost(config, LLMStore(tmp_path / "l1.db"), service)
+    seen: list[tuple[str, str]] = []
+
+    class _R:
+        status = "completed"
+        findings = []
+        unresolved = ""
+        suggested_followup = ""
+        evidence = {}
+        coverage_note = ""
+        stop_reason = "done"
+        elapsed_seconds = 0.1
+        model_calls = 1
+        tool_calls = 0
+        detail = ""
+
+    async def _fake(**kwargs):
+        seen.append((kwargs["provider"].id, kwargs["model"]))
+        return _R()
+
+    monkeypatch.setattr(investigation, "run_history_investigation", _fake)
+    await host._tool_investigate_group_history(
+        {"question": "q"}, _context(history=HistoryToolState())
+    )
+    assert seen == [("p1", "m2")]
+
+    # 无效覆盖：显式错误字符串，不偷偷换渠道
+    bad = _investigation_config(model="missing-model")
+    host2 = _InvestigationHost(bad, LLMStore(tmp_path / "l2.db"), service)
+    message = await host2._tool_investigate_group_history(
+        {"question": "q"}, _context(history=HistoryToolState())
+    )
+    assert "不可用" in message and "missing-model" in message
+
+
+def test_trim_to_budget_hard_caps_first_line_and_footer():
+    """R02：首行/footer/截断提示全部计入硬帽——超长首行切片而非整条保留。"""
+    from quickquip.llm.history_tools import _trim_to_budget
+
+    long_line = "长" * 400
+    lines = [long_line, "第二条"]
+    header = "头部"
+    footer = "尾部说明" + "补" * 300
+    kept, trimmed, footer_final = _trim_to_budget(lines, header, footer, 200)
+    assert trimmed is True
+    assert len(kept) == 1
+    assert estimate_tokens("\n".join([header, *kept, footer_final])) <= 200
+    # 首行被裁为片段（短于原 400 字，且整包入帽）
+    assert len(kept[0]) < 400
+
+
+def test_trim_to_budget_zero_cap_returns_nothing():
+    from quickquip.llm.history_tools import _trim_to_budget
+
+    kept, trimmed, _ = _trim_to_budget(["行"], "头", "脚", 0)
+    assert kept == [] and trimmed is False

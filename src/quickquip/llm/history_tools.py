@@ -217,19 +217,62 @@ def _speaker_line(user_id: str | None, sender_name: str) -> str:
     return sender_name
 
 
+_TRUNCATION_NOTE = "（因结果预算截断，以下内容不完整；可用游标续读。）"
+
+
+def _clip_line(line: str, budget: int) -> str:
+    """按预算裁单行（grapheme 近似：字符二分至估算入帽）。"""
+    if estimate_tokens(line) <= budget:
+        return line
+    low, high = 0, len(line)
+    while low < high:
+        mid = (low + high + 1) // 2
+        if estimate_tokens(line[:mid]) <= budget:
+            low = mid
+        else:
+            high = mid - 1
+    return line[:low] + "…"
+
+
+def _clip_footer(footer: str, budget: int) -> str:
+    """footer 超帽时整体裁剪（覆盖信息保头行，其余丢弃）。"""
+    if estimate_tokens(footer) <= budget:
+        return footer
+    first = footer.splitlines()[0] if footer else ""
+    clipped = _clip_line(first, max(budget - estimate_tokens(_TRUNCATION_NOTE), 8))
+    return clipped
+
+
 def _trim_to_budget(
     lines: list[str], header: str, footer: str, token_cap: int
-) -> tuple[list[str], bool]:
-    """从头保留行直到整包估算超帽；返回 (行列表, 是否截断)。"""
+) -> tuple[list[str], bool, str]:
+    """组装整包并对最终输出执行硬上限（R02）。
+
+    首条、footer、截断提示一律计入：首行超限按可续读片段裁剪而非
+    整条保留；footer 超帽截断。返回 (行列表, 是否截断, 最终 footer)。
+    """
     if token_cap <= 0:
-        return [], False
+        return [], False, _clip_footer(footer, 64)
+    footer_final = _clip_footer(footer, max(token_cap // 3, 64))
+    note_budget = estimate_tokens(_TRUNCATION_NOTE)
     kept: list[str] = []
-    for index, line in enumerate(lines):
-        candidate = "\n".join([header, *kept, line, footer])
-        if estimate_tokens(candidate) > token_cap and kept:
-            return kept, True
+    trimmed = False
+    for line in lines:
+        candidate = "\n".join([header, *kept, line, footer_final])
+        if estimate_tokens(candidate) > token_cap:
+            if not kept:
+                # 首行也超限：按剩余预算切成可续读片段（不整条保留）
+                reserved = token_cap - estimate_tokens(header) - estimate_tokens(
+                    footer_final
+                ) - note_budget
+                kept.append(_clip_line(line, max(reserved, 16)))
+            trimmed = True
+            break
         kept.append(line)
-    return kept, False
+    else:
+        if estimate_tokens("\n".join([header, *kept, footer_final])) > token_cap:
+            trimmed = True
+    return kept, trimmed, footer_final
 
 
 SEARCH_GROUP_HISTORY_SPEC = LLMToolSpec(
@@ -312,7 +355,7 @@ def render_investigation_result(result, token_cap: int = INVESTIGATION_REPORT_TO
         lines.append(f"{index}. {finding.claim}")
         for ref in finding.evidence_refs:
             excerpt = result.evidence.get(ref, "（证据原文不可用）")
-            lines.append(f"   证据：{excerpt}")
+            lines.append(f"   证据（ref {ref}）：{excerpt}")
     if not lines:
         lines.append("（无结构化结论）")
     footer_parts: list[str] = []
@@ -325,7 +368,7 @@ def render_investigation_result(result, token_cap: int = INVESTIGATION_REPORT_TO
     if result.detail:
         footer_parts.append(result.detail)
     footer = "\n".join(footer_parts)
-    kept, trimmed = _trim_to_budget(lines, header, footer, token_cap)
+    kept, trimmed, footer = _trim_to_budget(lines, header, footer, token_cap)
     body = "\n".join([header, *kept, footer])
     if trimmed:
         body += f"\n（因报告预算截断，仅显示前 {len(kept)} 条结论。）"
@@ -460,12 +503,21 @@ def _render_search_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolSta
     if outcome.has_more and outcome.cursor_token:
         footer_parts.append(f"仍有更早候选，续查 cursor：{outcome.cursor_token}")
     footer = "\n".join(footer_parts)
-    kept, trimmed = _trim_to_budget(lines, header, footer, allowance)
+    kept, trimmed, footer = _trim_to_budget(lines, header, footer, allowance)
     if not kept:
         return _BUDGET_REPLY
+    if trimmed and kept:
+        # R09：按"最后实际交付的命中"重签续查游标，续页不跳过未交付行
+        # （kept 行按 hits 顺序新→旧为前缀，交付边界 = 第 kept 条）
+        last_delivered = outcome.hits[min(len(kept), len(outcome.hits)) - 1]
+        reissued = deps.query_service.reissue_search_after(
+            state.session, outcome.internal_state, last_delivered
+        )
+        if reissued:
+            footer = coverage_line + f"\n仍有更早候选，续查 cursor：{reissued}"
     body = "\n".join([header, *kept, footer])
     if trimmed:
-        body += f"\n（因结果预算截断，仅显示前 {len(kept)} 条；可续查。）"
+        body += f"\n（因结果预算截断，仅显示前 {len(kept)} 条命中。）"
     state.consume(estimate_tokens(body))
     return body
 
@@ -545,9 +597,12 @@ def _render_read_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolState
             text += "…（长消息片段，续读可得剩余部分）"
         if message.image_count:
             text += f" [图片x{message.image_count}]"
+        # R08：每条可引用消息携带来源引用（时间浏览也能拿到可提交的 ref）
+        ref = deps.query_service.encode_ref(message.row_id)
         lines.append(
             f"[{_format_ts(message.ts)}] "
             f"{_speaker_line(message.user_id, message.sender_name)}：{text}"
+            f"（ref {ref}）"
         )
     header = "归档消息（时间升序）："
     footer_parts = [_format_coverage(outcome.coverage)]
@@ -556,11 +611,28 @@ def _render_read_outcome(deps: HistoryToolDeps, outcome, state: HistoryToolState
     if outcome.newer_cursor:
         footer_parts.append("newer_cursor=" + outcome.newer_cursor)
     footer = "\n".join(footer_parts)
-    kept, trimmed = _trim_to_budget(lines, header, footer, allowance)
+    kept, trimmed, footer = _trim_to_budget(lines, header, footer, allowance)
     if not kept:
         return _BUDGET_REPLY
+    if trimmed and kept:
+        # R09：newer 续读从"最后实际交付的消息"重签，续页不跳过未交付行
+        delivered_count = min(len(kept), len(outcome.messages))
+        last_delivered = outcome.messages[delivered_count - 1]
+        offset = 0
+        if (
+            outcome.fragment is not None
+            and last_delivered.row_id == outcome.fragment[0]
+        ):
+            offset = outcome.fragment[1] + len(last_delivered.text)
+        reissued = deps.query_service.reissue_read_newer_after(
+            state.session, outcome.newer_state, last_delivered, char_offset=offset
+        )
+        if reissued:
+            footer = footer.replace(
+                "newer_cursor=" + (outcome.newer_cursor or ""), "newer_cursor=" + reissued
+            )
     body = "\n".join([header, *kept, footer])
     if trimmed:
-        body += f"\n（因结果预算截断，仅显示前 {len(kept)} 条；可续读。）"
+        body += f"\n（因结果预算截断，仅显示前 {len(kept)} 条；用 newer_cursor 续读。）"
     state.consume(estimate_tokens(body))
     return body

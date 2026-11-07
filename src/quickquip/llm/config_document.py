@@ -438,6 +438,26 @@ def validate_document(document: Any, *, config_dir: Path | None = None) -> dict:
             )
         elif selection["model"]:
             reject("settings." + name + ".provider_id", "指定模型需要渠道")
+    # #72 调查执行器引用（R11）：显式 provider 必须存在；同时填 provider/model
+    # 时引用必须可解析（仅 model 跟随父渠道在运行时解析，此处不校验）。
+    investigation = output["settings"]["group_history"]
+    if investigation["investigation_provider_id"]:
+        if investigation["investigation_provider_id"] not in ids:
+            reject(
+                "settings.group_history.investigation_provider_id",
+                "调查执行器引用的渠道不存在",
+                "dependency_conflict",
+            )
+        if investigation["investigation_model"]:
+            _reference(
+                {
+                    "provider_id": investigation["investigation_provider_id"],
+                    "model": investigation["investigation_model"],
+                },
+                models,
+                "settings.group_history",
+                allow_default=True,
+            )
     seen_prices = set()
     for i, entry in enumerate(_list(doc.get("pricing", []), "pricing")):
         location = f"pricing[{i}]"
@@ -516,6 +536,13 @@ def dependencies(document: dict) -> list[dict]:
         s = document["settings"][name]
         if s["provider_id"]:
             edge("settings." + name, s["provider_id"], s["model"])
+    history = document["settings"]["group_history"]
+    if history["investigation_provider_id"]:
+        edge(
+            "settings.group_history",
+            history["investigation_provider_id"],
+            history["investigation_model"] or None,
+        )
     for provider in document["providers"]:
         pid = provider["id"]
         edge(f"providers.{pid}.default_model", pid, provider["default_model"])

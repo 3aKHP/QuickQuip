@@ -91,6 +91,10 @@ def _term_variants(term: str) -> list[str]:
     return variants
 
 
+class _QueryUnavailable(sqlite3.Error):
+    """内部信号：读取路径数据库故障（区别于"无记录"，R13）。"""
+
+
 class QueryStatus(str, Enum):
     """查询结果状态（实施计划 §5.4）。partial 不得包装成 empty。"""
 
@@ -136,6 +140,9 @@ class SearchOutcome:
     cursor_token: str | None = None
     coverage: CoverageInfo | None = None
     detail: str = ""
+    # 查询内部状态（筛选/快照/位置）的引用：渲染层按预算截断后可用
+    # reissue_search_after 从"最后实际交付行"重签续查游标（R09）。
+    internal_state: dict[str, Any] | None = None
 
 
 @dataclass
@@ -149,6 +156,9 @@ class ReadOutcome:
     stop_reason: str | None = None  # "message_cap" | "char_cap" | "window_end"
     coverage: CoverageInfo | None = None
     detail: str = ""
+    # 游标内部状态引用（R09 截断重签 / R10 区间约束）
+    older_state: dict[str, Any] | None = None
+    newer_state: dict[str, Any] | None = None
 
 
 class HistorySession:
@@ -252,8 +262,12 @@ class HistoryQueryService:
         finally:
             conn.close()
 
-    def recalled_row_ids(self, group_id: int | str, row_ids: list[int]) -> set[int]:
-        """交付前重查：按行 ID 集合返回其中已撤回的行（报告引用复查用）。"""
+    def recalled_row_ids(self, group_id: int | str, row_ids: list[int]) -> set[int] | None:
+        """交付前重查：按行 ID 集合返回其中已撤回的行（报告引用复查用）。
+
+        数据库故障返回 None（"撤回状态未知"），调用方不得当作"未撤回"
+        继续交付证据（R13）；空入参返回空集（无查询语义）。
+        """
         if not row_ids:
             return set()
         gid = self._try_group(group_id)
@@ -276,7 +290,7 @@ class HistoryQueryService:
             ).fetchall()
             return {int(r["id"]) for r in rows}
         except sqlite3.Error:
-            return set()
+            return None
         finally:
             conn.close()
 
@@ -464,6 +478,7 @@ class HistoryQueryService:
             stop_reason=stop_reason,
             cursor_token=cursor_token,
             coverage=self.coverage(gid),
+            internal_state=state,
         )
 
     @staticmethod
@@ -471,6 +486,34 @@ class HistoryQueryService:
         """Python 判定与 SQL LIKE 预筛同口径：变体子串命中（ASCII 折叠）。"""
         haystack = _ascii_lower(text)
         return any(_ascii_lower(v) in haystack for v in flat_variants)
+
+    def reissue_search_after(
+        self, session: HistorySession, source_state: dict[str, Any] | None,
+        last_hit: ArchivedMessage,
+    ) -> str | None:
+        """从"最后实际交付的命中"重签续查游标（R09：渲染截断后，
+        原游标会跳过未交付行）。source_state 缺失返回 None。"""
+        if not source_state:
+            return None
+        state = dict(source_state)
+        state["last_key"] = [last_hit.ts, last_hit.row_id]
+        return session.issue(state)
+
+    def reissue_read_newer_after(
+        self, session: HistorySession, source_state: dict[str, Any] | None,
+        last_message: ArchivedMessage, *, char_offset: int = 0,
+    ) -> str | None:
+        """从"最后实际交付的消息"重签 newer 续读游标（R09）。
+
+        ``char_offset`` > 0 表示最后交付行是片段，续读从该偏移起。
+        """
+        if not source_state:
+            return None
+        state = dict(source_state)
+        state["last_key"] = [last_message.ts, last_message.row_id]
+        state["resume_row_id"] = last_message.row_id if char_offset > 0 else None
+        state["char_offset"] = char_offset
+        return session.issue(state)
 
     # ------------------------------------------------------------------
     # 阅读
@@ -504,7 +547,10 @@ class HistoryQueryService:
         snapshot = self._current_snapshot()
         if snapshot is None:
             return ReadOutcome(status=QueryStatus.UNAVAILABLE, detail="archive_unavailable")
-        anchor = self._fetch_row(gid, row_id, snapshot)
+        try:
+            anchor = self._fetch_row(gid, row_id, snapshot)
+        except _QueryUnavailable:
+            return ReadOutcome(status=QueryStatus.UNAVAILABLE, detail="database_error")
         if anchor is None:
             # 不存在、跨群、已撤回统一拒绝，不区分原因（不泄露他群记录）
             return ReadOutcome(
@@ -514,18 +560,21 @@ class HistoryQueryService:
         want_before = radius if direction in ("around", "before") else 0
         want_after = radius if direction in ("around", "after") else 0
         # 单侧需求为 0 时不探测（limit=1 的探针会把仅剩一条误报为"还有更多"）
-        if want_before > 0:
-            older, older_more = self._fetch_side(
-                gid, snapshot, key, "older", want_before + 1
-            )
-        else:
-            older, older_more = [], True
-        if want_after > 0:
-            newer, newer_more = self._fetch_side(
-                gid, snapshot, key, "newer", want_after + 1
-            )
-        else:
-            newer, newer_more = [], True
+        try:
+            if want_before > 0:
+                older, older_more = self._fetch_side(
+                    gid, snapshot, key, "older", want_before + 1
+                )
+            else:
+                older, older_more = [], True
+            if want_after > 0:
+                newer, newer_more = self._fetch_side(
+                    gid, snapshot, key, "newer", want_after + 1
+                )
+            else:
+                newer, newer_more = [], True
+        except _QueryUnavailable:
+            return ReadOutcome(status=QueryStatus.UNAVAILABLE, detail="database_error")
         if older_more:
             older = older[:-1]
         if newer_more:
@@ -564,7 +613,10 @@ class HistoryQueryService:
         snapshot = self._current_snapshot()
         if snapshot is None:
             return ReadOutcome(status=QueryStatus.UNAVAILABLE, detail="archive_unavailable")
-        rows = self._fetch_range(gid, snapshot, start_ts, end_ts, max_messages + 1)
+        try:
+            rows = self._fetch_range(gid, snapshot, start_ts, end_ts, max_messages + 1)
+        except _QueryUnavailable:
+            return ReadOutcome(status=QueryStatus.UNAVAILABLE, detail="database_error")
         has_more = len(rows) > max_messages
         sequence = rows[:max_messages] if max_messages > 0 else []
         return self._assemble_read(
@@ -573,6 +625,7 @@ class HistoryQueryService:
             newer_exhausted=not has_more,
             max_messages=max_messages,
             max_chars=max_chars,
+            window=(start_ts, end_ts),
         )
 
     def read_continue(
@@ -602,21 +655,26 @@ class HistoryQueryService:
         # 片段续读：先把该行剩余正文作为首条输出
         prefix: list[ArchivedMessage] = []
         prefix_total = 0
-        if resume_row_id is not None:
-            row = self._fetch_row(gid, int(resume_row_id), snapshot)
-            if row is not None:
-                prefix_total = len(row.text)
-                prefix = [
-                    ArchivedMessage(
-                        row_id=row.row_id,
-                        ts=row.ts,
-                        user_id=row.user_id,
-                        sender_name=row.sender_name,
-                        text=row.text[char_offset:],
-                        image_count=row.image_count,
-                        message_id=row.message_id,
-                    )
-                ]
+        try:
+            row = (
+                self._fetch_row(gid, int(resume_row_id), snapshot)
+                if resume_row_id is not None else None
+            )
+        except _QueryUnavailable:
+            return ReadOutcome(status=QueryStatus.UNAVAILABLE, detail="database_error")
+        if row is not None:
+            prefix_total = len(row.text)
+            prefix = [
+                ArchivedMessage(
+                    row_id=row.row_id,
+                    ts=row.ts,
+                    user_id=row.user_id,
+                    sender_name=row.sender_name,
+                    text=row.text[char_offset:],
+                    image_count=row.image_count,
+                    message_id=row.message_id,
+                )
+            ]
         # keyset 锚点：优先取游标记录的 (ts, id)，取不到行也能继续翻页
         key: _KEY | None = None
         if last_key is not None:
@@ -626,16 +684,31 @@ class HistoryQueryService:
         if key is None:
             return ReadOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_cursor")
 
-        if direction == "newer":
-            rows, more = self._fetch_side(gid, snapshot, key, "newer", max_messages + 1)
-            if more:
-                rows = rows[:-1]
-            sequence = prefix + rows
-        else:
-            rows, more = self._fetch_side(gid, snapshot, key, "older", max_messages + 1)
-            if more:
-                rows = rows[:-1]
-            sequence = prefix + list(reversed(rows))
+        window_state = state.get("window")
+        window = (
+            (float(window_state[0]), float(window_state[1]))
+            if isinstance(window_state, (list, tuple)) and len(window_state) == 2
+            else None
+        )
+        try:
+            if direction == "newer":
+                rows, more = self._fetch_side(
+                    gid, snapshot, key, "newer", max_messages + 1,
+                    bound_ts=window[1] if window else None,
+                )
+                if more:
+                    rows = rows[:-1]
+                sequence = prefix + rows
+            else:
+                rows, more = self._fetch_side(
+                    gid, snapshot, key, "older", max_messages + 1,
+                    bound_ts=window[0] if window else None,
+                )
+                if more:
+                    rows = rows[:-1]
+                sequence = prefix + list(reversed(rows))
+        except _QueryUnavailable:
+            return ReadOutcome(status=QueryStatus.UNAVAILABLE, detail="database_error")
         exhausted = not more
         # 续页方向由游标固定：反向不签发回读游标（已交付内容按方向推进，
         # 模型要回读应另开锚点阅读），反向侧按"不再展开"处理
@@ -650,6 +723,7 @@ class HistoryQueryService:
                 if resume_row_id is not None and prefix
                 else None
             ),
+            window=window,
         )
 
     # ------------------------------------------------------------------
@@ -696,16 +770,19 @@ class HistoryQueryService:
                 (row_id, gid, snapshot),
             ).fetchone()
             return self._row_to_message(row) if row is not None else None
-        except sqlite3.Error:
-            return None
+        except sqlite3.Error as exc:
+            raise _QueryUnavailable(str(exc)) from exc
         finally:
             conn.close()
 
     def _fetch_side(
-        self, gid: str, snapshot: int, key: _KEY, side: str, limit: int
+        self, gid: str, snapshot: int, key: _KEY, side: str, limit: int,
+        *, bound_ts: float | None = None,
     ) -> tuple[list[ArchivedMessage], bool]:
         """keyset 单侧取数（严格大于/小于 key，不含 key 行本身）。
         older 返回新→旧序（调用方自行反转）；newer 返回升序。
+        ``bound_ts`` 为该方向的区间边界（R10：newer 传窗口 end、older 传
+        窗口 start），SQL 侧强制执行，续读不越出原区间。
         返回 (消息列表, 该侧窗口是否可能还有更多)。limit 不足整批返回
         False；恰好取满视为可能还有（保守，由上层 +1 探针修正）。"""
         conn = self.archive.query_connection()
@@ -714,9 +791,14 @@ class HistoryQueryService:
         if side == "older":
             clause = "(m.ts < ? OR (m.ts = ? AND m.id < ?))"
             order = "m.ts DESC, m.id DESC"
+            bound_clause = " AND m.ts >= ?" if bound_ts is not None else ""
         else:
             clause = "(m.ts > ? OR (m.ts = ? AND m.id > ?))"
             order = "m.ts ASC, m.id ASC"
+            bound_clause = " AND m.ts < ?" if bound_ts is not None else ""
+        params: list[Any] = [gid, snapshot, key[0], key[0], key[1]]
+        if bound_ts is not None:
+            params.append(bound_ts)
         try:
             rows = conn.execute(
                 f"""
@@ -725,7 +807,7 @@ class HistoryQueryService:
                 FROM archive_messages m
                 WHERE m.group_id = ?
                   AND m.id <= ?
-                  AND {clause}
+                  AND {clause}{bound_clause}
                   AND NOT EXISTS (
                       SELECT 1 FROM recalled_messages r
                       WHERE r.group_id = m.group_id
@@ -734,12 +816,12 @@ class HistoryQueryService:
                 ORDER BY {order}
                 LIMIT ?
                 """,
-                (gid, snapshot, key[0], key[0], key[1], limit),
+                (*params, limit),
             ).fetchall()
             more = len(rows) >= limit
             return [self._row_to_message(r) for r in rows], more
-        except sqlite3.Error:
-            return [], False
+        except sqlite3.Error as exc:
+            raise _QueryUnavailable(str(exc)) from exc
         finally:
             conn.close()
 
@@ -767,8 +849,8 @@ class HistoryQueryService:
                 (gid, start_ts, end_ts, snapshot, limit),
             ).fetchall()
             return [self._row_to_message(r) for r in rows]
-        except sqlite3.Error:
-            return []
+        except sqlite3.Error as exc:
+            raise _QueryUnavailable(str(exc)) from exc
         finally:
             conn.close()
 
@@ -784,6 +866,7 @@ class HistoryQueryService:
         max_messages: int,
         max_chars: int,
         fragment_start: tuple[int, int, int] | None = None,
+        window: tuple[float, float] | None = None,
     ) -> ReadOutcome:
         """消息帽 + 字符帽装配（升序遍历）。
 
@@ -838,9 +921,10 @@ class HistoryQueryService:
             stop_reason = "window_end"
 
         older_cursor = None
+        older_state_copy = None
         if not older_exhausted:
             boundary = sequence[0]
-            older_cursor = session.issue({
+            older_state_copy = {
                 "kind": "read",
                 "group_id": gid,
                 "direction": "older",
@@ -850,8 +934,11 @@ class HistoryQueryService:
                 "char_offset": 0,
                 "max_messages": cap,
                 "max_chars": int(max_chars),
-            })
+                "window": list(window) if window else None,
+            }
+            older_cursor = session.issue(dict(older_state_copy))
         newer_cursor = None
+        newer_state_copy = None
         # 窗口探针说"没有更多整条"时，预算截断（片段/顺延）仍意味着
         # 有未交付内容：一样必须签发续读游标
         needs_newer = (not newer_exhausted) or truncated_last or leftover > 0
@@ -863,7 +950,7 @@ class HistoryQueryService:
                 # 续读从片段剩余部分开始（resume 行 = 片段行本身）
                 resume_row_id = fragment[0]
                 char_offset = fragment[1] + len(last.text)
-            newer_cursor = session.issue({
+            newer_state_copy = {
                 "kind": "read",
                 "group_id": gid,
                 "direction": "newer",
@@ -873,7 +960,9 @@ class HistoryQueryService:
                 "char_offset": char_offset,
                 "max_messages": cap,
                 "max_chars": int(max_chars),
-            })
+                "window": list(window) if window else None,
+            }
+            newer_cursor = session.issue(dict(newer_state_copy))
         return ReadOutcome(
             status=QueryStatus.OK,
             messages=messages,
@@ -882,6 +971,8 @@ class HistoryQueryService:
             newer_cursor=newer_cursor,
             stop_reason=stop_reason,
             coverage=coverage,
+            older_state=older_state_copy,
+            newer_state=newer_state_copy,
         )
 
     @staticmethod

@@ -462,3 +462,35 @@ def test_second_instance_shares_stamped_uuid(tmp_path: Path):
     first = ChatArchive(db_path)
     second = ChatArchive(db_path)
     assert first.archive_uuid and first.archive_uuid == second.archive_uuid
+
+
+def test_range_continuation_respects_window_end(tmp_path):
+    """R10：区间阅读续页不越出原窗口 end（排除行不进入次屏）。"""
+    service, archive = _make_service(tmp_path)
+    for i in range(6):
+        archive.record(G1, "张三", f"行{i}", ts=_ts(i), user_id="1", message_id=f"w{i}")
+    session = HistorySession()
+    out = service.read_range(G1, session, start_ts=_ts(0), end_ts=_ts(4), max_messages=2, max_chars=10_000)
+    assert [m.text for m in out.messages] == ["行0", "行1"]
+    assert out.newer_cursor
+    second = service.read_continue(G1, session, cursor_token=out.newer_cursor)
+    # 次屏只含窗口内的 行2/行3；行4（end=4 排除）与之后的行都不出现
+    assert [m.text for m in second.messages] == ["行2", "行3"]
+    assert second.stop_reason == "window_end" or second.newer_cursor is None
+
+
+def test_read_db_error_is_unavailable_not_empty(tmp_path, monkeypatch):
+    """R13：读取路径数据库故障返回 UNAVAILABLE，不冒充空记录。"""
+    import sqlite3 as _sqlite3
+    service, archive = _make_service(tmp_path)
+    archive.record(G1, "张三", "内容", ts=_ts(0), user_id="1", message_id="m1")
+
+    from quickquip.chat.history_query import _QueryUnavailable
+
+    def _broken(*a, **k):
+        raise _QueryUnavailable("database is locked")
+
+    monkeypatch.setattr(service, "_fetch_range", _broken)
+    out = service.read_range(G1, HistorySession(), start_ts=_ts(-5), end_ts=_ts(10))
+    assert out.status is QueryStatus.UNAVAILABLE
+    assert out.detail == "database_error"

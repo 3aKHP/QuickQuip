@@ -96,3 +96,14 @@ def test_list_and_get_merge_history_flags(monkeypatch, tmp_path):
     assert single["history_enabled"] is True
     # 无记录的群 → None（继承全局）
     assert routes.get_group_settings("10003")["history_enabled"] is None
+
+
+def test_delete_clears_history_flag_too(monkeypatch, tmp_path):
+    """R07：清空全部 override 时历史旗标一并清除（回到继承全局）。"""
+    monkeypatch.setattr(routes, "_DB", tmp_path / "llm.db")
+    _patch_audit_noop(monkeypatch)
+    store = LLMStore(tmp_path / "llm.db")
+    store.set_group_history_flag("10001", True)
+    deleted = routes.delete_group_settings("10001", object())
+    assert deleted is not None
+    assert store.get_group_history_flag("10001") is None

@@ -94,6 +94,13 @@ async def run_tool_call_loop(
         # 模型产出图片（Responses 内置生图 / Gemini inlineData）收进外发
         # 通道：与工具路径同上限同语义，后续调用失败不丢弃已产出图片。
         collect_generated_images(response, context)
+        # R03：触达检测先于任何记录分支——首个响应声明 ephemeral 工具但
+        # 被整批拒绝/提前结束时，原生副本同样必须省略
+        if not ephemeral_touched and response.tool_calls:
+            ephemeral_touched = any(
+                tool_registry.retention_of(call.name) == "ephemeral"
+                for call in response.tool_calls
+            )
         logger.info(
             "LLM completion: provider=%s model=%s finish_reason=%s tool_calls=%s round=%s",
             provider.id,
@@ -242,11 +249,6 @@ async def run_tool_call_loop(
             return response
 
         # ── Turn 原子提交 + 文字交付（§5.3.5-6）：先于工具执行 ──────
-        if not ephemeral_touched:
-            ephemeral_touched = any(
-                tool_registry.retention_of(call.name) == "ephemeral"
-                for call in response.tool_calls
-            )
         execution_ids: dict[str, str] = {}
         if turn_recorder is not None:
             execution_ids = turn_recorder.on_turn(

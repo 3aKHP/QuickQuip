@@ -559,12 +559,13 @@ class ToolMixin(McpLifecycleMixin):
         else:
             model = provider.default_model
         try:
-            return resolve_model_provider(self.config, provider_id, model)
+            resolved_provider = resolve_model_provider(self.config, provider_id, model)
         except ValueError:
             return (
                 f"调查模型配置无效：{provider_id}/{model} 不可用"
                 "（不存在或已停用），请修正 [group_history] 配置"
             )
+        return resolved_provider, model
 
     async def _tool_investigate_group_history(
         self, arguments: dict[str, object], context: ToolExecutionContext
@@ -626,6 +627,13 @@ class ToolMixin(McpLifecycleMixin):
             max_model_calls=settings.investigation_max_calls,
             max_tool_calls=settings.investigation_max_calls * 2,
         )
+        from quickquip.llm.request_budget import resolve_input_budget
+
+        # R04：子任务输入帽与渠道请求预算取小（模型窗口限制同样生效）
+        input_token_cap = min(
+            24_000,
+            resolve_input_budget(self.config, provider, model),
+        )
         result = await run_history_investigation(
             task=task,
             provider=provider,
@@ -636,9 +644,20 @@ class ToolMixin(McpLifecycleMixin):
             parent_scope_key=context.chat_scope or str(context.group_id),
             build_provider_client=build_provider_client,
             limits=limits,
+            input_token_cap=input_token_cap,
             parent_cancel_check=state.parent_cancel_check,
         )
-        text = render_investigation_result(result, INVESTIGATION_REPORT_TOKEN_CAP)
+        # R02：报告按当时实际剩余额度渲染，而不是固定 2000
+        text = render_investigation_result(
+            result,
+            max(
+                64,
+                min(
+                    INVESTIGATION_REPORT_TOKEN_CAP,
+                    state.allowance(INVESTIGATION_REPORT_TOKEN_CAP, 0),
+                ),
+            ),
+        )
         state.consume(estimate_tokens(text))
         state.investigation_used = True
         state.investigation_result_text = text

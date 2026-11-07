@@ -260,3 +260,20 @@ def test_scoped_recording_isolation(tmp_path: Path):
     # G2 的同名消息不可见（同群隔离）
     all_rows = archive.read_window(G1, 0, now + 10)
     assert rows <= {int(r["message_id"].replace("m", "")) + 1 for r in all_rows}
+
+
+@pytest.mark.asyncio
+async def test_unreferenced_finding_rejected_and_no_answer_form_ok(tmp_path):
+    """R06：无证据结论被拒（修复后仍拒→invalid_report）；空 findings + unresolved 合法。"""
+    no_evidence = json.dumps({"findings": [{"claim": "无据断言", "evidence_refs": []}]})
+    no_answer = json.dumps({"findings": [], "unresolved": "归档无相关记录，无法确认"})
+    # 空引用 → 拒绝 → 修复仍空引用 → invalid_report
+    script = [_FakeResponse(text=no_evidence), _FakeResponse(text=no_evidence)]
+    result, _ = await _run(tmp_path, script)
+    assert result.status == "invalid_report"
+
+    # 合法无答案形态 → completed（无结论，不迫使编造）
+    ok_script = [_FakeResponse(text=no_answer)]
+    result2, _ = await _run(tmp_path, ok_script)
+    assert result2.status == "completed"
+    assert result2.findings == [] and "无法确认" in result2.unresolved
