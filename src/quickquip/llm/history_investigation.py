@@ -638,6 +638,9 @@ async def run_history_investigation(
             HistoryToolState,
             READ_GROUP_HISTORY_SPEC,
             SEARCH_GROUP_HISTORY_SPEC,
+            redact_count_arguments,
+            redact_read_arguments,
+            redact_search_arguments,
             run_group_history_count,
             run_group_history_read,
             run_group_history_search,
@@ -691,17 +694,23 @@ async def run_history_investigation(
             return await run_group_history_count(deps, arguments, context)
 
         registry = ToolRegistry()
+        # 声明脱敏随注册面声明（独立 CR nit）：子循环当前无 recorder，
+        # 但隐私契约不依赖这一实现细节——未来接入任何记录路径时，
+        # 词项/问题/回执参数仍只落白名单元数据
         registry.register(
             SEARCH_GROUP_HISTORY_SPEC, _sub_search,
             category="history", result_retention="ephemeral",
+            redact_arguments=redact_search_arguments,
         )
         registry.register(
             READ_GROUP_HISTORY_SPEC, _sub_read,
             category="history", result_retention="ephemeral",
+            redact_arguments=redact_read_arguments,
         )
         registry.register(
             COUNT_GROUP_HISTORY_SPEC, _sub_count,
             category="history", result_retention="ephemeral",
+            redact_arguments=redact_count_arguments,
         )
 
         sub_history_state = HistoryToolState()

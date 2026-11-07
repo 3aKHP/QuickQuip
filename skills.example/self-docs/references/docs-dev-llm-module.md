@@ -62,7 +62,7 @@ LLM 维护入口按职责列在下表：
 | `src/quickquip/llm/tool_discovery.py` | 负责单次循环内的动态工具加载状态（`loaded_names`）与 `tool_search` / `tool_list` 元工具 handler |
 | `src/quickquip/llm/tool_result_pipeline.py` | 负责工具执行前后的强制处理：参数与结果的敏感词扫描、单请求工具图片预算、非视觉模型图片降级 |
 | `src/quickquip/llm/tool_registry.py` | 负责工具白名单注册、参数校验和执行调度；注册元数据含结果保留政策（ephemeral）与声明参数白名单脱敏器 |
-| `src/quickquip/llm/history_tools.py` | #72 群历史直接工具（search/read）的 schema、参数解析、结果渲染与请求级预算状态 |
+| `src/quickquip/llm/history_tools.py` | #72 群历史工具（search/read/count）的 schema、参数解析、结果渲染与请求级预算状态 |
 | `src/quickquip/llm/history_investigation.py` | #72 专用历史调查执行器：独立上下文运行受限工具循环并产出带证据校验的结构报告（ADR-0027） |
 | `src/quickquip/chat/history_query.py` | 归档之上的同群只读查询层：SQL 过滤、keyset 分页、来源引用、请求级游标与撤回屏蔽 |
 | `src/quickquip/llm/skills/` | 解析、扫描与执行 Skill 包；模块职责见第 6.3 节 |
