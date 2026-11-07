@@ -49,7 +49,7 @@ UTC = timezone.utc
 def _context(group_id=G1, chat_type="group", history: HistoryToolState | None = None):
     return ToolExecutionContext(
         group_id=group_id,
-        user_id="1000000002",
+        user_id="123456",
         sender_name="触发者",
         provider_id="p1",
         model="m1",
