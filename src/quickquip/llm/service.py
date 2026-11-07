@@ -1424,6 +1424,10 @@ class LLMService(
 
         recorder: TurnRecorder | None = None
 
+        if tool_context.history is not None:
+            # 调查执行器在每次子模型活动前复核父会话有效性（§7：取消传播）
+            tool_context.history.parent_cancel_check = check_session
+
         def check_error_session() -> None:
             try:
                 check_session()

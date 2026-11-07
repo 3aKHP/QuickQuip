@@ -56,6 +56,7 @@ DEFAULT_ENABLED_TOOLS = [
     "search_recent_messages",
     "search_group_history",
     "read_group_history",
+    "investigate_group_history",
     "get_llm_status",
     ACTIVATE_SKILL_TOOL_NAME,
     READ_SKILL_RESOURCE_TOOL_NAME,

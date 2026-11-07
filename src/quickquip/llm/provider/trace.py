@@ -65,6 +65,8 @@ class AgentLoopTrace:
 
     loop_id: str = field(default_factory=lambda: uuid4().hex)
     sequence: int = 0
+    # 嵌套子任务（#72 历史调查执行器）的父 loop 关联；顶层为 None。
+    parent_loop_id: str | None = None
 
 
 _TRACE_CAPTURE: ContextVar[TraceCapture | None] = ContextVar(
@@ -116,6 +118,28 @@ def trace_agent_loop(func):
             _AGENT_LOOP_TRACE.reset(token)
 
     return wrapped
+
+
+@contextmanager
+def agent_loop_trace_boundary(parent_loop_id: str | None = None) -> Iterator[AgentLoopTrace]:
+    """显式嵌套 trace 边界（#72 §9）。
+
+    ``trace_agent_loop`` 对已设边界的嵌套调用默认复用父身份；子任务需要
+    独立 loop ID 时由本模块（ContextVar 的所有者）显式开新边界，并记录
+    父关联。退出即复位，父边界不受影响。
+    """
+    trace = AgentLoopTrace(parent_loop_id=parent_loop_id)
+    token = _AGENT_LOOP_TRACE.set(trace)
+    try:
+        yield trace
+    finally:
+        _AGENT_LOOP_TRACE.reset(token)
+
+
+def current_agent_loop_id() -> str | None:
+    """当前生效的 trace loop ID（诊断摘要与父子关联记录用）。"""
+    trace = _AGENT_LOOP_TRACE.get()
+    return trace.loop_id if trace is not None else None
 
 
 def current_agent_loop_id() -> str | None:

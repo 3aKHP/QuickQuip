@@ -23,12 +23,21 @@ from quickquip.llm.service_parts.constants import (
 )
 from quickquip.llm.history_tools import (
     HISTORY_TOOLS,
+    CONTEXT_NOTE_MAX_CHARS,
+    INVESTIGATION_BUDGET_REPLY,
     HistoryToolDeps,
+    INVESTIGATE_GROUP_HISTORY_SPEC,
+    MAX_ANCHORS,
+    MIN_PARENT_REPORT_SPACE,
+    QUESTION_MAX_CHARS,
     READ_GROUP_HISTORY_SPEC,
     SEARCH_GROUP_HISTORY_SPEC,
+    INVESTIGATION_REPORT_TOKEN_CAP,
+    parse_history_time,
     redact_read_arguments,
     redact_recent_arguments,
     redact_search_arguments,
+    render_investigation_result,
     run_group_history_read,
     run_group_history_search,
 )
@@ -225,6 +234,14 @@ class ToolMixin(McpLifecycleMixin):
             keywords=["群聊历史", "上下文", "阅读记录", "附近消息"],
             result_retention="ephemeral",
             redact_arguments=redact_read_arguments,
+        )
+        self.tool_registry.register(
+            INVESTIGATE_GROUP_HISTORY_SPEC,
+            self._tool_investigate_group_history,
+            category="history",
+            keywords=["群聊历史", "调查", "时间线", "追查", "多方核对"],
+            result_retention="ephemeral",
+            redact_arguments=redact_search_arguments,
         )
         self.tool_registry.register(
             LLMToolSpec(
@@ -521,6 +538,110 @@ class ToolMixin(McpLifecycleMixin):
         if deps is None:
             return "群聊历史查询未启用。"
         return await run_group_history_read(deps, arguments, context)
+
+    def _resolve_investigation_model(self, context: ToolExecutionContext):
+        """调查执行器模型解析：专用覆盖 > 父请求路由；无效覆盖显式报错。
+
+        返回 (provider, model) 或错误字符串。
+        """
+        from quickquip.llm.config_document import resolve_model_provider
+
+        overrides = self.config.group_history
+        provider_id = overrides.investigation_provider_id or context.provider_id
+        provider = self.config.providers.get(provider_id)
+        if provider is None:
+            return f"调查渠道配置无效：provider {provider_id} 不存在"
+        if overrides.investigation_model:
+            model = overrides.investigation_model
+        elif provider_id == context.provider_id:
+            model = context.model
+        else:
+            model = provider.default_model
+        try:
+            return resolve_model_provider(self.config, provider_id, model)
+        except ValueError:
+            return (
+                f"调查模型配置无效：{provider_id}/{model} 不可用"
+                "（不存在或已停用），请修正 [group_history] 配置"
+            )
+
+    async def _tool_investigate_group_history(
+        self, arguments: dict[str, object], context: ToolExecutionContext
+    ) -> str:
+        from quickquip.llm.history_investigation import (
+            InvestigationLimits,
+            InvestigationTask,
+            run_history_investigation,
+        )
+        from quickquip.llm.token_estimate import estimate_tokens
+
+        if context.chat_type != "group":
+            return "该工具仅支持群聊使用。"
+        if not self._effective_history_enabled(context.group_id, context.chat_type):
+            return "本群未开启群聊历史查询，无法执行。"
+        state = getattr(context, "history", None)
+        if state is None or self.group_history_service is None:
+            return "群聊历史查询未启用。"
+
+        # 父 Loop 最多委派一次；重复调用返回既有当轮结果
+        if state.investigation_used:
+            return (
+                state.investigation_result_text
+                + "\n（本回答周期已委派过一次调查，以上为既有结果。）"
+            )
+        if state.allowance(INVESTIGATION_REPORT_TOKEN_CAP, 0) < MIN_PARENT_REPORT_SPACE:
+            return INVESTIGATION_BUDGET_REPLY
+
+        question = str(arguments.get("question", "")).strip()[:QUESTION_MAX_CHARS]
+        if not question:
+            return "缺少调查问题：question 必须写清要查证什么。"
+        task = InvestigationTask(
+            question=question,
+            context_note=str(arguments.get("context", "") or "").strip()[
+                :CONTEXT_NOTE_MAX_CHARS
+            ],
+            anchors=[
+                str(a).strip()
+                for a in (arguments.get("anchors") or [])[:MAX_ANCHORS]
+                if str(a).strip()
+            ],
+        )
+        for key, target in (("start", "start_ts"), ("end", "end_ts")):
+            raw = arguments.get(key)
+            if raw:
+                parsed = parse_history_time(str(raw))
+                if parsed is None:
+                    return "时间格式无法解析：请用 YYYY-MM-DD 或 ISO 8601（北京时间）。"
+                setattr(task, target, parsed.timestamp())
+
+        resolved = self._resolve_investigation_model(context)
+        if isinstance(resolved, str):
+            return resolved
+        provider, model = resolved
+
+        settings = self.config.group_history
+        limits = InvestigationLimits(
+            timeout_seconds=settings.investigation_timeout_seconds,
+            max_model_calls=settings.investigation_max_calls,
+            max_tool_calls=settings.investigation_max_calls * 2,
+        )
+        result = await run_history_investigation(
+            task=task,
+            provider=provider,
+            model=model,
+            runtime_config=self.config.runtime,
+            query_service=self.group_history_service,
+            group_id=context.group_id,
+            parent_scope_key=context.chat_scope or str(context.group_id),
+            build_provider_client=build_provider_client,
+            limits=limits,
+            parent_cancel_check=state.parent_cancel_check,
+        )
+        text = render_investigation_result(result, INVESTIGATION_REPORT_TOKEN_CAP)
+        state.consume(estimate_tokens(text))
+        state.investigation_used = True
+        state.investigation_result_text = text
+        return text
 
     def bind_image_preprocessor(self, preprocessor: ImagePreprocessor | None) -> None:
         self.image_preprocessor = preprocessor

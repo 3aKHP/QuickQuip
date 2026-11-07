@@ -41,11 +41,26 @@ READ_RADIUS_DEFAULT = 5
 READ_MAX_MESSAGES = 12
 PREVIEW_CHARS = 80
 RESUME_RESERVE_TOKENS = 512
+# 委派调查前，父 Loop 剩余结果空间至少要装得下报告的最小可用部分
+MIN_PARENT_REPORT_SPACE = 800
 
 BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 """工具时间语义与轮次信封一致（北京时间）；date-only 输入按此解释。"""
 
-HISTORY_TOOLS = ("search_group_history", "read_group_history")
+HISTORY_TOOLS = (
+    "search_group_history",
+    "read_group_history",
+    "investigate_group_history",
+)
+
+INVESTIGATION_REPORT_TOKEN_CAP = 2000
+QUESTION_MAX_CHARS = 2000
+CONTEXT_NOTE_MAX_CHARS = 2000
+MAX_ANCHORS = 8
+
+INVESTIGATION_BUDGET_REPLY = (
+    "剩余结果空间不足以接收调查报告，请基于已获取的内容作答，或下次再问。"
+)
 
 _PRIVATE_CHAT_REPLY = "该工具仅支持群聊使用。"
 _DISABLED_REPLY = "本群未开启群聊历史查询，无法执行。"
@@ -65,6 +80,11 @@ class HistoryToolState:
     session: HistorySession = field(default_factory=HistorySession)
     direct_budget_tokens: int = DIRECT_HISTORY_LOOP_BUDGET
     round_space_tokens: int | None = None
+    # 父 Loop 有效性检查（service 侧注入；调查执行器在每次模型活动前调用）
+    parent_cancel_check: Callable[[], None] | None = None
+    # 「父 Loop 最多委派一次」的当轮事实与既有结果缓存
+    investigation_used: bool = False
+    investigation_result_text: str = ""
     _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
 
     def begin_round(self, space_tokens: int | None) -> None:
@@ -239,6 +259,78 @@ SEARCH_GROUP_HISTORY_SPEC = LLMToolSpec(
         "required": [],
     },
 )
+
+INVESTIGATE_GROUP_HISTORY_SPEC = LLMToolSpec(
+    name="investigate_group_history",
+    description=(
+        "把复杂的群历史问题委派给专用调查子任务（独立上下文，多次换词搜索、"
+        "翻页、锚点阅读、核对时间线），返回带来源引用与原文证据的结构化报告。"
+        "适合：方案为什么变了、最终决定是什么、多方说法核对这类需要跨时段"
+        "追查的问题。找某句原话请直接用 search_group_history。"
+        "每个回答周期最多委派一次，耗时可达数分钟；question 要写清要查什么、"
+        "可选 context 提供待核实的背景，start/end 限定时间窗（北京时间）。"
+    ),
+    input_schema={
+        "type": "object",
+        "properties": {
+            "question": {
+                "type": "string",
+                "description": "调查问题（≤2000 字符）：要查证什么、判断标准",
+            },
+            "context": {
+                "type": "string",
+                "description": "可选背景（视为待核实线索，不是事实）",
+            },
+            "start": {"type": "string", "description": "时间窗起点（北京时间）"},
+            "end": {"type": "string", "description": "时间窗终点（北京时间）"},
+            "anchors": {
+                "type": "array",
+                "items": {"type": "string"},
+                "description": "可选起始来源引用（hr1 开头，≤8 个）",
+            },
+        },
+        "required": [],
+    },
+)
+
+
+def render_investigation_result(result, token_cap: int = INVESTIGATION_REPORT_TOKEN_CAP) -> str:
+    """把调查结果渲染为主模型可用的有界报告（含程序取回的原文证据）。"""
+    status_label = {
+        "completed": "完成",
+        "partial": "部分完成（预算/时限触顶）",
+        "invalid_report": "报告未通过校验（附已读证据）",
+        "failed": "执行失败",
+        "busy": "并发占用",
+    }.get(result.status, result.status)
+    header = (
+        f"历史调查报告（{status_label}；模型调用 {result.model_calls} 次、"
+        f"工具调用 {result.tool_calls} 次、用时 {result.elapsed_seconds:.0f}s）"
+    )
+    lines: list[str] = []
+    for index, finding in enumerate(result.findings, 1):
+        lines.append(f"{index}. {finding.claim}")
+        for ref in finding.evidence_refs:
+            excerpt = result.evidence.get(ref, "（证据原文不可用）")
+            lines.append(f"   证据：{excerpt}")
+    if not lines:
+        lines.append("（无结构化结论）")
+    footer_parts: list[str] = []
+    if result.unresolved:
+        footer_parts.append(f"未决：{result.unresolved}")
+    if result.suggested_followup:
+        footer_parts.append(f"建议后续：{result.suggested_followup}")
+    if result.coverage_note:
+        footer_parts.append(result.coverage_note)
+    if result.detail:
+        footer_parts.append(result.detail)
+    footer = "\n".join(footer_parts)
+    kept, trimmed = _trim_to_budget(lines, header, footer, token_cap)
+    body = "\n".join([header, *kept, footer])
+    if trimmed:
+        body += f"\n（因报告预算截断，仅显示前 {len(kept)} 条结论。）"
+    return body
+
 
 READ_GROUP_HISTORY_SPEC = LLMToolSpec(
     name="read_group_history",
