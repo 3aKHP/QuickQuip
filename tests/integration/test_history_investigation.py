@@ -5,7 +5,6 @@
 """
 from __future__ import annotations
 
-import asyncio
 import json
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -17,13 +16,11 @@ from quickquip.chat.archive import ChatArchive
 from quickquip.chat.history_query import HistoryQueryService
 from quickquip.llm.config import ProviderConfig, RuntimeConfig
 from quickquip.llm.history_investigation import (
-    InvestigationDeadline,
     InvestigationLimits,
     InvestigationTask,
     ParentCancelled,
     run_history_investigation,
 )
-from quickquip.llm.provider.base import LLMResponse
 from quickquip.llm.tools import LLMToolCall
 
 G1 = "1000000000"

@@ -5,14 +5,14 @@ import logging
 from quickquip.llm.config import LLMConfig, ProviderConfig, ToolsConfig, load_llm_config
 from quickquip.llm.history_tools import HISTORY_TOOLS
 from quickquip.llm.service_parts.constants import DEFAULT_ENABLED_TOOLS
+from quickquip.llm.service_parts.tools import ToolMixin
+from quickquip.llm.tool_registry import ToolRegistry
+from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
 
 # #72 后默认面含群历史工具，但历史双开关未开时被 _get_enabled_tool_names
 # 过滤；「完整默认面」断言需以 history_enabled=True 调用，其余场景按
 # 关闭口径 = DEFAULT_ENABLED_TOOLS − HISTORY_TOOLS。
 DEFAULT_FACE_HISTORY_OFF = [n for n in DEFAULT_ENABLED_TOOLS if n not in HISTORY_TOOLS]
-from quickquip.llm.service_parts.tools import ToolMixin
-from quickquip.llm.tool_registry import ToolRegistry
-from quickquip.llm.tools import LLMToolSpec, ToolExecutionContext
 
 _BUILTIN_TOOLS = [*DEFAULT_ENABLED_TOOLS, "draw_svg", "get_group_stats", "get_rule_status"]
 

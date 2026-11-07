@@ -137,12 +137,6 @@ def agent_loop_trace_boundary(parent_loop_id: str | None = None) -> Iterator[Age
 
 
 def current_agent_loop_id() -> str | None:
-    """当前生效的 trace loop ID（诊断摘要与父子关联记录用）。"""
-    trace = _AGENT_LOOP_TRACE.get()
-    return trace.loop_id if trace is not None else None
-
-
-def current_agent_loop_id() -> str | None:
     """Current agent loop id, or ``None`` outside any ``@trace_agent_loop`` boundary.
 
     跨模块归因的唯一公开入口：不要读取可变的 ``AgentLoopTrace``/``_AGENT_LOOP_TRACE``。
