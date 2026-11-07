@@ -470,7 +470,9 @@ def test_range_continuation_respects_window_end(tmp_path):
     for i in range(6):
         archive.record(G1, "张三", f"行{i}", ts=_ts(i), user_id="1", message_id=f"w{i}")
     session = HistorySession()
-    out = service.read_range(G1, session, start_ts=_ts(0), end_ts=_ts(4), max_messages=2, max_chars=10_000)
+    out = service.read_range(
+        G1, session, start_ts=_ts(0), end_ts=_ts(4), max_messages=2, max_chars=10_000
+    )
     assert [m.text for m in out.messages] == ["行0", "行1"]
     assert out.newer_cursor
     second = service.read_continue(G1, session, cursor_token=out.newer_cursor)
@@ -481,7 +483,6 @@ def test_range_continuation_respects_window_end(tmp_path):
 
 def test_read_db_error_is_unavailable_not_empty(tmp_path, monkeypatch):
     """R13：读取路径数据库故障返回 UNAVAILABLE，不冒充空记录。"""
-    import sqlite3 as _sqlite3
     service, archive = _make_service(tmp_path)
     archive.record(G1, "张三", "内容", ts=_ts(0), user_id="1", message_id="m1")
 

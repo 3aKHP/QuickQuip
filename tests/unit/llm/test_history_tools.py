@@ -39,6 +39,7 @@ from quickquip.llm.store_parts.agent_records import (
     UserTriggerPayload,
 )
 from quickquip.llm.service_parts.agent_runtime import RecorderConfig, TurnRecorder
+from quickquip.llm.service_parts.tools import ToolMixin as _ToolMixin
 from quickquip.llm.token_estimate import estimate_tokens
 from quickquip.llm.tools import LLMToolCall, LLMToolSpec, ToolExecutionContext
 from quickquip.llm.tool_registry import ToolRegistry
@@ -490,9 +491,6 @@ async def test_final_turn_native_state_omitted_after_ephemeral_tool(tmp_path, mo
 # ── R01 回归：调查工具生产入口（真实 handler → 解析 → runner 接线） ──
 
 
-from quickquip.llm.service_parts.tools import ToolMixin as _ToolMixin
-
-
 class _InvestigationHost(_ToolMixin):
     """最小宿主：只供调查 handler 的依赖面（GPT 外审 R01 生产路径）。"""
 
@@ -520,7 +518,6 @@ def _investigation_config(provider_id="p1", model=None):
 async def test_investigate_tool_entry_resolves_and_runs(tmp_path, monkeypatch):
     """生产入口全链：handler → 模型解析（元组解包）→ runner 接线 → 渲染。"""
     import quickquip.llm.history_investigation as investigation
-    from quickquip.llm.config import LLMConfig, ProviderConfig
     from quickquip.chat.archive import ChatArchive
     from quickquip.chat.history_query import HistoryQueryService
     from quickquip.llm.store import LLMStore
