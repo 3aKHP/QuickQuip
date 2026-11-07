@@ -1087,3 +1087,74 @@ async def test_read_fragment_resumes_at_rendered_boundary(tmp_path: Path):
     assert not set(markers1) & set(markers2)
     assert min(markers2) <= max(markers1) + 3
     assert 59 in markers2  # 续读抵达消息尾部
+
+
+def _marker_block(index: int) -> str:
+    """每 100 字符一个唯一序号标记块（与集成测试同构，用于验证续读边界）。"""
+    return f"〔标{index:03d}记〕" + "字" * 92
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("clip_position", ["query_fragment", "render_midtext"])
+async def test_read_reissue_offset_bases_agree(tmp_path: Path, clip_position: str):
+    """KHPilot SF:两种裁切位置的重签偏移基准必须一致——无论正文被
+    查询层切成片段( fragment 分支)还是被渲染层裁在完整消息正文内部
+    (elif 分支),续读都从「实际交付的原始文本位置」继续,不重不漏。
+    两个分支的 char_offset 都必须是原始消息文本内的绝对偏移。"""
+    import re
+
+    deps = _deps(tmp_path)
+    archive = _archive_for(deps)
+    now = time()
+    marker_text = "".join(_marker_block(i) for i in range(60))
+    if clip_position == "query_fragment":
+        # 单条 6000 字消息：查询层先切 4800 字片段 → fragment 分支
+        archive.record(
+            G1, "作者", marker_text, ts=now - 60, user_id="1", message_id="m0"
+        )
+    else:
+        # 3000 字消息（< 查询层 4800 字帽，不产生片段）+ 紧随其后的
+        # 短消息迫使预算在长消息行内被裁 → elif 分支（完整消息被渲染
+        # 层裁在正文内部）
+        archive.record(
+            G1, "作者", marker_text[:3000], ts=now - 60, user_id="1", message_id="m0"
+        )
+        archive.record(
+            G1, "跟帖", "后续短消息", ts=now - 30, user_id="2", message_id="m1"
+        )
+    state = HistoryToolState()
+    if clip_position == "render_midtext":
+        # 收紧预算：完整长消息行在正文内部被渲染层裁掉（elif 分支）
+        state.direct_budget_tokens = 700
+    first = await run_group_history_read(
+        deps, {"start": "2000-01-01", "end": "2100-01-01"},
+        _context(history=state),
+    )
+    assert "预算截断" in first and "newer_cursor=" in first
+
+    def _body_of(page: str) -> str:
+        m = re.search(r"：(.*)", page.splitlines()[1], re.S)
+        return (m.group(1) if m else "").split("…（长消息片段")[0]
+
+    body1 = _body_of(first)
+    # 交付正文的尾部 24 字在原始全文中的位置 = 续读必须接续的绝对偏移
+    tail = body1.rstrip("…")[-24:]
+    raw = marker_text if clip_position == "query_fragment" else marker_text[:3000]
+    delivered_end = raw.index(tail) + len(tail)
+
+    cursor = re.search(r"newer_cursor=(\S+)", first).group(1)
+    state.direct_budget_tokens = DIRECT_HISTORY_LOOP_BUDGET
+    state.begin_round(8000)
+    second = await run_group_history_read(
+        deps, {"cursor": cursor}, _context(history=state)
+    )
+    if clip_position == "render_midtext":
+        # 续读头必须是同一条消息、从交付边界继续
+        assert "作者" in second.splitlines()[1]
+    body2 = _body_of(second)
+    assert body2[:16] == raw[delivered_end:delivered_end + 16], (
+        f"{clip_position}: 续读未从实际交付边界继续"
+        f"(期望 {raw[delivered_end:delivered_end+16]!r}, 实得 {body2[:16]!r})"
+    )
+    # 无重复交付
+    assert tail not in body2
