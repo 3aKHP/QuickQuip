@@ -487,7 +487,12 @@ class HistoryQueryService:
         max_messages: int = 12,
         max_chars: int = 1600,
     ) -> ReadOutcome:
-        """按来源引用展开命中附近消息。direction ∈ around|before|after。"""
+        """按来源引用展开命中附近消息。direction ∈ around|before|after。
+
+        返回条数可能少于 ``2*radius+1``：单侧探针行（探测"还有更多"用的
+        第 radius+1 行）会被剔除，窗口耗尽的侧自然不足额；上层渲染与
+        预算不应假设恰好满额。
+        """
         gid = self._try_group(group_id)
         if gid is None:
             return ReadOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_group")
@@ -544,7 +549,13 @@ class HistoryQueryService:
         max_messages: int = 12,
         max_chars: int = 1600,
     ) -> ReadOutcome:
-        """按时间区间升序阅读（从区间起点开始）。"""
+        """按时间区间升序阅读（从区间起点开始）。
+
+        区间模式以调用方给定的时间窗为界：older 方向（窗口起点之前）
+        按定义不在本次阅读范围内，故恒置 ``older_exhausted=True``、
+        不签发 older 续读游标——需要向更早扩展时应以更早的 start 另开
+        区间或改用锚点模式（§6.2「时间模式从区间起点开始」）。
+        """
         gid = self._try_group(group_id)
         if gid is None:
             return ReadOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_group")
@@ -574,10 +585,14 @@ class HistoryQueryService:
         state = session.resolve(cursor_token, gid)
         if state is None or state.get("kind") != "read":
             return ReadOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_cursor")
+        # 损坏/异 kind 状态同样走 bad_cursor（不区分原因），避免把坏游标
+        # 变成未处理 KeyError
+        direction = str(state.get("direction") or "")
+        if direction not in ("older", "newer") or state.get("last_key") is None:
+            return ReadOutcome(status=QueryStatus.INVALID_REQUEST, detail="bad_cursor")
         snapshot = int(state.get("snapshot_max_id") or 0) or self._current_snapshot()
         if not snapshot:
             return ReadOutcome(status=QueryStatus.UNAVAILABLE, detail="archive_unavailable")
-        direction: str = state["direction"]
         max_messages = max(1, int(state.get("max_messages", 12)))
         max_chars = int(state.get("max_chars", 1600))
         resume_row_id = state.get("resume_row_id")

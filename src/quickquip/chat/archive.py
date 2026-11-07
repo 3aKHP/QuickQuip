@@ -67,6 +67,9 @@ class ChatArchive:
         self._unavailable = False
         self._retry_init_after: float = 0.0
         self._dropped_since_unavailable = 0
+        # 撤回旁表写失败计数（#72 KHPilot NIT）：撤回屏蔽失效是隐私相关
+        # 降级，静默不可观测不行——stats() 暴露给巡检。
+        self._recall_write_failures = 0
         self._archive_uuid: str = ""
         try:
             self._init_db()
@@ -180,6 +183,7 @@ class ChatArchive:
         if self._unavailable:
             self._maybe_retry_init()
             if self._unavailable:
+                self._recall_write_failures += 1
                 return False
         try:
             conn = self._connect()
@@ -197,6 +201,7 @@ class ChatArchive:
             finally:
                 conn.close()
         except sqlite3.Error as exc:
+            self._recall_write_failures += 1
             logger.warning(
                 "chat_archive: failed to record recall for group %s: %s", gid, exc
             )
@@ -438,7 +443,12 @@ class ChatArchive:
             groups = conn.execute(
                 "SELECT COUNT(DISTINCT group_id) AS n FROM archive_messages"
             ).fetchone()["n"]
-            return {"available": True, "messages": total, "groups": groups}
+            return {
+                "available": True,
+                "messages": total,
+                "groups": groups,
+                "recall_write_failures": self._recall_write_failures,
+            }
         except sqlite3.Error:
             return {"available": False}
         finally:

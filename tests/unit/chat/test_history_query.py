@@ -222,6 +222,25 @@ def test_cursor_rejected_across_groups_and_sessions(tmp_path: Path):
     assert stranger.status is QueryStatus.INVALID_REQUEST
 
 
+def test_read_continue_rejects_malformed_cursor_state(tmp_path: Path):
+    """损坏/异 kind 游标状态统一 bad_cursor，不变成未处理异常（KHPilot）。"""
+    service, archive = _make_service(tmp_path)
+    archive.record(G1, "张三", "内容", ts=_ts(0), user_id="1", message_id="m1")
+    session = HistorySession()
+
+    # search 游标用于 read_continue：kind 不符 → bad_cursor
+    search_out = service.search(G1, session, terms=["内容"], start_ts=_ts(-5), end_ts=_ts(10))
+    assert service.read_continue(
+        G1, session, cursor_token=search_out.cursor_token or "none"
+    ).detail == "bad_cursor"
+
+    # 缺 direction/last_key 的 read 状态 → bad_cursor 而非 KeyError
+    broken = session.issue({"kind": "read", "group_id": G1})
+    assert service.read_continue(G1, session, cursor_token=broken).detail == "bad_cursor"
+    keyless = session.issue({"kind": "read", "group_id": G1, "direction": "older"})
+    assert service.read_continue(G1, session, cursor_token=keyless).detail == "bad_cursor"
+
+
 def test_read_anchor_directions_and_radius(tmp_path: Path):
     service, archive = _make_service(tmp_path)
     for i in range(10):
