@@ -109,6 +109,11 @@ async def run_tool_call_loop(
                     declared_calls=[],
                     executable_calls=[],
                     has_more_rounds=False,
+                    # 最终轮恰是引用临时内容最密集的一轮（模型据检索结果
+                    # 合成答案），ephemeral 触达后原生副本同样必须省略
+                    native_state_omission=(
+                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                    ),
                 )
                 await turn_recorder.deliver_turn()
             return response
@@ -203,6 +208,9 @@ async def run_tool_call_loop(
                     declared_calls=[],
                     executable_calls=[],
                     has_more_rounds=False,
+                    native_state_omission=(
+                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                    ),
                 )
                 await turn_recorder.deliver_turn()
             return response

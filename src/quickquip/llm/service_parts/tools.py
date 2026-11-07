@@ -149,7 +149,8 @@ class ToolMixin(McpLifecycleMixin):
                               lambda: self.config.runtime.memory_max_items_per_group,
                               lambda name, context: self.config.runtime.tool_calling_enabled
                               and name in self._get_enabled_tool_names(
-                                  context.chat_type, provider_id=context.provider_id))
+                                  context.chat_type, provider_id=context.provider_id,
+                                  history_enabled=bool(getattr(context, "history", None))))
         self.tool_registry.register(
             LLMToolSpec(
                 name=SEARCH_TOOL_NAME,
@@ -723,12 +724,17 @@ class ToolMixin(McpLifecycleMixin):
         except (TypeError, ValueError):
             limit = self.config.tools.discovery_search_limit
         limit = max(1, min(limit, self.config.tools.discovery_search_limit))
+        # 与循环侧启用集同口径（service 注入的 context.history 即裁决结果）：
+        # 双开群必须能在此搜到/点名历史工具，否则与信封公告自相矛盾
+        history_enabled = bool(getattr(context, "history", None))
         current_enabled = self._get_enabled_tool_names(
-            chat_type=context.chat_type, provider_id=context.provider_id
+            chat_type=context.chat_type, provider_id=context.provider_id,
+            history_enabled=history_enabled,
         )
         loaded_names = set(
             self._get_always_loaded_tool_names(
-                chat_type=context.chat_type, provider_id=context.provider_id
+                chat_type=context.chat_type, provider_id=context.provider_id,
+                history_enabled=history_enabled,
             )
         )
 
@@ -793,7 +799,8 @@ class ToolMixin(McpLifecycleMixin):
         page = max(1, page)
         limit = max(1, min(limit, 50))
         enabled_names = self._get_enabled_tool_names(
-            chat_type=context.chat_type, provider_id=context.provider_id
+            chat_type=context.chat_type, provider_id=context.provider_id,
+            history_enabled=bool(getattr(context, "history", None)),
         )
 
         if mode == "groups":

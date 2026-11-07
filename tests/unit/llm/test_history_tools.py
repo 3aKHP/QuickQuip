@@ -384,3 +384,103 @@ def test_recorder_ephemeral_retention_flow(tmp_path: Path):
         assert turn["native_omission_reason"] == "ephemeral_policy"
     finally:
         conn.close()
+
+
+# ── B1 回归：ephemeral 触达后最终轮 Turn 原生副本省略（CR 评审） ────
+
+
+def types_proxy():
+    class _P:
+        id = "p1"
+        protocol = "openai"
+        non_vision_models: list = []
+        temperature = 0.3
+        max_output_tokens = 64
+        reasoning_effort = None
+        style_overrides = ""
+    return _P()
+
+
+class _LoopResponse:
+    def __init__(self, *, text="", tool_calls=None, native=None):
+        self.text = text
+        self.tool_calls = tool_calls or []
+        self.model = "m1"
+        self.finish_reason = "stop"
+        self.thinking_blocks = []
+        self.native_blocks = native
+        self.owner = None
+        self.generated_images = []
+
+
+class _LoopClient:
+    def __init__(self, script):
+        self.script = list(script)
+
+    async def complete(self, request):
+        assert self.script, "脚本耗尽"
+        return self.script.pop(0)
+
+
+@pytest.mark.asyncio
+async def test_final_turn_native_state_omitted_after_ephemeral_tool(tmp_path, monkeypatch):
+    """ephemeral 工具触达后，模型合成答案的最终轮原生副本不得落库。"""
+    import logging
+    from quickquip.llm.config import RuntimeConfig
+    from quickquip.llm.tool_loop import run_tool_call_loop
+    from quickquip.llm.provider import LLMRequest
+    from quickquip.llm.store import LLMStore
+    from quickquip.llm.store_parts.agent_records import (
+        UserTriggerPayload,
+    )
+
+    store = LLMStore(tmp_path / "llm.db")
+    handle: LoopHandle = store.begin_loop(
+        "1001", 0, TriggerKind.GROUP_DIRECT,
+        UserTriggerPayload(user_id="u1", sender_name="n", canonical_name="n", content="问"),
+    )
+    recorder = TurnRecorder(store=store, handle=handle, config=RecorderConfig(), sink=None)
+
+    registry = _registry_with_history_tool()
+    context = _context()
+    request = LLMRequest(
+        model="m1", system_prompt="s", temperature=0.3, max_output_tokens=64,
+        messages=[], allow_tool_calls=True,
+        tools=[registry.list_specs()[0]],
+    )
+    script = [
+        _LoopResponse(tool_calls=[LLMToolCall(
+            id="call_1", name="search_group_history",
+            arguments_json='{"terms": ["词"]}',
+        )]),
+        _LoopResponse(text="最终答案", native=[{"type": "reasoning", "text": "引用了检索内容"}]),
+    ]
+    client = _LoopClient(script)
+
+    await run_tool_call_loop(
+        provider=types_proxy(),
+        request=request,
+        context=context,
+        build_provider_client=lambda prov: client,
+        tool_registry=registry,
+        runtime_config=RuntimeConfig(tool_calling_enabled=True, tool_max_rounds=4),
+        logger=logging.getLogger("test"),
+        search_tool_name="search_web",
+        search_failsafe_max_rounds=8,
+        search_failsafe_max_calls_per_round=8,
+        turn_recorder=recorder,
+    )
+    conn = store._connect()
+    try:
+        rows = conn.execute(
+            "SELECT native_state_json, native_omission_reason FROM agent_turns"
+            " ORDER BY turn_index"
+        ).fetchall()
+        assert len(rows) == 2
+        # 中间轮（声明 ephemeral 工具）与最终轮（引用临时内容的 reasoning）
+        # 原生副本都按 ephemeral 政策省略
+        for row in rows:
+            assert row["native_state_json"] is None
+            assert row["native_omission_reason"] == "ephemeral_policy"
+    finally:
+        conn.close()

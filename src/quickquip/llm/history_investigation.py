@@ -640,9 +640,8 @@ async def run_history_investigation(
                         allow_tool_calls=False,
                         tool_choice="none",
                     )
-                    client = build_provider_client(provider)
-                    repaired = await client.complete(repair_request)
-                    state.model_calls += 1
+                    # 修复调用走同一计数 client：计入模型调用帽与 token 预算
+                    repaired = await counting_client.complete(repair_request)
                     parsed = _parse_report(repaired.text or "")
                     error = _validate_report(parsed, recording)
                 except (InvestigationDeadline, ParentCancelled):

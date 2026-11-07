@@ -282,7 +282,8 @@ class HealthMixin:
         lines.append(f"工具调用：{'ON' if self.config.runtime.tool_calling_enabled else 'OFF'}")
         lines.append(f"MCP：{self._summarize_mcp_status()}")
         enabled_tool_names = self._get_enabled_tool_names(
-            chat_type=chat_type, provider_id=settings.provider_id
+            chat_type=chat_type, provider_id=settings.provider_id,
+            history_enabled=self._effective_history_enabled(group_id, chat_type),
         )
         lines.append(f"工具列表：{', '.join(enabled_tool_names) or '无'}")
         lines.append(f"Provider：{settings.provider_id}")
@@ -327,7 +328,8 @@ class HealthMixin:
             vocab_path=self.vocab_path,
             identity_path=self.identity_path,
             tool_names=self._get_enabled_tool_names(
-                chat_type=chat_type, provider_id=settings.provider_id
+                chat_type=chat_type, provider_id=settings.provider_id,
+                history_enabled=self._effective_history_enabled(group_id, chat_type),
             ),
             mcp_status_summary=self._summarize_mcp_status(),
             mcp_enabled=self.config.mcp.enabled,
