@@ -38,7 +38,7 @@
 - `docs/user/group-commands.md` → `references/docs-user-group-commands.md` — QuickQuip 群内指令速查 ｜ 关键词：/ai 你的问题、/search 关键词、/roll 2d6、/ai、/ai 你觉得今天适合熬夜吗、@机器人 这句话是什么意思、/search news 关键词、/search finance 关键词、/search news OpenAI 最新模型、/defectify
 - `docs/user/group-games.md` → `references/docs-user-group-games.md` — QuickQuip 群内游戏指南 ｜ 关键词：config/games.toml、/game start 数字炸弹、/game start 21点 200、/game start 俄罗斯轮盘 200、/注册牛牛、/签到、/金币、/金币排行、/game list、/game stop
 - `docs/user/llm-skills.md` → `references/docs-user-llm-skills.md` — AI Skill 扩展能力说明 ｜ 关键词：/ai、/skill list、/ai 你的 /quote 命令怎么用？、/ai 你支持什么配置？、/ai 这个报错是什么意思？、/ai 服务器现在负载高吗？、/ai 内存还剩多少？磁盘快满了吗？、/ai 机器人怎么有点卡，是不是内存不足？
-- `docs/user/llm-tool-discovery.md` → `references/docs-user-llm-tool-discovery.md` — AI 工具发现说明 ｜ 关键词：/ai 搜一下 Python 3.13 的官方发布公告、/ai 查查群里有没有关于阿桃喜欢什么的记忆、/ai 用 GitHub 工具列出 3aKHP/QuickQuip 当前仍开放的 issue
+- `docs/user/llm-tool-discovery.md` → `references/docs-user-llm-tool-discovery.md` — AI 工具发现说明 ｜ 关键词：/ai 搜一下 Python 3.13 的官方发布公告、/ai 查查群里有没有关于阿桃喜欢什么的记忆、/ai 用 GitHub 工具列出 3aKHP/QuickQuip 当前仍开放的 issue、/llm history on、/llm history status、/llm history off、/llm history reset、[group_history]
 - `docs/user/private-commands.md` → `references/docs-user-private-commands.md` — QuickQuip 私聊指令速查 ｜ 关键词：/ai、/start_session、/end_session、/resume_session、<尖括号>、[方括号]、/resume_session [N]、/sessions、/delete_session N、/start_session --preset "请用英文回复"
 - `docs/user/three-kingdoms-memes.md` → `references/docs-user-three-kingdoms-memes.md` — 新三国梗触发指南
 
@@ -95,7 +95,7 @@
 - `docs/dev/adr/0002-business-session-identity.md` → `references/docs-dev-adr-0002-business-session-identity.md` — ADR-0002：由业务维护 Session 身份 ｜ 状态：Accepted
 - `docs/dev/adr/0003-epoch-history-freezing.md` → `references/docs-dev-adr-0003-epoch-history-freezing.md` — ADR-0003：在纪元内冻结历史表达 ｜ 状态：Accepted
 - `docs/dev/adr/0004-agent-execution-replay-delivery.md` → `references/docs-dev-adr-0004-agent-execution-replay-delivery.md` — ADR-0004：分离执行记录、历史投影与消息交付 ｜ 状态：Accepted
-- `docs/dev/adr/0005-tool-result-retention.md` → `references/docs-dev-adr-0005-tool-result-retention.md` — ADR-0005：区分临时查询结果与可保留工具事实 ｜ 状态：Accepted ｜ 关键词：bounded、ephemeral、7a11405、EPHEMERAL、BOUNDED、retention
+- `docs/dev/adr/0005-tool-result-retention.md` → `references/docs-dev-adr-0005-tool-result-retention.md` — ADR-0005：区分临时查询结果与可保留工具事实 ｜ 状态：Accepted ｜ 关键词：bounded、ephemeral、7a11405、EPHEMERAL、BOUNDED、retention、result_retention、redact_arguments、NativeOmissionReason.EPHEMERAL_POLICY、search_recent_messages
 - `docs/dev/adr/0006-layered-architecture-composition.md` → `references/docs-dev-adr-0006-layered-architecture-composition.md` — ADR-0006：按领域分层并由应用层装配 ｜ 状态：Accepted
 - `docs/dev/adr/0007-unified-chat-archive.md` → `references/docs-dev-adr-0007-unified-chat-archive.md` — ADR-0007：统一群聊归档并按消费方序列化 ｜ 状态：Accepted
 - `docs/dev/adr/0008-record-content-member-identity.md` → `references/docs-dev-adr-0008-record-content-member-identity.md` — ADR-0008：分离记录正文、成员关联与展示名称 ｜ 状态：Accepted
@@ -117,6 +117,7 @@
 - `docs/dev/adr/0024-directional-configuration-deployment.md` → `references/docs-dev-adr-0024-directional-configuration-deployment.md` — ADR-0024：工作副本与单向配置部署 ｜ 状态：Accepted ｜ 关键词：.qqconf/、.env、QUICKQUIP_DEPLOY_LOCATION=local|cloud、QUICKQUIP_DEPLOY_RUNTIME=source|docker、.config-staging/、refresh、push、pull、committed
 - `docs/dev/adr/0025-tracked-operations-programs.md` → `references/docs-dev-adr-0025-tracked-operations-programs.md` — ADR-0025：统一分发运维程序并分离生产配置 ｜ 状态：Accepted ｜ 关键词：scripts/deploy/、server/、legacy/、scripts/ops/、scripts/maintenance/、prod.example/、prod/、prod/hooks/deployment.sh、docker/Dockerfile.prod、.env
 - `docs/dev/adr/0026-conversation-owned-memory.md` → `references/docs-dev-adr-0026-conversation-owned-memory.md` — ADR-0026：由主对话模型维护会话记忆 ｜ 状态：Accepted
+- `docs/dev/adr/0027-history-investigation-executor.md` → `references/docs-dev-adr-0027-history-investigation-executor.md` — ADR-0027：群历史查询与专用调查执行器 ｜ 状态：Accepted ｜ 关键词：chat/history_query.py、get_group_msg_history、search_group_history、read_group_history、hr1.<归档UUID>.<行ID>、investigate_group_history、search_recent_messages、[group_history]
 - `docs/dev/adr/README.md` → `references/docs-dev-adr-readme.md` — 架构决策记录 ｜ 关键词：NNNN-short-title.md、Proposed、Accepted、Rejected、Superseded、status、superseded_by
 - `docs/dev/adr/template.md` → `references/docs-dev-adr-template.md` — ADR 模板 ｜ 关键词：NNNN-short-title.md
 

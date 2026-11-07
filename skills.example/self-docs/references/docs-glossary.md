@@ -215,3 +215,17 @@ Bot 最近回报已接纳的运行配置版本，通过 `loaded_revision` 等状
 ## 运维程序与生产配置
 
 通用运维程序由 `scripts/deploy/`、`scripts/ops/` 维护，随代码升级。`prod.example/` 分发配置模板，`prod/` 保存私有配置和协议端登录资产。生产镜像构建程序位于 `docker/Dockerfile.prod`。目录职责和入口见[脚本导航](../scripts/README.md)。
+
+### 群历史查询（Group history query）
+
+LLM 按需检索本群已归档历史消息的只读能力（Issue #72）。三个工具：
+`search_group_history`（关键词搜索）、`read_group_history`（按来源引用展开
+上下文）、`investigate_group_history`（委派专用调查执行器处理复杂问题）。
+同群限定、默认关闭（全局 `[group_history].enabled` + 群级开关双开），
+查询结果按临时载荷处理。见 [ADR-0027](dev/adr/0027-history-investigation-executor.md)。
+
+### 来源引用（Message ref）
+
+`hr1.<归档UUID前8>.<行ID>` 形式的归档消息定位值，由查询工具签发、可跨轮
+回查；绑定归档 UUID，库替换后失效。引用不是授权凭证，解析后仍按当前群
+复核。与之相对，续页游标只在当前请求生命周期内有效。

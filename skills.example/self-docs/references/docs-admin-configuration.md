@@ -251,6 +251,19 @@
 
 <a id="settingstools--工具调用"></a>
 
+### `settings.group_history` — 群聊历史查询（#72）
+
+LLM 按需检索本群归档历史的只读能力；默认关闭，群级开关见
+[工具发现配置](tool-discovery.md)。本节为 document-only 存储（不建关系表）。
+
+| 键名 | 说明 | 默认值 |
+|----|------|--------|
+| `enabled` | 全局默认开关；群级显式开关优先于本值 | `false` |
+| `investigation_provider_id` | 调查执行器专用渠道；留空跟随当前对话渠道 | `""` |
+| `investigation_model` | 调查执行器专用模型；留空用渠道默认模型 | `""` |
+| `investigation_timeout_seconds` | 调查子任务总时限（1–3600 秒，含排队与报告） | `240` |
+| `investigation_max_calls` | 调查子任务模型调用数上限（1–32，最后一次预留给报告） | `10` |
+
 ### `settings.tools` — 工具白名单与按需发现（Tool Discovery）
 
 | 键名 | 说明 | 默认值 |
