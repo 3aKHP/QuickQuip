@@ -11,9 +11,11 @@
   计数证无通道，不受搜索分页限制），无 MCP / Skill /
   联网 / 记忆写入 / 主动发送 / 再次委派。
 - 预算：模型调用 ≤ investigation_max_calls（最后一次留报告）、历史
-  工具调用 ≤ 2×、单请求输入 ≤ 24K token、累计请求估算 ≤ 160K token、
-  总时限 ≤ investigation_timeout_seconds；触顶时关闭工具用剩余额度
-  生成报告，不允许则返回已验证证据 + partial。
+  工具调用 ≤ investigation_tool_calls、单请求输入 ≤ 24K token、累计
+  请求估算 ≤ 160K token、总时限 ≤ investigation_timeout_seconds；触顶时
+  关闭工具用剩余额度生成报告，不允许则返回已验证证据 + partial。
+  软预算（工具帽/直查结果预算）触顶后收束的合法报告如实标 partial，
+  不冒充 completed。
 - 报告由程序校验：findings ≤ 5、evidence_refs ≤ 8、引用必须来自本任务
   实际读取过的来源；无效引用给一次预算内修复机会，仍失败返回
   partial/invalid_report；关键原文由程序从已读证据取回并重过敏感滤。
@@ -58,7 +60,9 @@ BEIJING_TZ = ZoneInfo("Asia/Shanghai")
 # ── 预算常量（§8.1；配置可覆盖时限与模型调用数） ────────────────────
 SUB_INPUT_TOKEN_CAP = 24_000
 SUB_CUMULATIVE_TOKEN_CAP = 160_000
-SUB_TOOL_CALLS_CAP = 20
+# 直调（不经配置宿主）时的回退默认；配置面 investigation_tool_calls
+# 默认 30（生产实测密度 ~2.5 工具/轮 × 10 轮模型帽，旧派生比值 2× 偏紧）
+SUB_TOOL_CALLS_CAP = 30
 SUB_BATCH_CALLS_PER_ROUND = 4
 SUB_DIRECT_HISTORY_BUDGET = 16_000
 MAX_FINDINGS = 5
@@ -438,7 +442,8 @@ def _system_prompt(recording: RecordingQueryService, task: InvestigationTask) ->
         ' "unresolved": "未能确认的部分", "suggested_followup": "可选后续"}\n'
         f"约束：最多 {MAX_FINDINGS} 条 findings，每条结论必须带 evidence_refs"
         f"（只引用你实际读过的消息或回执，消息引用与计数回执共用 "
-        f"≤ {MAX_EVIDENCE_REFS} 的总预算）。"
+        f"≤ {MAX_EVIDENCE_REFS} 的总预算）。suggested_followup 会交给另一个"
+        "会话执行：只写具体搜索词与时间窗，不要写游标（跨会话无效）。\n"
     )
 
 
@@ -451,6 +456,10 @@ class _RunnerState:
     cumulative_tokens: int = 0
     deadline: float = 0.0
     limits: InvestigationLimits = field(default_factory=InvestigationLimits)
+    # 软预算受限事实（refusal 触发）：tool_call_cap / history_budget。
+    # 置位后即使模型收束出合法报告，最终状态也如实标 partial——
+    # 旧版本这类报告冒充 completed，误导外层接续补查。
+    budget_limited: str = ""
 
 
 def _make_parent_check(
@@ -620,6 +629,8 @@ async def run_history_investigation(
             """工具调用帽：额度用尽不抛异常（registry 会把异常吞成错误结果），
             返回引导消息让模型立即出报告；轮边界守卫另做硬停兜底。"""
             if state.tool_calls >= limits.max_tool_calls:
+                if not state.budget_limited:
+                    state.budget_limited = "tool_call_cap"
                 return "调查工具调用额度已用完，请立即基于已读内容输出最终 JSON 报告。"
             state.tool_calls += 1
             return None
@@ -628,12 +639,20 @@ async def run_history_investigation(
             notice = _tool_budget_notice()
             if notice:
                 return notice
+            # 直查结果预算已尽的调用会被渲染层拒绝（_BUDGET_REPLY）：
+            # refusal 语义置位，最终报告如实标 partial
+            if sub_history_state.direct_budget_tokens <= 0:
+                if not state.budget_limited:
+                    state.budget_limited = "history_budget"
             return await run_group_history_search(deps, arguments, context)
 
         async def _sub_read(arguments, context):
             notice = _tool_budget_notice()
             if notice:
                 return notice
+            if sub_history_state.direct_budget_tokens <= 0:
+                if not state.budget_limited:
+                    state.budget_limited = "history_budget"
             return await run_group_history_read(deps, arguments, context)
 
         async def _sub_count(arguments, context):
@@ -837,6 +856,19 @@ async def run_history_investigation(
                 coverage_note=recording.coverage_note(),
                 stop_reason="evidence_recalled",
                 detail="报告结论的证据在交付前被撤回；以下为仍可用的已读证据。",
+            )
+        if state.budget_limited:
+            # 软预算触顶后收束的合法报告：结论仍有效，但状态如实标
+            # partial（不冒充 completed），外层可据此决定是否补查
+            return _result(
+                "partial",
+                findings=surviving,
+                unresolved=unresolved,
+                suggested_followup=followup,
+                evidence=evidence,
+                coverage_note=recording.coverage_note(),
+                stop_reason=state.budget_limited,
+                detail="调查因预算触顶收束；以下结论仍然有效。",
             )
         return _result(
             "completed",

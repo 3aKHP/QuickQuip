@@ -716,6 +716,9 @@ def _load_llm_config(path: str | Path) -> LLMConfig:
             investigation_max_calls=max(
                 1, min(int(group_history_raw.get("investigation_max_calls", 10)), 32)
             ),
+            investigation_tool_calls=max(
+                1, min(int(group_history_raw.get("investigation_tool_calls", 30)), 128)
+            ),
         ),
         skills=SkillsConfig(
             enabled=as_bool(skills_raw.get("enabled", True), default=True),

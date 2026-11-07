@@ -212,7 +212,10 @@ async def test_tool_call_budget_notice_guides_report(tmp_path: Path):
         limits=InvestigationLimits(timeout_seconds=30, max_model_calls=6,
                                    max_tool_calls=2),
     )
-    assert result.status == "completed"
+    # 软预算触顶后收束的合法报告：结论仍交付，但状态如实标 partial
+    assert result.status == "partial"
+    assert result.stop_reason == "tool_call_cap"
+    assert result.findings and result.findings[0].claim == "成员5 参与了讨论"
     assert result.tool_calls == 2  # 第三次只拿到引导消息，未执行
 
 
@@ -406,3 +409,30 @@ async def test_fabricated_count_receipt_rejected_then_repaired(tmp_path: Path):
     result, _ = await _run(tmp_path, script)
     assert result.status == "completed"
     assert result.findings[0].evidence_refs == [good_ref]
+
+
+@pytest.mark.asyncio
+async def test_history_budget_exhaustion_labels_partial(tmp_path, monkeypatch):
+    """直查结果预算耗尽的 refusal 同样如实标注：partial/history_budget。"""
+    import quickquip.llm.history_investigation as investigation
+
+    monkeypatch.setattr(investigation, "SUB_DIRECT_HISTORY_BUDGET", 0)
+    archive, service, _ = _archive_with_history(tmp_path)
+    script = [
+        _FakeResponse(tool_calls=[LLMToolCall(
+            id="c1", name="search_group_history",
+            arguments_json=json.dumps({"terms": ["部署方案"]}),
+        )]),  # 预算 0：渲染层拒绝（额度已尽），refusal 置位
+        _FakeResponse(text=json.dumps({
+            "findings": [],
+            "unresolved": "结果预算耗尽，未能读取任何消息",
+        }, ensure_ascii=False)),
+    ]
+    result, _ = await _run(
+        tmp_path, script,
+        limits=InvestigationLimits(timeout_seconds=30, max_model_calls=4,
+                                   max_tool_calls=5),
+    )
+    assert result.status == "partial"
+    assert result.stop_reason == "history_budget"
+    assert "未能读取" in result.unresolved

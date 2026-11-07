@@ -409,6 +409,13 @@ def render_investigation_result(result, token_cap: int = INVESTIGATION_REPORT_TO
     if result.detail:
         footer_parts.append(result.detail)
     footer = "\n".join(footer_parts)
+    # 交接卫生（计入报告预算，紧预算时可被裁掉）：声明未决线索为可选，
+    # 压制外层以更高单 call 成本盲目接续补查——措辞放结果侧而非工具
+    # schema 侧，延迟面体量线不涨
+    footer += (
+        "\n（结论均附证据，可直接引用作答；「未决/建议后续」是可选线索，"
+        "事实足够时无需自动补查。）"
+    )
     kept, trimmed, footer = _trim_to_budget(lines, header, footer, token_cap)
     body = "\n".join([header, *kept, footer])
     if trimmed:

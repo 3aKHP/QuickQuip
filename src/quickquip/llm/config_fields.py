@@ -97,6 +97,7 @@ RANGES = {
     "tools.discovery_max_loaded_tools": (1, 64),
     "group_history.investigation_timeout_seconds": (1, 3600),
     "group_history.investigation_max_calls": (1, 32),
+    "group_history.investigation_tool_calls": (1, 128),
     "skills.script_timeout_ms": (1, MAX_SCRIPT_TIMEOUT_MS),
     "image_preprocessing.max_tokens": (80, c.MAX_IMAGE_PREPROCESSING_TOKENS),
     "daily_summary.summary_length_hint": (100, None),

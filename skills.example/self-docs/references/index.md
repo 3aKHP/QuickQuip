@@ -117,7 +117,7 @@
 - `docs/dev/adr/0024-directional-configuration-deployment.md` → `references/docs-dev-adr-0024-directional-configuration-deployment.md` — ADR-0024：工作副本与单向配置部署 ｜ 状态：Accepted ｜ 关键词：.qqconf/、.env、QUICKQUIP_DEPLOY_LOCATION=local|cloud、QUICKQUIP_DEPLOY_RUNTIME=source|docker、.config-staging/、refresh、push、pull、committed
 - `docs/dev/adr/0025-tracked-operations-programs.md` → `references/docs-dev-adr-0025-tracked-operations-programs.md` — ADR-0025：统一分发运维程序并分离生产配置 ｜ 状态：Accepted ｜ 关键词：scripts/deploy/、server/、legacy/、scripts/ops/、scripts/maintenance/、prod.example/、prod/、prod/hooks/deployment.sh、docker/Dockerfile.prod、.env
 - `docs/dev/adr/0026-conversation-owned-memory.md` → `references/docs-dev-adr-0026-conversation-owned-memory.md` — ADR-0026：由主对话模型维护会话记忆 ｜ 状态：Accepted
-- `docs/dev/adr/0027-history-investigation-executor.md` → `references/docs-dev-adr-0027-history-investigation-executor.md` — ADR-0027：群历史查询与专用调查执行器 ｜ 状态：Accepted ｜ 关键词：chat/history_query.py、get_group_msg_history、search_group_history、read_group_history、hr1.<归档UUID>.<行ID>、investigate_group_history、search_recent_messages、[group_history]
+- `docs/dev/adr/0027-history-investigation-executor.md` → `references/docs-dev-adr-0027-history-investigation-executor.md` — ADR-0027：群历史查询与专用调查执行器 ｜ 状态：Accepted ｜ 关键词：chat/history_query.py、get_group_msg_history、search_group_history、read_group_history、hr1.<归档UUID>.<行ID>、investigate_group_history、search_recent_messages、[group_history]、count_group_history、COUNT(*)
 - `docs/dev/adr/README.md` → `references/docs-dev-adr-readme.md` — 架构决策记录 ｜ 关键词：NNNN-short-title.md、Proposed、Accepted、Rejected、Superseded、status、superseded_by
 - `docs/dev/adr/template.md` → `references/docs-dev-adr-template.md` — ADR 模板 ｜ 关键词：NNNN-short-title.md
 

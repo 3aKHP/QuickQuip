@@ -261,6 +261,7 @@ LLM 按需检索本群归档历史的只读能力；默认关闭，群级开关�
 | `investigation_model` | 调查执行器专用模型；留空用渠道默认模型 | `""` |
 | `investigation_timeout_seconds` | 调查子任务总时限（1–3600 秒，含排队与报告） | `240` |
 | `investigation_max_calls` | 调查子任务模型调用数上限（1–32，最后一次预留给报告） | `10` |
+| `investigation_tool_calls` | 调查子任务内历史工具（搜索/阅读/计数）总次数上限（1–128；每轮可并行多个工具） | `30` |
 
 ### `settings.tools` — 工具白名单与按需发现（Tool Discovery）
 

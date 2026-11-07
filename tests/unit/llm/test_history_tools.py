@@ -782,3 +782,83 @@ def test_render_investigation_result_includes_receipt_evidence():
     assert "从未出现" in text
     assert "hr1c.deadbeef" in text
     assert "计数核验" in text
+
+
+# ── 工具帽配置接线与交接卫生（证无+预算修正 PR） ─────────────────────
+
+
+@pytest.mark.asyncio
+async def test_investigation_limits_read_configured_tool_calls(tmp_path, monkeypatch):
+    """max_tool_calls 来自 investigation_tool_calls 配置（默认 30，可覆盖）。"""
+    import quickquip.llm.history_investigation as investigation
+    from quickquip.llm.store import LLMStore
+
+    calls: list[dict] = []
+
+    class _Result:
+        status = "completed"
+        findings = []
+        unresolved = ""
+        suggested_followup = ""
+        evidence = {}
+        coverage_note = "归档覆盖：测试。"
+        stop_reason = "done"
+        elapsed_seconds = 1.0
+        model_calls = 1
+        tool_calls = 1
+        detail = ""
+
+    async def _fake_run(**kwargs):
+        calls.append(kwargs)
+        return _Result()
+
+    monkeypatch.setattr(investigation, "run_history_investigation", _fake_run)
+
+    from quickquip.chat.archive import ChatArchive
+    from quickquip.chat.history_query import HistoryQueryService
+    from quickquip.llm.config import GroupHistoryConfig
+
+    archive = ChatArchive(tmp_path / "a.db")
+    service = HistoryQueryService(archive)
+
+    # 默认值
+    config = _investigation_config()
+    host = _InvestigationHost(config, LLMStore(tmp_path / "d.db"), service)
+    await host._tool_investigate_group_history(
+        {"question": "q"}, _context(history=HistoryToolState())
+    )
+    assert calls[-1]["limits"].max_tool_calls == 30
+
+    # 显式覆盖
+    config2 = _investigation_config()
+    config2.group_history = GroupHistoryConfig(
+        enabled=True, investigation_tool_calls=7
+    )
+    host2 = _InvestigationHost(config2, LLMStore(tmp_path / "e.db"), service)
+    await host2._tool_investigate_group_history(
+        {"question": "q"}, _context(history=HistoryToolState())
+    )
+    assert calls[-1]["limits"].max_tool_calls == 7
+
+
+def test_prompts_teach_cross_session_followup_and_optional_leads():
+    """交接卫生：子任务提示词禁游标；报告渲染声明未决线索可选。"""
+    from quickquip.llm.history_investigation import InvestigationTask, _system_prompt
+    from quickquip.llm.history_tools import render_investigation_result
+
+    class _RecordingStub:
+        def coverage_note(self):
+            return "归档覆盖：测试。"
+
+    prompt = _system_prompt(_RecordingStub(), InvestigationTask(question="q"))
+    assert "不要写游标" in prompt
+    assert "另一个会话" in prompt
+    assert "hr1c" in prompt and "count_group_history" in prompt
+
+    from quickquip.llm.history_investigation import InvestigationFinding, InvestigationResult
+    report = render_investigation_result(InvestigationResult(
+        status="completed",
+        findings=[InvestigationFinding(claim="结论", evidence_refs=["hr1.deadbeef.1"])],
+        evidence={"hr1.deadbeef.1": "证据"},
+    ))
+    assert "可选线索" in report and "无需自动补查" in report
