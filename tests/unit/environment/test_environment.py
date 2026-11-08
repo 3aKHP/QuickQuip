@@ -203,3 +203,19 @@ def test_operation_reclassifies_a_new_key_after_provider_is_saved(store):
     assert store.execute('operation', {'id': result['id']})['changes'][0]['mode'] == 'credential'
     save(store, [{'name': 'NEW_KEY', 'action': 'replace', 'value': 'second'}], 'later')
     assert store.execute('operation', {'id': result['id']})['phase'] == 'superseded'
+
+
+def test_metadata_is_read_as_utf8_in_a_non_utf8_native_process(store):
+    import os
+    import subprocess
+    import sys
+    program = (
+        'from quickquip.environment.store import Store; '
+        f's=Store({str(store.root)!r}); '
+        "s.execute('changes', {'expected_version':s.execute('list')['version'], "
+        "'request_id':'locale', 'changes':[{'name':'PORT','action':'replace','value':'9999'}]}); "
+        "assert s.execute('operation', {'id':'locale'})['phase']=='saved'"
+    )
+    subprocess.run([sys.executable, '-c', program], check=True, env={
+        **os.environ, 'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0', 'LC_ALL': 'C',
+    })

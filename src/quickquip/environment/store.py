@@ -55,7 +55,7 @@ class Store:
 
     def _json(self, name, default):
         p = self.directory / name
-        return json.loads(p.read_text()) if p.exists() else default
+        return json.loads(p.read_text(encoding='utf-8')) if p.exists() else default
 
     def _own(self, path):
         if hasattr(os, 'geteuid') and os.geteuid() == 0 and self.path.exists():
@@ -120,7 +120,9 @@ class Store:
         directory.mkdir(parents=True, exist_ok=True, mode=0o700)
         with write_lock(directory.resolve()):
             marker = directory / 'maintenance.json'
-            if marker.exists() and not json.loads(marker.read_text()).get('allow_start', False):
+            if marker.exists() and not json.loads(
+                marker.read_text(encoding='utf-8')
+            ).get('allow_start', False):
                 raise EnvironmentError('Configuration installation is in progress')
             if (self.root / 'data/qqconf/active.json').exists():
                 raise EnvironmentError('Recover the interrupted configuration write first')
