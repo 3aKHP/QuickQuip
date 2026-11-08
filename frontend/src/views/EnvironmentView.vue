@@ -101,7 +101,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
       <button :disabled="busy || (reviewed && !password)" @click="submit">{{ reviewed ? '确认并保存' : '预览修改' }}</button>
     </div>
     <div v-if="operation" role="status">
-      <p>操作 {{ operation.id }}：已保存</p>
+      <p>操作 {{ operation.id }}：{{ operation.phase === 'superseded' ? '已被后续修改替代，以下为当前加载状态' : '已保存' }}</p>
       <p v-for="(states, name) in operation.states" :key="name">{{ name }}：<span v-for="(state, role) in states" :key="role">{{ role }} {{ stateLabel(state) }} </span></p>
       <p v-for="(consumer, role) in operation.consumers" :key="role">{{ role }}：{{ consumer && Date.now() / 1000 - consumer.updated_at < 20 ? '运行中' : '等待进程确认' }}</p>
     </div>

@@ -185,3 +185,13 @@ def test_startup_status_clears_after_new_boot_and_hides_comparison_proofs(store)
     assert next(row for row in public['variables']
                 if row['name'] == 'PORT')['states']['web'] == 'loaded'
     assert '_startup' not in json.dumps(public)
+
+
+def test_operation_reclassifies_a_new_key_after_provider_is_saved(store, monkeypatch):
+    from quickquip.environment import policy
+    result = save(store, [{'name': 'NEW_KEY', 'action': 'create', 'value': 'first'}])
+    assert result['changes'][0]['mode'] == 'restart'
+    monkeypatch.setattr(policy, 'provider_references', lambda root: {'NEW_KEY': ['new-provider']})
+    assert store.execute('operation', {'id': result['id']})['changes'][0]['mode'] == 'credential'
+    save(store, [{'name': 'NEW_KEY', 'action': 'replace', 'value': 'second'}], 'later')
+    assert store.execute('operation', {'id': result['id']})['phase'] == 'superseded'

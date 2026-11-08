@@ -156,9 +156,20 @@ class Store:
                 result = operations.get(body.get('id'))
                 if result is None:
                     raise EnvironmentError('Operation not found')
+                from quickquip.environment.policy import provider_references
+                references = provider_references(self.root)
+                rows = [{**row, 'mode': mode(row['name'], references),
+                         'references': references.get(row['name'], [])}
+                        for row in result['changes']]
+                current = self._values(raw, state)
+                superseded = any(
+                    digest != self._fingerprint(state, name in current, current.get(name, ''))
+                    for name, digest in result.get('_desired', {}).items()
+                )
                 return {**{k: v for k, v in result.items() if not k.startswith('_')},
+                        'changes': rows, 'phase': 'superseded' if superseded else result['phase'],
                         'consumers': self._consumers(),
-                        'states': self._statuses(state, raw, result['changes'])}
+                        'states': self._statuses(state, raw, rows)}
             if action not in ('preview', 'changes'):
                 raise EnvironmentError('Unknown environment operation')
             if action == 'changes':
@@ -191,6 +202,12 @@ class Store:
                 state['salt'].encode(),
                 json.dumps(body.get('changes', []), sort_keys=True).encode(),
                 hashlib.sha256).hexdigest()}
+            desired = read_environment(candidate.decode())
+            operations[request_id]['_desired'] = {
+                row['name']: self._fingerprint(
+                    state, row['name'] in desired, desired.get(row['name'], '')
+                ) for row in changed
+            }
             durable_write(self.directory / 'candidate.env', candidate)
             self._own(self.directory / 'candidate.env')
             self._write('active.json', {'state': state, 'operations': operations,
