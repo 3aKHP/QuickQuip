@@ -187,11 +187,19 @@ def test_startup_status_clears_after_new_boot_and_hides_comparison_proofs(store)
     assert '_startup' not in json.dumps(public)
 
 
-def test_operation_reclassifies_a_new_key_after_provider_is_saved(store, monkeypatch):
-    from quickquip.environment import policy
+def test_operation_reclassifies_a_new_key_after_provider_is_saved(store):
+    from quickquip.llm.config_service import ConfigService
     result = save(store, [{'name': 'NEW_KEY', 'action': 'create', 'value': 'first'}])
     assert result['changes'][0]['mode'] == 'restart'
-    monkeypatch.setattr(policy, 'provider_references', lambda root: {'NEW_KEY': ['new-provider']})
+    service = ConfigService(store.root / 'config/managed/config.db')
+    service.initialize()
+    draft = service.read()
+    document = draft['document']
+    document['providers'] = [{
+        'id': 'new-provider', 'protocol': 'openai', 'base_url': 'https://example.test/v1',
+        'api_key_env': 'NEW_KEY', 'default_model': 'test', 'models': [{'model': 'test'}],
+    }]
+    service.replace(document, draft['revision'])
     assert store.execute('operation', {'id': result['id']})['changes'][0]['mode'] == 'credential'
     save(store, [{'name': 'NEW_KEY', 'action': 'replace', 'value': 'second'}], 'later')
     assert store.execute('operation', {'id': result['id']})['phase'] == 'superseded'
