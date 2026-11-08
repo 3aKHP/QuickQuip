@@ -38,7 +38,7 @@ function mark(name: string, action: Edit['action']) {
 }
 function add() {
   const name = newName.value.trim()
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || rows.value.some(r => r.name === name)) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || listing.value?.variables.some(r => r.name === name) || Boolean(edits[name])) {
     error.value = '变量名无效或已存在'; return
   }
   edits[name] = { name, action: 'create', value: '' }; newName.value = ''; reviewed.value = false
@@ -83,6 +83,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
 <template>
   <section class="environment-panel">
     <h1>环境变量</h1>
+    <fieldset :disabled="busy" :aria-busy="busy">
     <p>管理根 .env。所有已有值均不回显；空白输入框表示保持原值。启动参数保存后需人工重启。</p>
     <p v-if="error" role="alert">{{ error }} <button @click="refresh">刷新状态（保留编辑）</button></p>
     <input v-model="search" aria-label="搜索变量" placeholder="搜索变量名">
@@ -103,6 +104,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
       <label v-if="reviewed">管理员当前口令 <input v-model="password" type="password" autocomplete="current-password"></label>
       <button :disabled="busy || (reviewed && !password)" @click="submit">{{ reviewed ? '确认并保存' : '预览修改' }}</button>
     </div>
+    </fieldset>
     <div v-if="operation" role="status">
       <p>操作 {{ operation.id }}：{{ operation.phase === 'superseded' ? '已被后续修改替代，以下为当前加载状态' : '已保存' }}</p>
       <p v-for="(states, name) in operation.states" :key="name">{{ name }}：<span v-for="(state, role) in states" :key="role">{{ role }} {{ stateLabel(state) }} </span></p>
@@ -113,6 +115,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
 
 <style scoped>
 .environment-panel { padding: 1.5rem; overflow-x: auto; }
+fieldset { border: 0; padding: 0; min-width: 0; }
 table { width: 100%; margin-block: 1rem; border-collapse: collapse; }
 th, td { text-align: left; padding: .7rem; border-bottom: 1px solid var(--border-color, #8884); }
 textarea { -webkit-text-security: disc; padding: .5rem; }

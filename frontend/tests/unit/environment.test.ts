@@ -45,3 +45,23 @@ it('retains entered values after a conflict and clears them only after confirmed
   expect((view.find('textarea[aria-label="TEST_API_KEY 新值"]').element as HTMLInputElement).value).toBe('new-secret')
   view.unmount()
 })
+
+it('locks edits while the submitted snapshot is being saved', async () => {
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  await view.find('textarea[aria-label="TEST_API_KEY 新值"]').setValue('new\nsecret')
+  await view.findAll('button').find(b => b.text() === '预览修改')!.trigger('click')
+  await flushPromises()
+  expect(api.previewEnvironment).toHaveBeenLastCalledWith('v1', [
+    { name: 'TEST_API_KEY', action: 'replace', value: 'new\nsecret' },
+  ])
+  await view.find('input[autocomplete="current-password"]').setValue('password')
+  let finish!: (value: api.Operation) => void
+  vi.mocked(api.saveEnvironment).mockReturnValueOnce(new Promise(resolve => { finish = resolve }))
+  await view.findAll('button').find(b => b.text() === '确认并保存')!.trigger('click')
+  expect(view.find('fieldset').attributes('disabled')).toBeDefined()
+  finish({ id: 'saved', phase: 'saved', version: 'v2', changes: [], consumers: {} })
+  await flushPromises()
+  expect((view.find('textarea[aria-label="TEST_API_KEY 新值"]').element as HTMLTextAreaElement).value).toBe('')
+  view.unmount()
+})
