@@ -218,4 +218,5 @@ def test_metadata_is_read_as_utf8_in_a_non_utf8_native_process(store):
     )
     subprocess.run([sys.executable, '-c', program], check=True, env={
         **os.environ, 'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0', 'LC_ALL': 'C',
+        'PYTHONPATH': os.pathsep.join(map(str, sys.path)),
     })
