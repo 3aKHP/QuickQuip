@@ -36,3 +36,5 @@ Copy-Item prod.example/docker-compose.yml prod/docker-compose.yml
 | `scripts/ops/` | 检查登录状态、巡检通知和宿主机指标采集 |
 
 发布命令、SSH 设置、存储迁移和恢复步骤见[部署工具指南](../scripts/deploy/README.md)。安装教程见[云端 Docker 部署](../docs/admin/deployment.md)。配置编辑与同步见[qqconf](../docs/admin/config-workspace.md)和[qqsync](../docs/admin/config-sync.md)。
+
+模板中的 `env-agent` 提供环境变量管理与凭据热更新。首次接入和日常操作见[环境变量管理](../docs/admin/environment.md)。agent 独占部署根目录挂载，Bot 与 Web 分别使用只读能力和管理能力的私有通信卷。

@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 import re
 
-from dotenv import dotenv_values
+from quickquip.common.dotenv import read_environment
 
 from quickquip.configuration.errors import ConfigError
 
@@ -27,7 +27,8 @@ class Deployment:
 
 
 def read(root, *, required=False):
-    values = dotenv_values(Path(root) / ".env")
+    path = Path(root) / ".env"
+    values = read_environment(path.read_text(encoding="utf-8")) if path.exists() else {}
     modes = []
     for suffix, choices in (("LOCATION", ("local", "cloud")), ("RUNTIME", ("source", "docker"))):
         key = "QUICKQUIP_DEPLOY_" + suffix

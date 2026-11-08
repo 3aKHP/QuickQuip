@@ -9,7 +9,7 @@ import errno
 from dataclasses import asdict, replace
 from importlib.metadata import PackageNotFoundError, version
 import logging
-import os
+from quickquip.common.runtime_environment import get as runtime_env_get
 import time
 import uuid
 
@@ -96,7 +96,7 @@ class ConfigRuntimeWorker:
         required.update(environment_references(self.service.read("draft")["document"]))
         core_ready = not runtime.config.load_error and runtime.storage_available
         return {
-            "environment": [{"name": name, "configured": bool(os.getenv(name))}
+            "environment": [{"name": name, "configured": bool(runtime_env_get(name))}
                             for name in sorted(required)],
             "core": {"state": "ready" if core_ready else "failed"},
             "mcp": {

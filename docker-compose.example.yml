@@ -11,6 +11,24 @@
 name: quickquip
 
 services:
+  env-agent:
+    image: ghcr.io/3akhp/quickquip:latest
+    command: ["python", "-m", "quickquip.environment.transport"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(socket.AF_UNIX); s.connect('/run/quickquip-environment/control.sock'); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    environment:
+      QUICKQUIP_ENV_ROOT: /host/project
+      QUICKQUIP_ENV_SOCKET: /run/quickquip-environment/control.sock
+      QUICKQUIP_ENV_WRITE_SOCKET: /run/quickquip-environment-write/control.sock
+    volumes:
+      - environment-write:/run/quickquip-environment-write
+      - .:/host/project
+      - environment-control:/run/quickquip-environment
+    restart: unless-stopped
+
   # ── QQ 协议适配器（LLBot）───────────────────────────────────────────────
   # 参考：https://github.com/LLOneBot/LuckyLilliaBot
   # 登录态保存在 llbot-qq/，切勿丢失否则 QQ 视作新设备。
@@ -67,6 +85,8 @@ services:
     container_name: quickquip
     init: true
     depends_on:
+      env-agent:
+        condition: service_healthy
       llbot:
         condition: service_started
       searxng:
@@ -76,6 +96,7 @@ services:
     env_file:
       - .env
     environment:
+      QUICKQUIP_ENV_SOCKET: /run/quickquip-environment/control.sock
       QUICKQUIP_MANAGED_CONTAINER: "1"
       DRIVER: "${DRIVER:-~fastapi+~websockets}"
       HOST: "0.0.0.0"
@@ -85,6 +106,7 @@ services:
       SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
     shm_size: "1gb"
     volumes:
+      - environment-control:/run/quickquip-environment
       - ./data:/app/data
       - ./config:/app/config:ro
       - ./config/managed:/app/config/managed
@@ -109,6 +131,8 @@ services:
     init: true
     command: ["python", "-u", "web_api.py"]
     depends_on:
+      env-agent:
+        condition: service_healthy
       searxng:
         condition: service_started
       config-init:
@@ -116,6 +140,8 @@ services:
     env_file:
       - .env
     environment:
+      QUICKQUIP_ENV_SOCKET: /run/quickquip-environment/control.sock
+      QUICKQUIP_ENV_WRITE_SOCKET: /run/quickquip-environment-write/control.sock
       QUICKQUIP_MANAGED_CONTAINER: "1"
       WEB_ADMIN_HOST: "0.0.0.0"
       WEB_ADMIN_PORT: "5104"
@@ -123,6 +149,8 @@ services:
     ports:
       - "127.0.0.1:5104:5104"
     volumes:
+      - environment-write:/run/quickquip-environment-write
+      - environment-control:/run/quickquip-environment
       - ./data:/app/data
       - ./config:/app/config
       # 群友身份（同上，可选）：
@@ -134,4 +162,6 @@ services:
     restart: unless-stopped
 
 volumes:
+  environment-write:
+  environment-control:
   searxng-cache:

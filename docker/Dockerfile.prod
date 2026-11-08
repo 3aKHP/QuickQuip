@@ -17,7 +17,7 @@ RUN set -eux; \
 
 COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
 
-COPY bot.py .
+COPY bot.py .env.example ./
 COPY web_api.py .
 COPY pyproject.toml .
 COPY scripts/maintenance/backfill_chat_archive.py scripts/maintenance/backfill_record_identities.py scripts/maintenance/sync_preset_skills.py scripts/maintenance/reset_niuniu_lengths.py scripts/maintenance/

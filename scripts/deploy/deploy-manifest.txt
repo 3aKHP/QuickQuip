@@ -1,4 +1,5 @@
 .dockerignore
+.env.example
 bot.py
 web_api.py
 pyproject.toml

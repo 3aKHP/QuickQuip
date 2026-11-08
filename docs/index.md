@@ -90,3 +90,5 @@ QuickQuip 是一个基于 NoneBot2 + OneBot V11 的规则驱动优先 QQ 群聊�
 | [../README.md](../README.md) | 项目入口——功能亮点与快速开始 |
 | [../ROADMAP.md](../ROADMAP.md) | 演进路线——候选计划、待调研问题与中长期方向 |
 | [../CHANGELOG.md](../CHANGELOG.md) | 变更记录——按 Keep a Changelog 规范维护 |
+
+环境变量的新增、覆写、删除与热更新见[环境变量管理](admin/environment.md)。

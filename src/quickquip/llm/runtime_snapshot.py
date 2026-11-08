@@ -193,15 +193,18 @@ class RuntimeSnapshotMixin:
     @contextmanager
     def configuration_view(self, snapshot):
         """Prepare resources or scheduler descriptions with an explicit view."""
-        previous = current_snapshot(self)
-        token = _LEASE.set((self, snapshot))
-        tools_token = _TASK_TOOLS.set(None) if previous is not snapshot else None
-        try:
-            yield snapshot
-        finally:
-            _LEASE.reset(token)
-            if tools_token is not None:
-                _TASK_TOOLS.reset(tools_token)
+        from quickquip.common.runtime_environment import credential_scope
+
+        with credential_scope():
+            previous = current_snapshot(self)
+            token = _LEASE.set((self, snapshot))
+            tools_token = _TASK_TOOLS.set(None) if previous is not snapshot else None
+            try:
+                yield snapshot
+            finally:
+                _LEASE.reset(token)
+                if tools_token is not None:
+                    _TASK_TOOLS.reset(tools_token)
 
     @asynccontextmanager
     async def configuration_lease(self):

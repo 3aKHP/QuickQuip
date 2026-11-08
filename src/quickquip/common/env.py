@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from dotenv import load_dotenv
+from quickquip.common.dotenv import load_dotenv
 
 
 def _find_project_root() -> Path:

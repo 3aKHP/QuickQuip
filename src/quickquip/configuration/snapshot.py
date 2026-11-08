@@ -5,11 +5,10 @@ from dataclasses import asdict
 import json
 import os
 import sqlite3
-from io import StringIO
 from pathlib import Path
 import tempfile
 
-from dotenv import dotenv_values
+from quickquip.common.dotenv import read_environment
 
 from quickquip.common.config_utils import expansion_environment
 from quickquip.configuration.errors import ConfigError
@@ -93,7 +92,7 @@ def validate(snapshot):
         environment.update(
             {
                 key: value
-                for key, value in dotenv_values(stream=StringIO(raw.decode("utf-8"))).items()
+                for key, value in read_environment(raw.decode("utf-8")).items()
                 if value is not None
             }
         )
