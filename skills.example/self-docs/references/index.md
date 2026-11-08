@@ -49,6 +49,7 @@
 - `docs/admin/config-workspace.md` → `references/docs-admin-config-workspace.md` — 用 qqconf 编辑本地配置 ｜ 关键词：config/managed/config.db、.env、qqconf、.config-workspace/、unpack、refresh、pack、python -m quickquip.config_workspace、--root /path/to/QuickQuip、--workspace /path/to/workspace
 - `docs/admin/configuration.md` → `references/docs-admin-configuration.md` — QuickQuip 配置参考 ｜ 关键词：.env、config/managed/config.db、qqconf pack、local、cloud、qqsync push、generation.toml、awakening.toml、chat_rules.toml、DRIVER
 - `docs/admin/deployment.md` → `references/docs-admin-deployment.md` — QuickQuip 云端 Docker 部署指南 ｜ 关键词：deploy-v4、local、cloud、source、docker、prod.example/、prod/、scripts/deploy/、scripts/ops/、.env
+- `docs/admin/environment.md` → `references/docs-admin-environment.md` — 管理环境变量 ｜ 关键词：.env、${变量}、TIEBA_FORUM_KEYWORD、TIEBA_FORUM_KEYWORDS、env-agent、data/environment/、qqsync pull、qqconf unpack
 - `docs/admin/game-config.md` → `references/docs-admin-game-config.md` — 游戏系统管理 ｜ 关键词：config/games.toml、/game list、/game stop、/rules、/disable <rule_name>、/enable <rule_name>、config/games.toml.example、[economy]、sign_base_gold、10
 - `docs/admin/global-admins.md` → `references/docs-admin-global-admins.md` — 全局管理员 ｜ 关键词：config/admins.toml、config/admins.toml.example、ADMIN_TRACE、registry_loaded、global_admin_unlock、SUPERUSERS
 - `docs/admin/installation.md` → `references/docs-admin-installation.md` — 安装与部署方式 ｜ 关键词：.env、start.bat、ONEBOT_WS_URLS、3001、ONEBOT_ACCESS_TOKEN、http://127.0.0.1:5104/ops/、WEB_ADMIN_PASSWORD、deploy-v4、Copy-Item .env.example .env、QQ_ACCOUNT
@@ -118,6 +119,7 @@
 - `docs/dev/adr/0025-tracked-operations-programs.md` → `references/docs-dev-adr-0025-tracked-operations-programs.md` — ADR-0025：统一分发运维程序并分离生产配置 ｜ 状态：Accepted ｜ 关键词：scripts/deploy/、server/、legacy/、scripts/ops/、scripts/maintenance/、prod.example/、prod/、prod/hooks/deployment.sh、docker/Dockerfile.prod、.env
 - `docs/dev/adr/0026-conversation-owned-memory.md` → `references/docs-dev-adr-0026-conversation-owned-memory.md` — ADR-0026：由主对话模型维护会话记忆 ｜ 状态：Accepted
 - `docs/dev/adr/0027-history-investigation-executor.md` → `references/docs-dev-adr-0027-history-investigation-executor.md` — ADR-0027：群历史查询与专用调查执行器 ｜ 状态：Accepted ｜ 关键词：chat/history_query.py、get_group_msg_history、search_group_history、read_group_history、hr1.<归档UUID>.<行ID>、investigate_group_history、search_recent_messages、[group_history]、count_group_history、COUNT(*)
+- `docs/dev/adr/0028-write-only-environment-management.md` → `references/docs-dev-adr-0028-write-only-environment-management.md` — ADR-0028：环境变量只写管理与运行时凭据快照 ｜ 状态：Accepted ｜ 关键词：.env
 - `docs/dev/adr/README.md` → `references/docs-dev-adr-readme.md` — 架构决策记录 ｜ 关键词：NNNN-short-title.md、Proposed、Accepted、Rejected、Superseded、status、superseded_by
 - `docs/dev/adr/template.md` → `references/docs-dev-adr-template.md` — ADR 模板 ｜ 关键词：NNNN-short-title.md
 

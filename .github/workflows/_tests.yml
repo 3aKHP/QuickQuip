@@ -108,3 +108,19 @@ jobs:
 
       - name: Build
         run: pnpm build
+
+  environment-windows:
+    name: Environment management (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: requirements*.txt
+      - name: Install dependencies
+        run: python -m pip install -r requirements.txt -r requirements-dev.txt
+      - name: Validate native environment transactions and API
+        run: python -m pytest -q tests/unit/environment tests/unit/web/test_environment_routes.py tests/unit/common/test_env.py tests/unit/common/test_config_utils.py

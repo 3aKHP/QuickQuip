@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 import re
 from collections.abc import Mapping
 from contextlib import contextmanager
@@ -47,7 +46,8 @@ def _expand_env_string(value: str) -> str:
         key = match.group(1)
         default = match.group(2)
         environment = _EXPANSION_ENVIRONMENT.get()
-        resolved = os.getenv(key) if environment is None else environment.get(key)
+        from quickquip.common.runtime_environment import get
+        resolved = get(key) if environment is None else environment.get(key)
         if resolved is None:
             return default or ""
         return resolved

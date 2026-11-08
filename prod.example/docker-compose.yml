@@ -1,6 +1,24 @@
 name: quickquip
 
 services:
+  env-agent:
+    image: quickquip-app:${QUICKQUIP_RELEASE:-latest}
+    command: ["python", "-m", "quickquip.environment.transport"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; s=socket.socket(socket.AF_UNIX); s.connect('/run/quickquip-environment/control.sock'); s.close()"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    environment:
+      QUICKQUIP_ENV_ROOT: /host/project
+      QUICKQUIP_ENV_SOCKET: /run/quickquip-environment/control.sock
+      QUICKQUIP_ENV_WRITE_SOCKET: /run/quickquip-environment-write/control.sock
+    volumes:
+      - environment-write:/run/quickquip-environment-write
+      - ${QUICKQUIP_ROOT:-..}:/host/project
+      - environment-control:/run/quickquip-environment
+    restart: unless-stopped
+
   # 运维模板使用外部 SearXNG，通过 QUICKQUIP_SEARXNG_BASE_URL 配置其地址。
   # 面向终端用户的开箱即用自带 searxng 见仓库根目录 docker-compose.example.yml。
   llbot:
@@ -33,10 +51,14 @@ services:
         PLAYWRIGHT_BASE_IMAGE: "${PLAYWRIGHT_BASE_IMAGE:-m.daocloud.io/mcr.microsoft.com/playwright/python:v1.58.0-noble}"
     container_name: quickquip
     depends_on:
-      - llbot
+      env-agent:
+        condition: service_healthy
+      llbot:
+        condition: service_started
     env_file:
       - ${QUICKQUIP_ENV_FILE:-../.env}
     environment:
+      QUICKQUIP_ENV_SOCKET: /run/quickquip-environment/control.sock
       TZ: "${TZ:-Asia/Shanghai}"
       DRIVER: "${DRIVER:-~fastapi+~websockets}"
       HOST: "0.0.0.0"
@@ -48,6 +70,7 @@ services:
       QUICKQUIP_MANAGED_CONTAINER: "1"
     shm_size: "1gb"
     volumes:
+      - environment-control:/run/quickquip-environment
       - ${QUICKQUIP_ROOT:-..}/data:/app/data
       - ../config:/app/config:ro
       - ${QUICKQUIP_ROOT:-..}/config/managed:/app/config/managed
@@ -68,7 +91,12 @@ services:
     command: ["python", "-u", "web_api.py"]
     env_file:
       - ${QUICKQUIP_ENV_FILE:-../.env}
+    depends_on:
+      env-agent:
+        condition: service_healthy
     environment:
+      QUICKQUIP_ENV_SOCKET: /run/quickquip-environment/control.sock
+      QUICKQUIP_ENV_WRITE_SOCKET: /run/quickquip-environment-write/control.sock
       TZ: "${TZ:-Asia/Shanghai}"
       WEB_ADMIN_HOST: "0.0.0.0"
       WEB_ADMIN_PORT: "5104"
@@ -78,6 +106,8 @@ services:
     ports:
       - "127.0.0.1:5104:5104"
     volumes:
+      - environment-write:/run/quickquip-environment-write
+      - environment-control:/run/quickquip-environment
       - ${QUICKQUIP_ROOT:-..}/data:/app/data
       - ../config:/app/config
       - ${QUICKQUIP_ROOT:-..}/config/managed:/app/config/managed
@@ -88,3 +118,7 @@ services:
       # 部署根共享 Skill 目录：Skill 页在线安装/编辑/预置同步在此落盘。
       - ${QUICKQUIP_ROOT:-..}/skills:/app/skills
     restart: unless-stopped
+
+volumes:
+  environment-write:
+  environment-control:

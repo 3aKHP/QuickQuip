@@ -14,7 +14,6 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 import json
 import logging
-import os
 import re
 import time
 from typing import Any
@@ -439,6 +438,15 @@ class BaseProviderClient:
         self, config: ProviderConfig, retry_policy: RetryPolicy | None = None,
         *, single_dispatch: bool = False,
     ):
+        from dataclasses import replace
+        from quickquip.common.runtime_environment import snapshot
+        from quickquip.common.config_utils import expansion_environment, expand_env_value
+
+        self._credentials = snapshot()
+        with expansion_environment(self._credentials):
+            config = replace(
+                config, headers=expand_env_value(config.header_templates or config.headers)
+            )
         self.config = config
         self.single_dispatch = single_dispatch
         self.retry_policy = retry_policy or RetryPolicy(
@@ -474,7 +482,7 @@ class BaseProviderClient:
         return kwargs
 
     def _get_api_key(self) -> str:
-        api_key = os.getenv(self.config.api_key_env, "").strip()
+        api_key = self._credentials.get(self.config.api_key_env, "").strip()
         if not api_key:
             raise LLMProviderError(
                 f"环境变量 {self.config.api_key_env} 未设置，provider {self.config.id} 无法调用"

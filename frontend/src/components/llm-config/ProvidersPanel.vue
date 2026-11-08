@@ -82,6 +82,7 @@
             <SettingField label="认证方式" :model-value="String(current.auth_method ?? 'api_key')" :options="authOptions" @update:model-value="patch({ auth_method: String($event) })" />
             <SettingField class="form-grid__wide" label="API 地址" :model-value="String(current.base_url ?? '')" :hint="L.base_url.hint" :placeholder="L.base_url.placeholder" @update:model-value="patch({ base_url: String($event) })" />
             <div class="form-grid__wide api-key-row">
+              <a :href="`#/environment?variable=${encodeURIComponent(String(current.api_key_env ?? ''))}`" target="_blank" rel="noopener">新增或覆写密钥（打开环境变量管理）</a>
               <SettingField label="密钥环境变量" :model-value="String(current.api_key_env ?? '')" :hint="L.api_key_env.hint" :placeholder="L.api_key_env.placeholder" @update:model-value="patch({ api_key_env: String($event) })" />
               <span v-if="keyEnvState" class="env-badge" :class="`env-badge--${keyEnvState.kind}`">{{ keyEnvState.text }}</span>
             </div>

@@ -1,6 +1,6 @@
 """Local-only runtime prerequisites, shared by Bot application and deployment planning."""
 
-import os
+from quickquip.common.runtime_environment import get as runtime_env_get
 from quickquip.llm.config_document import resolve_model_provider, environment_references
 from quickquip.llm.config_errors import ConfigError
 
@@ -74,7 +74,7 @@ def validate_runtime_configuration(config, document, *, environment=None):
     missing = [
         name
         for name in environment_references({"providers": active_providers})
-        if not (os.getenv(name) if environment is None else environment.get(name))
+        if not (runtime_env_get(name) if environment is None else environment.get(name))
     ]
     if missing:
         raise ConfigError(

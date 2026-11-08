@@ -246,6 +246,7 @@ class ProviderConfig:
     api_key_env: str
     default_model: str
     models: list[str]
+    header_templates: dict[str, str] = field(default_factory=dict, repr=False)
     enabled: bool = True  # false = 暂时禁用：不展示、不探活、cascade 跳过、拒绝切换
     client_fingerprint: str = "default"
     fingerprint_runtime: FingerprintRuntime | None = None

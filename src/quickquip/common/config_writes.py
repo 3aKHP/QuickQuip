@@ -33,6 +33,11 @@ def maintenance_owner(token: str):
 
 
 def check_writable(data_dir: Path = DATA_DIR) -> None:
+    env_recovery = Path(data_dir) / "environment" / "active.json"
+    if env_recovery.exists() and _OWNER.get() != "environment":
+        raise ConfigurationBusy(
+            "Interrupted environment write; open environment management to recover"
+        )
     recovery = Path(data_dir) / "qqconf" / "active.json"
     if recovery.exists():
         state = json.loads(recovery.read_text(encoding="utf-8"))

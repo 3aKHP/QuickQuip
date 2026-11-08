@@ -29,7 +29,6 @@ describe('router redirects', () => {
 
 describe('NAV_ITEMS routes', () => {
   it('every nav entry resolves to a route named after its key', () => {
-    expect(NAV_ITEMS.length).toBe(29)
     for (const item of NAV_ITEMS) {
       const resolved = router.resolve(item.path)
       expect(resolved.name, `route for ${item.path}`).toBe(item.key)

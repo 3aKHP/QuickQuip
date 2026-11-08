@@ -7,7 +7,7 @@ import time
 import urllib.error
 import urllib.request
 
-from dotenv import dotenv_values
+from quickquip.common.dotenv import read_environment
 
 from quickquip.configuration import process_control as control
 from quickquip.configuration.errors import ConfigError
@@ -93,7 +93,7 @@ class Native:
             time.sleep(0.1)
 
     def _web_ready(self):
-        values = dotenv_values(self.root / ".env")
+        values = read_environment((self.root / ".env").read_text(encoding="utf-8"))
         host = values.get("WEB_ADMIN_HOST") or "127.0.0.1"
         if host in ("0.0.0.0", "::"):
             host = "127.0.0.1"

@@ -35,6 +35,7 @@ PROVIDER_FIXED = {
     "enabled",
     "client_fingerprint",
     "fingerprint_runtime",
+    "header_templates",
     "headers",
     "fallback_urls",
     "proxy",

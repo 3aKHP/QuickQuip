@@ -51,6 +51,8 @@
 | [ADR-0017](0017-preset-skill-distribution.md) | 保留可选 Skill 副本并显式检测和同步漂移 | Accepted | — |
 | [ADR-0018](0018-mcp-result-normalization.md) | 将 MCP 结果归一化为受控内部内容 | Accepted | — |
 
+| [ADR-0028](0028-write-only-environment-management.md) | 环境变量只写管理与运行时凭据快照 | Accepted | — |
+
 ## 何时记录
 
 影响模块依赖、状态所有权、持久化、跨进程协作、协议兼容或后续开发约束的重要选择，使用 ADR 保留依据。局部实现和修复在 PR 中说明。提案可以先在 Issue 讨论，决定成形后关联 ADR 与实现变更。

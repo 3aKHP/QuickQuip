@@ -26,6 +26,9 @@ def main():
         install_stdlib_bridge()
         load_root_env_file()
         require_fresh_layout(PROJECT_ROOT)
+        from quickquip.environment.bootstrap import start as start_environment
+
+        start_environment("bot")
         nonebot.init()
         driver = nonebot.get_driver()
         driver.register_adapter(OneBotV11Adapter)

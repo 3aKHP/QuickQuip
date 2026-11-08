@@ -605,6 +605,7 @@ def compile_document(
         append = values.get("style_overrides", "")
         fixed.update(values)
         provider = c.ProviderConfig(**fixed, models=[m["model"] for m in raw["models"]])
+        provider.header_templates = deepcopy(raw["headers"])
         provider.fingerprint_runtime = FingerprintRuntime(
             resolve_profile(provider.client_fingerprint, provider.protocol, directory),
             config.runtime.client_cluster, directory.parent / "data",
