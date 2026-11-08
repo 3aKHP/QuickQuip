@@ -70,7 +70,10 @@ onMounted(() => {
   }); window.addEventListener('beforeunload', guard)
   timer = setInterval(async () => {
     if (operation.value) {
-      try { operation.value = await getEnvironmentOperation(operation.value.id) } catch (e) { error.value = String(e) }
+      try {
+        operation.value = await getEnvironmentOperation(operation.value.id)
+        if (!changes.value.length) await refresh()
+      } catch (e) { error.value = String(e) }
     }
   }, 5000)
 })
