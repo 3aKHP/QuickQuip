@@ -240,7 +240,7 @@ api_key_env = "  PADDED_KEY  "
     assert padded['relations'][0]['name_kind'] == 'configured_name'
     assert padded['relations'][0]['raw_expression'] == 'PADDED_KEY'
     assert padded['relations'][0]['field_path'].endswith('.api_key_env')
-    assert [row['name'] for row in result['directory']] == ['PADDED_KEY']
+    assert [row['name'] for row in result['directory']].count('PADDED_KEY') == 1
 
 
 def test_disabled_models_do_not_report_next_task_activation(tmp_path):

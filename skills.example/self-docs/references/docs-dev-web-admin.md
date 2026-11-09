@@ -78,9 +78,13 @@
 
 `taxonomy` 提供稳定的领域/小组 ID 和显示名。每个 `directory` 项按变量名唯一归并，保留旧 `assigned/mode/references/warning/states`，并增加 `groups`、`relations`、`sources` 与 `evidence_flags`。根文件未定义但已被配置引用的变量也会进入目录，其 `states` 为空；它们不会进入旧 `variables`，也不会获得伪造的进程状态。
 
-每条消费关系记录组件、对象 ID、原始字段路径、`config_scope=draft/published/file`、声明的 `enabled/required`（无法确定时为 `null`）、名称类型、源变量名、目标服务/类型/名称、解析与传递方式，以及 `required_action`。草稿关系使用 `publish`；已发布 LLM 凭据及按任务展开的参数使用 `next_task`；需要重新编译并重建资源的关系使用 `apply`；generation 进程环境关系使用 `restart_or_recreate`。`observation=not_observed` 表示没有逐消费者回执，Bot/Web 的旧 `states` 只描述进程快照或启动值比较。
+每条消费关系记录组件、对象 ID、原始字段路径、`config_scope=draft/published/file/code/template`、声明的 `enabled/required`（无法确定时为 `null`）、名称类型、源变量名、目标服务/类型/名称、解析与传递方式，以及 `required_action`。草稿关系使用 `publish`；已发布 LLM 凭据及按任务展开的参数使用 `next_task`；需要重新编译并重建资源的关系使用 `apply`；generation 进程环境关系使用 `restart_or_recreate`。`observation=not_observed` 表示没有逐消费者回执，Bot/Web 的旧 `states` 只描述进程快照或启动值比较。
 
-`sources` 记录 `llm_config` 或 `generation_file` 的来源类型、生命周期、原始路径和解析上下文。`raw_expression` 只保留变量名或 `${NAME}` 规范 token；默认值原文、完整 Header、URL、配置值和展开结果均不进入响应。只有显式声明的凭据变量名和插值引用会进入目录；请求体、子进程环境等嵌套结构中的同名普通字面量不会被当作根环境变量引用。目录投影读取原始草稿/已发布文档及 generation 配置，但不启动运行时、MCP 连接、探活或传输层，也不把任意进程环境名称导入目录。
+除动态配置引用外，目录合并固定名称目录与打包模板证据：内置开关、贴吧、Trace、搜索、部署连接、NoneBot/OneBot 字段（含 `ONEBOT_V11_*` 别名，`alias_of` 指向规范名）与编排内部项。每项含 `description`、`value_type`、按 Store 存在性规则计算的 `allowed_actions`（活跃定义为 `replace/empty/delete`；未定义或带删除标记且允许根创建为 `create`；未定义内部项为空），以及由根文件解析结果与删除标记派生的 `definition`（`present`、`value_state=bare/empty/nonempty/missing`、`managed_literal`、`deletion_marker`、`conflict`）。定义与删除标记冲突时目录保留两侧状态并按 Store 规则要求 `create`；此时任何写入仍被现有解析拒绝，需先解决冲突。`evidence_flags` 标注 `internal`（编排/进程内部，未定义时不提供根创建）、`example_only`（仅出现在 `.env.example` 且无任何消费证据；出现实际引用后自动清除）与 `computed_name`。
+
+打包的 `prod.example/docker-compose.yml`、`docker-compose.example.yml` 与公开 Dockerfile 仅做静态声明解析：映射（`override_kind=compose_mapped`）、固定覆盖（`compose_static`，动作为 `edit_compose_then_recreate`）、构建参数（`rebuild_image`）与镜像 ARG 以 `evidence_scope=compose_template/code` 记录来源和目标名。模板默认值只反映为 `default_present` 布尔；真实部署的私有 override、运行容器当前值与加载状态一律 `not_observed`，目录不执行 Compose、不读取 `prod/` 或宿主进程环境。
+
+`sources` 记录 `llm_config`、`generation_file`、`code`、`compose`、`compose_interpolation`、`dockerfile` 或 `root_env_file` 的来源类型、生命周期、原始路径和解析上下文。`raw_expression` 只保留变量名或 `${NAME}` 规范 token；默认值原文、完整 Header、URL、配置值和展开结果均不进入响应。只有显式声明的凭据变量名和插值引用会进入目录；请求体、子进程环境等嵌套结构中的同名普通字面量不会被当作根环境变量引用。目录投影读取原始草稿/已发布文档及 generation 配置，但不启动运行时、MCP 连接、探活或传输层，也不把任意进程环境名称导入目录。
 
 单个新增来源不可读或格式错误时，其他目录项仍返回，`directory_errors` 只含组件和固定错误码，不包含异常正文、配置内容或宿主机路径。目录响应沿用私有传输的 15 秒与 2 MiB 限制，超限按现有后端不可用/响应过大处理，不静默截断关系。
 

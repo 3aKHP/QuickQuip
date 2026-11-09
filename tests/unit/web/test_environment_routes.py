@@ -92,7 +92,9 @@ def test_directory_is_opt_in_and_disabled_directory_does_not_touch_backend(clien
     assert 'directory' not in baseline.json()
     response = client.get('/ops/api/environment?include_directory=true')
     assert response.status_code == 200
-    assert response.json()['directory'][0]['name'] == 'EXISTING_KEY'
+    names = {row['name'] for row in response.json()['directory']}
+    assert 'EXISTING_KEY' in names
+    assert 'PIP_INDEX_URL' in names
     assert response.json()['directory_errors'] == []
     assert 'old-secret' not in response.text
 

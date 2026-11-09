@@ -323,13 +323,23 @@ def _deduplicate(items):
 
 
 def build_directory(root, documents, legacy_rows, warning_for_name=None,
-                    references=None, mode_for=None):
+                    references=None, mode_for=None, *, values=None, deleted=(),
+                    managed=(), example_names=()):
+    from quickquip.environment.catalog import CATALOG, fixed_usages
+
     root = Path(root)
     warning_for_name = warning_for_name or (lambda name: '')
+    values = {} if values is None else values
+    deleted = set(deleted)
+    managed = set(managed)
+    example_names = set(example_names)
     usages, errors = _llm_usages(documents)
     generation, generation_errors = _generation_usages(root)
+    fixed, fixed_errors = fixed_usages(root)
     usages.extend(generation)
     errors.extend(generation_errors)
+    errors.extend(fixed_errors)
+
     entries = {}
     for row in legacy_rows:
         entries[row['name']] = {
@@ -338,27 +348,98 @@ def build_directory(root, documents, legacy_rows, warning_for_name=None,
             'states': row['states'], 'groups': [], 'relations': [], 'sources': [],
             'evidence_flags': {},
         }
-    for group, relation, source in usages:
-        name = relation['source_name']
-        entry = entries.setdefault(name, {
+
+    def _entry_for(name):
+        return entries.setdefault(name, {
             'name': name, 'assigned': False,
             'mode': mode_for(name) if mode_for else 'unknown',
             'references': (references or {}).get(name, []),
             'warning': warning_for_name(name), 'states': {},
             'groups': [], 'relations': [], 'sources': [], 'evidence_flags': {},
         })
-        if group not in entry['groups']:
-            entry['groups'].append(group)
+
+    # Fixed-catalog, example and deletion-marker names join the directory even
+    # without live usage evidence; definitions and actions fill in below.
+    for name in [*CATALOG, *sorted(example_names), *sorted(deleted)]:
+        if name not in entries:
+            _entry_for(name)
+
+    def _absorb(usage):
+        name = usage['name']
+        entry = _entry_for(name)
+        groups = usage['group']
+        if isinstance(groups, str):
+            groups = [groups]
+        for group in groups:
+            if group not in entry['groups']:
+                entry['groups'].append(group)
+        relation = dict(usage['relation'])
+        if usage.get('required_from_template'):
+            relation['required'] = True
         entry['relations'].append(relation)
-        entry['sources'].append(source)
+        entry['sources'].append(usage['source'])
         if relation['name_kind'] == 'computed_name':
             entry['evidence_flags']['computed_name'] = True
-    for entry in entries.values():
+
+    for group, relation, source in usages:
+        _absorb({'name': relation['source_name'], 'group': group,
+                 'relation': relation, 'source': source})
+    for usage in fixed:
+        _absorb(usage)
+
+    for name in list(entries):
+        entry = entries[name]
+        catalog_entry = CATALOG.get(name)
+        present = name in values
+        deletion_marker = name in deleted
+        value = values.get(name)
+        value_state = ('missing' if not present else
+                       'bare' if value is None else
+                       'empty' if value == '' else 'nonempty')
+        definition = {
+            'present': present,
+            'value_state': value_state,
+            'managed_literal': name in managed,
+            'deletion_marker': deletion_marker,
+        }
+        if present and deletion_marker:
+            definition['conflict'] = True
+        entry['definition'] = definition
+        active = present and not deletion_marker
+        if active:
+            allowed = ['replace', 'empty', 'delete']
+        elif catalog_entry is not None and catalog_entry['internal']:
+            allowed = []
+        else:
+            allowed = ['create']
+        entry['allowed_actions'] = allowed
+        if catalog_entry is not None:
+            entry['description'] = catalog_entry['description']
+            entry['value_type'] = catalog_entry['value_type']
+            if catalog_entry['alias_of']:
+                entry['alias_of'] = catalog_entry['alias_of']
+            if catalog_entry['internal']:
+                entry['evidence_flags']['internal'] = True
+            if catalog_entry['suggest']:
+                entry['suggest'] = True
+            if catalog_entry['default_present']:
+                entry['default_present'] = True
+                entry['default_origin'] = catalog_entry['default_origin']
+        if present:
+            entry['sources'].append({
+                'kind': 'root_env_file', 'context': 'file', 'path': '.env',
+                'raw_expression': None, 'resolution_context': 'native_startup',
+                'evidence_scope': 'file', 'observation': 'not_observed',
+            })
+        if (name in example_names and not present
+                and not entry['relations']):
+            entry['evidence_flags']['example_only'] = True
         entry['groups'].sort()
         if not entry['groups']:
             entry['groups'] = ['unknown.unidentified']
         entry['relations'] = _deduplicate(entry['relations'])
         entry['sources'] = _deduplicate(entry['sources'])
+
     return {
         'taxonomy': copy.deepcopy(TAXONOMY),
         'directory': [entries[name] for name in sorted(entries)],
