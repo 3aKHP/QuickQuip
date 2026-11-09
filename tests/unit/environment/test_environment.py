@@ -98,8 +98,10 @@ async def test_rotation_new_provider_and_deletion_reach_real_request_builder(sto
     monkeypatch.setenv('EXAMPLE_API_KEY', 'stale-docker-key')
     monkeypatch.setattr(runtime, '_values', None)
     monkeypatch.setattr(runtime, '_version', None)
+    import os
+    baseline = dict(os.environ)
     first = store.execute('snapshot')
-    runtime.install(first['values'], first['version'])
+    runtime.install_snapshot(first, baseline)
     request = LLMRequest(
         model='model', system_prompt='', messages=[], max_output_tokens=1, temperature=0
     )
@@ -107,17 +109,18 @@ async def test_rotation_new_provider_and_deletion_reach_real_request_builder(sto
         old = OpenAIProviderClient(config())
         save(store, [{'name': 'EXAMPLE_API_KEY', 'action': 'replace', 'value': 'rotated'}])
         new = store.execute('snapshot')
-        runtime.install(new['values'], new['version'])
+        runtime.install_snapshot(new, baseline)
         # Even a new client in the same logical task retains the pinned credential.
         retry = OpenAIProviderClient(config())
         _, old_headers, _ = await old._build_request_parts(request)
         _, retry_headers, _ = await retry._build_request_parts(request)
-        assert old_headers['authorization'] == retry_headers['authorization'] == 'Bearer old-key'
+        assert old_headers['authorization'] == retry_headers['authorization']
+        assert old_headers['authorization'] == 'Bearer stale-docker-key'
     _, headers, _ = await OpenAIProviderClient(config())._build_request_parts(request)
     assert headers['authorization'] == headers['X-Test-Auth'] == 'Bearer rotated'
     save(store, [{'name': 'NEW_API_KEY', 'action': 'create', 'value': 'initial'}], 'new')
     new = store.execute('snapshot')
-    runtime.install(new['values'], new['version'])
+    runtime.install_snapshot(new, baseline)
     from dataclasses import replace
     _, headers, _ = await OpenAIProviderClient(replace(
         config(), api_key_env='NEW_API_KEY', header_templates={}
@@ -125,7 +128,7 @@ async def test_rotation_new_provider_and_deletion_reach_real_request_builder(sto
     assert headers['authorization'] == 'Bearer initial'
     save(store, [{'name': 'EXAMPLE_API_KEY', 'action': 'delete'}], 'delete')
     new = store.execute('snapshot')
-    runtime.install(new['values'], new['version'])
+    runtime.install_snapshot(new, baseline)
     with pytest.raises(LLMProviderError):
         await OpenAIProviderClient(config())._build_request_parts(request)
 

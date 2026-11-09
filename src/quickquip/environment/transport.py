@@ -5,13 +5,15 @@ from pathlib import Path
 import socket
 import socketserver
 
-from quickquip.common.env import PROJECT_ROOT
+from quickquip.common.env import PROJECT_ROOT, environment_management_enabled
 from quickquip.environment.store import Store, EnvironmentError
 
 LIMIT = 2 * 1024 * 1024
 
 
 def call(action, body=None):
+    if not environment_management_enabled():
+        raise EnvironmentError('environment_management_disabled')
     address = os.environ.get('QUICKQUIP_ENV_SOCKET')
     if action in ('preview', 'changes'):
         address = os.environ.get('QUICKQUIP_ENV_WRITE_SOCKET', address)
@@ -19,6 +21,9 @@ def call(action, body=None):
         if os.getenv('QUICKQUIP_MANAGED_CONTAINER') == '1':
             raise EnvironmentError('Adopt the environment agent Compose template first')
         return Store(PROJECT_ROOT).execute(action, body)
+    if action == 'initialize':
+        # The agent initializes before exposing either socket.
+        return {'initialized': True}
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
         client.settimeout(15)
         client.connect(address)
@@ -34,10 +39,13 @@ def call(action, body=None):
 
 
 def main():
+    if not environment_management_enabled():
+        raise EnvironmentError('environment_management_disabled')
     root = Path(os.environ['QUICKQUIP_ENV_ROOT'])
     address = Path(os.environ['QUICKQUIP_ENV_SOCKET'])
-    address.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     store = Store(root)
+    store.execute('initialize')
+    address.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     class Handler(socketserver.StreamRequestHandler):
         writable = False
@@ -50,6 +58,8 @@ def main():
                 if not raw:
                     return
                 request = json.loads(raw)
+                if request['action'] == 'initialize':
+                    raise EnvironmentError('Initialization belongs to agent startup')
                 if request['action'] in ('preview', 'changes') and not self.writable:
                     raise EnvironmentError('Read-only environment endpoint')
                 result = store.execute(request['action'], request.get('body'))

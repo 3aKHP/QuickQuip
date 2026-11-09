@@ -8,7 +8,7 @@ vi.mock('@/api/environment', () => ({
   getEnvironmentOperation: vi.fn(),
 }))
 beforeEach(() => {
-  vi.mocked(api.loadEnvironment).mockResolvedValue({ version: 'v1', consumers: {}, variables: [
+  vi.mocked(api.loadEnvironment).mockResolvedValue({ enabled: true, restart_required: false, backend_available: true, reason: null, version: 'v1', consumers: {}, variables: [
     { name: 'TEST_API_KEY', assigned: true, mode: 'credential', warning: '' },
   ] })
   vi.mocked(api.previewEnvironment).mockResolvedValue({ id: '', phase: 'preview', version: 'v1', changes: [], consumers: {} })
@@ -63,5 +63,18 @@ it('locks edits while the submitted snapshot is being saved', async () => {
   finish({ id: 'saved', phase: 'saved', version: 'v2', changes: [], consumers: {} })
   await flushPromises()
   expect((view.find('textarea[aria-label="TEST_API_KEY 新值"]').element as HTMLTextAreaElement).value).toBe('')
+  view.unmount()
+})
+
+it('explains disabled management without showing editing controls', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValue({ enabled: false, restart_required: true,
+    backend_available: false, reason: 'environment_management_disabled', version: '',
+    variables: [], consumers: {} })
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  expect(view.text()).toContain('QUICKQUIP_ENV_MANAGEMENT_ENABLED=true')
+  expect(view.find('fieldset').exists()).toBe(false)
+  expect(api.previewEnvironment).not.toHaveBeenCalled()
+  expect(api.saveEnvironment).not.toHaveBeenCalled()
   view.unmount()
 })

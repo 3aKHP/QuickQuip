@@ -18,6 +18,10 @@ def install(values, version):
         _values, _version = dict(values), version
 
 
+def managed():
+    return _values is not None
+
+
 def snapshot():
     leased = _lease.get()
     if leased is not None:
@@ -32,11 +36,27 @@ def get(name, default=None):
 
 @contextmanager
 def credential_scope():
+    if not managed():
+        yield
+        return
     token = _lease.set(snapshot())
     try:
         yield
     finally:
         _lease.reset(token)
+
+
+def install_snapshot(result, baseline):
+    """Overlay explicit managed values and tombstones on the legacy environment."""
+    values = dict(baseline)
+    for name in result['managed']:
+        value = result['values'].get(name)
+        if value is not None:
+            values[name] = value
+    for name in result['deleted']:
+        values.pop(name, None)
+    install(values, result['version'])
+    return values
 
 
 def start(loader, acknowledge, role):
@@ -46,15 +66,15 @@ def start(loader, acknowledge, role):
     def update():
         nonlocal first_ack
         result = loader()
-        install(result['values'], result['version'])
+        values = install_snapshot(result, startup_values)
         # Tieba's existing reload_config reads these two variables at task boundaries.
         for name in ('TIEBA_FORUM_KEYWORD', 'TIEBA_FORUM_KEYWORDS'):
-            if name in result['values']:
-                os.environ[name] = result['values'][name]
+            if name in values:
+                os.environ[name] = values[name]
             else:
                 os.environ.pop(name, None)
         body = {'role': role, 'version': result['version'], 'boot_id': boot_id,
-                'updated_at': time.time(), 'names': sorted(result['values'])}
+                'updated_at': time.time(), 'names': sorted(values)}
         if first_ack:
             body['startup_values'] = startup_values
         acknowledge(body)

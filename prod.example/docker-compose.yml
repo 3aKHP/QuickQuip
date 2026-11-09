@@ -11,6 +11,7 @@ services:
       retries: 12
     environment:
       QUICKQUIP_ENV_ROOT: /host/project
+      QUICKQUIP_ENV_MANAGEMENT_ENABLED: "true"
       QUICKQUIP_ENV_SOCKET: /run/quickquip-environment/control.sock
       QUICKQUIP_ENV_WRITE_SOCKET: /run/quickquip-environment-write/control.sock
     volumes:
@@ -58,6 +59,7 @@ services:
     env_file:
       - ${QUICKQUIP_ENV_FILE:-../.env}
     environment:
+      QUICKQUIP_ENV_MANAGEMENT_ENABLED: "true"
       QUICKQUIP_ENV_SOCKET: /run/quickquip-environment/control.sock
       TZ: "${TZ:-Asia/Shanghai}"
       DRIVER: "${DRIVER:-~fastapi+~websockets}"
@@ -95,6 +97,7 @@ services:
       env-agent:
         condition: service_healthy
     environment:
+      QUICKQUIP_ENV_MANAGEMENT_ENABLED: "true"
       QUICKQUIP_ENV_SOCKET: /run/quickquip-environment/control.sock
       QUICKQUIP_ENV_WRITE_SOCKET: /run/quickquip-environment-write/control.sock
       TZ: "${TZ:-Asia/Shanghai}"

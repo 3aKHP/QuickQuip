@@ -62,3 +62,10 @@
 - **旧版 JSONL 清理与启动索引补建**：
   - 从旧版 JSONL Trace 升级上来时，旧的 `data/logs/quickquip_trace_YYYY-MM-DD.jsonl` 文件不会导入新数据库，但当访问 Trace 或产生新记录时，系统会按同样的 **14 天保留期**自动清理这些过期旧文件。
   - Trace 数据库初始化时会自动检查并补建“状态 + 开始时间”的组合索引（用于快速检索超过 1 小时的挂起记录，避免全表扫描大体积正文）。已有存量数据的老库在首次升级启动时需要读取一次历史记录来建索引，耗时取决于库大小；后续启动直接复用索引。
+
+
+## 环境变量管理能力
+
+`GET /ops/api/environment` 在登录鉴权后返回 `enabled`、`restart_required`、`backend_available` 与 `reason`，以及可用时的变量名、赋值状态和加载状态。`restart_required` 在管理关闭时为 `true`，表示启用需重启。管理关闭时 `reason` 为 `environment_management_disabled`；启用但后端不可用时为 `environment_backend_unavailable`。两个状态都返回空变量列表，页面按能力展示说明。
+
+管理关闭时，预览、保存和操作查询返回 `409` 与 `code=environment_management_disabled`，不访问环境存储。管理开关按进程启动值固定；后端不可用时启用进程不会降级到旧凭据。环境值仅通过私有后端快照传给进程，公开接口继续保持只写契约。启用与运维步骤见[环境变量管理](../admin/environment.md)。

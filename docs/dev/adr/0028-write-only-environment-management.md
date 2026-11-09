@@ -1,6 +1,6 @@
 ---
-status: Accepted
-superseded_by: []
+status: Superseded
+superseded_by: [0029-opt-in-environment-compatibility.md]
 ---
 
 # ADR-0028：环境变量只写管理与运行时凭据快照

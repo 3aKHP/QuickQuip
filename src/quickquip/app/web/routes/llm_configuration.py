@@ -22,6 +22,7 @@ from quickquip.llm.config_service import get_config_service
 
 MAX_BODY_BYTES = 1024 * 1024
 CONFLICT_CODES = {
+    "environment_management_disabled",
     "configuration_busy",
     "revision_conflict",
     "operation_conflict",

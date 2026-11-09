@@ -3,7 +3,7 @@
 本文面向部署与运维人员，按**配置文件与作用范围**完整列出 QuickQuip 的所有可配置项。
 
 > **不同配置的维护位置与生效方式总览**：
-> 1. **根目录 `.env` 环境变量**：保存端口、连接口令、API Key 等涉密凭据与基础运行参数；修改后需**重启进程或重建容器**生效。
+> 1. **根目录 `.env` 环境变量**：保存端口、连接口令、API Key 等涉密凭据与基础运行参数；默认在**重启进程或重建容器**后生效；启用[环境变量管理](environment.md)后，Provider 凭据与贴吧关键词支持热更新。
 > 2. **LLM 结构化配置数据库（`config/managed/config.db`）**：本文下方的 JSON 片段均为数据库导出 JSON 中的字段结构。通过 Web Admin **“LLM 配置”** 页面编辑或导入完整 JSON 时，保存草稿后需单独应用（完整交换格式见 [LLM 配置管理](llm-configuration.md)）。使用 [qqconf 工作副本](config-workspace.md) 时，先执行 `qqconf pack`：`local` 模式生成暂存，`cloud` 模式写入本地真实配置，再用 `qqsync push` 部署生效。
 > 3. **独立 TOML / YAML 配置文件**（如 `generation.toml`、`awakening.toml`、`chat_rules.toml` 等）：按各自章节说明支持热重载或重启生效。
 
@@ -24,6 +24,8 @@
 字段表用于查询。首次配置一个功能时，可先按对应教程完成操作，再回到这里调整参数。
 
 ## .env 环境变量
+
+`QUICKQUIP_ENV_MANAGEMENT_ENABLED` 默认 `false`。启用步骤、只写面板与热更新范围见[环境变量管理](environment.md)。
 
 ### 基础运行
 

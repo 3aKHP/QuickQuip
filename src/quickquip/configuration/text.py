@@ -10,6 +10,7 @@ from dotenv.parser import parse_stream
 import yaml
 from yaml.nodes import MappingNode, ScalarNode, SequenceNode
 
+from quickquip.common.dotenv import DELETED, LITERAL
 from quickquip.configuration.errors import ConfigError
 from quickquip.configuration.toml import render_table
 from quickquip.configuration.merge import same
@@ -37,7 +38,17 @@ def parse(name, content):
                 if binding.error:
                     raise ValueError("invalid dotenv")
                 if binding.key is not None:
-                    result.setdefault(binding.key, []).append(binding.value)
+                    item = binding.value
+                    if binding.original.string.rstrip().endswith(LITERAL):
+                        item = {'literal': item}
+                    result.setdefault(binding.key, []).append(item)
+                else:
+                    match = DELETED.fullmatch(binding.original.string.strip())
+                    if match:
+                        result['# quickquip:deleted ' + match[1]] = [None]
+            if any(key.startswith('# quickquip:deleted ') and key.split()[-1] in result
+                   for key in result):
+                raise ValueError('definition and deletion conflict')
             return result
         return text
     except (ValueError, UnicodeError, yaml.YAMLError):
@@ -45,6 +56,11 @@ def parse(name, content):
 
 
 def _env_value(key, value, previous=""):
+    if key.startswith('# quickquip:deleted '):
+        return key + '\n'
+    is_literal = isinstance(value, dict)
+    if is_literal:
+        value = value['literal']
     if value is None:
         return key + "\n"
     # JSON quoting is compatible with dotenv double quotes and keeps raw ${references}.
@@ -62,6 +78,10 @@ def _env_value(key, value, previous=""):
             break
     if previous.lstrip().startswith("export "):
         rendered = "export " + rendered
+    if comment.rstrip().endswith(LITERAL):
+        comment = comment.rstrip()[:-len(LITERAL)].rstrip()
+    if is_literal:
+        comment += ' ' + LITERAL
     return rendered + comment + ("\r\n" if previous.endswith("\r\n") else "\n")
 
 
@@ -71,6 +91,10 @@ def render_env(value, original):
     seen, result = set(), []
     for binding in bindings:
         key, raw = binding.key, binding.original.string
+        if key is None:
+            match = DELETED.fullmatch(raw.strip())
+            if match:
+                key = '# quickquip:deleted ' + match[1]
         if key is None:
             result.append(raw)
         elif key not in value:
@@ -90,7 +114,10 @@ def render_env(value, original):
         if result and not result[-1].endswith("\n"):
             result.append("\n")
         result.extend(_env_value(key, item) for item in value[key])
-    return "".join(result).encode("utf-8")
+    rendered = "".join(result).encode("utf-8")
+    if not same(parse('.env', rendered), value):
+        raise ConfigError('configuration_conflict', 'Environment edit requires reconciliation')
+    return rendered
 
 
 def _yaml_dump(value):
