@@ -135,10 +135,12 @@ def test_defined_internal_variables_keep_the_edit_contract(tmp_path):
 
 
 def test_example_only_entries_are_flagged_and_cleared_by_real_references(tmp_path):
-    (tmp_path / '.env').write_text('EXISTING=value\n')
-    (tmp_path / '.env.example').write_text('EXISTING=value\nUNKNOWN_EXAMPLE_KEY=\n')
+    referenced = tmp_path / 'referenced'
+    referenced.mkdir()
+    (referenced / '.env').write_text('EXISTING=value\n')
+    (referenced / '.env.example').write_text('EXISTING=value\nUNKNOWN_EXAMPLE_KEY=\n')
     from quickquip.llm.config_service import ConfigService
-    service = ConfigService(tmp_path / 'config/managed/config.db')
+    service = ConfigService(referenced / 'config/managed/config.db')
     service.initialize()
     draft = service.read()
     draft['document']['providers'] = [{
@@ -147,16 +149,18 @@ def test_example_only_entries_are_flagged_and_cleared_by_real_references(tmp_pat
         'default_model': 'model', 'models': [{'model': 'model'}],
     }]
     service.replace(draft['document'], draft['revision'])
-    store = Store(tmp_path)
+    store = Store(referenced)
     rows = directory(store)
     example_key = row(rows, 'UNKNOWN_EXAMPLE_KEY')
     assert 'example_only' not in example_key['evidence_flags']
     assert example_key['allowed_actions'] == ['create']
     assert store.execute('list')['suggestions'] == ['UNKNOWN_EXAMPLE_KEY']
 
-    no_reference = Store(tmp_path)
-    (tmp_path / 'config/managed/config.db').unlink()
-    rows = directory(no_reference)
+    unreferenced = tmp_path / 'unreferenced'
+    unreferenced.mkdir()
+    (unreferenced / '.env').write_text('EXISTING=value\n')
+    (unreferenced / '.env.example').write_text('EXISTING=value\nUNKNOWN_EXAMPLE_KEY=\n')
+    rows = directory(Store(unreferenced))
     example_key = row(rows, 'UNKNOWN_EXAMPLE_KEY')
     assert example_key['evidence_flags'].get('example_only') is True
     assert example_key['allowed_actions'] == ['create']
