@@ -52,12 +52,15 @@ __all__ = [
     "dependencies",
     "resolve_model_provider",
     "effective_parameters",
+    "environment_occurrences",
+    "environment_name_occurrence",
     "environment_references",
 ]
 FORMAT_VERSION = 2
 ROUTES = ("daily_summary", "daily_briefing", "weekly_report", "monthly_report")
 _VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_OCCURRENCE_REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 _SECRET_KEY = re.compile(
     r"(?:(?:.*[-_])?authorization|x-api-key|key|api[_-]?key|access[_-]?token|"
     r"refresh[_-]?token|token|password|secret|cookie|.*[_-](?:token|secret|password|key))$",
@@ -216,6 +219,55 @@ def _secrets(value: Any, path: str = "") -> None:
             if _SECRET_KEY.fullmatch(key) and child:
                 if not _REFERENCE.search(child) or _REFERENCE.sub("", child).strip():
                     reject(path, "地址中的认证值须完全使用环境变量引用", "literal_secret")
+
+
+def environment_occurrences(value: Any, *, path: str = "") -> list[dict]:
+    """Project ``${NAME}`` interpolation occurrences without exposing source values.
+
+    Only interpolation references are collected here. Fields that declare an
+    environment variable *name* (such as a provider's ``api_key_env``) hold plain
+    strings, not references; callers project those explicitly through
+    :func:`environment_name_occurrence` so nested same-key literals inside request
+    bodies or child environments are never mistaken for root environment lookups.
+    """
+    occurrences = []
+
+    def visit(child: Any, location: str) -> None:
+        if isinstance(child, dict):
+            for key, item in child.items():
+                visit(item, f"{location}.{key}" if location else str(key))
+        elif isinstance(child, list):
+            for index, item in enumerate(child):
+                visit(item, f"{location}[{index}]")
+        elif isinstance(child, str):
+            for match in _OCCURRENCE_REFERENCE.finditer(child):
+                name = match.group(1)
+                occurrences.append({
+                    "name": name,
+                    "path": location,
+                    "raw_expression": f"${{{name}}}",
+                    "default_present": match.group(2) is not None,
+                    "kind": "interpolation",
+                })
+
+    visit(value, path)
+    return occurrences
+
+
+def environment_name_occurrence(value: Any, path: str) -> dict | None:
+    """Project a declared environment variable name with runtime whitespace rules."""
+    if not isinstance(value, str):
+        return None
+    name = value.strip()
+    if not _VARIABLE.fullmatch(name):
+        return None
+    return {
+        "name": name,
+        "path": path,
+        "raw_expression": name,
+        "default_present": False,
+        "kind": "configured_name",
+    }
 
 
 def environment_references(doc: dict) -> list[str]:

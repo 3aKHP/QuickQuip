@@ -20,6 +20,28 @@ _SUPPORTED_ASR_PROTOCOLS = {"openai_transcriptions"}
 _NO_AUTH_AUDIO_PROTOCOLS = {"openai_tts", "http_tts"}
 
 
+def generation_api_key_required(modality: str, protocol: Any) -> bool | None:
+    """Return the declared credential requirement without expanding protocol names."""
+    if not isinstance(protocol, str) or "${" in protocol:
+        return None
+    protocol = protocol.strip()
+    if modality == "audio":
+        protocol = protocol or "minimax_t2a_http"
+        if protocol in _NO_AUTH_AUDIO_PROTOCOLS:
+            return False
+        return True if protocol in _SUPPORTED_AUDIO_PROTOCOLS else None
+    defaults = {"image": "openai_images", "music": "minimax_music", "asr": "openai_transcriptions"}
+    supported = {
+        "image": _SUPPORTED_IMAGE_PROTOCOLS,
+        "music": _SUPPORTED_MUSIC_PROTOCOLS,
+        "asr": _SUPPORTED_ASR_PROTOCOLS,
+    }
+    if modality not in supported:
+        return None
+    protocol = protocol or defaults[modality]
+    return True if protocol in supported[modality] else None
+
+
 class _ResolveModelMixin:
     """为各模式 generation config 容器提供统一的 resolve_model 查找逻辑。
 
@@ -499,27 +521,53 @@ def _read_asr(raw: dict[str, Any]) -> AsrConfig:
 
 
 
+def _select_generation_section(
+    data: dict[str, Any],
+    section_name: str,
+    legacy_section_name: str,
+) -> tuple[dict[str, Any], str]:
+    generation = as_dict(data.get("generation"))
+    section = as_dict(generation.get(section_name))
+    if section:
+        return section, f"generation.{section_name}"
+
+    section = as_dict(data.get(section_name))
+    if section:
+        return section, section_name
+
+    legacy_section = as_dict(data.get(legacy_section_name))
+    if legacy_section:
+        return legacy_section, legacy_section_name
+
+    return {}, f"generation.{section_name}"
+
+
+def generation_environment_sections(data: dict[str, Any]) -> list[dict[str, Any]]:
+    sections = []
+    for modality, legacy_section_name in (
+        ("image", "image_generation"),
+        ("audio", "audio_generation"),
+        ("music", "music_generation"),
+        ("asr", "asr"),
+        ("svg", "svg"),
+    ):
+        section, path = _select_generation_section(data, modality, legacy_section_name)
+        sections.append({"modality": modality, "path": path, "section": section})
+    return sections
+
+
 def _read_generation_section(
     data: dict[str, Any],
     section_name: str,
     legacy_section_name: str,
     reader,
 ):
-    generation = expand_env_value(as_dict(data.get("generation")))
-    if generation:
-        section = expand_env_value(as_dict(generation.get(section_name)))
-        if section:
-            return reader(section)
-
-    section = expand_env_value(as_dict(data.get(section_name)))
-    if section:
-        return reader(section)
-
-    legacy_section = expand_env_value(as_dict(data.get(legacy_section_name)))
-    if legacy_section:
-        return reader(legacy_section)
-
-    return reader({})
+    raw_section, path = _select_generation_section(data, section_name, legacy_section_name)
+    section = expand_env_value(raw_section)
+    if path == f"generation.{section_name}":
+        # 嵌套布局原先会先展开 generation，再展开选中的 section。
+        section = expand_env_value(section)
+    return reader(section)
 
 
 def _read_image_generation_section(data: dict[str, Any]) -> ImageGenerationConfig:

@@ -158,7 +158,8 @@ class Store:
                 return {'version': state['version'], 'values': self._values(raw, state),
                         'managed': sorted(managed), 'deleted': sorted(deleted)}
             if action == 'list':
-                return self._listing(state, raw)
+                return self._listing(
+                    state, raw, include_directory=body.get('include_directory') is True)
             if action == 'ack':
                 role = body['role']
                 if role not in ('bot', 'web'):
@@ -299,10 +300,11 @@ class Store:
                 statuses[name][role] = status
         return statuses
 
-    def _listing(self, state, raw):
+    def _listing(self, state, raw, include_directory=False):
         values = self._values(raw, state)
-        from quickquip.environment.policy import provider_references
-        references = provider_references(self.root)
+        from quickquip.environment.policy import provider_references, read_llm_documents
+        documents = read_llm_documents(self.root)
+        references = provider_references(self.root, documents)
         rows = [
             {'name': name, 'assigned': bool(value), 'mode': mode(name, references),
              'references': references.get(name, []), 'warning': warning(name)}
@@ -313,9 +315,16 @@ class Store:
             example = Path('/app/.env.example')
         suggestions = (sorted(set(read_environment(example.read_text(encoding='utf-8')))
                               - set(values)) if example.exists() else [])
-        return {'version': state['version'], 'suggestions': suggestions,
-                'variables': [{**row, 'states': statuses[row['name']]} for row in rows],
-                'consumers': self._consumers()}
+        result = {'version': state['version'], 'suggestions': suggestions,
+                  'variables': [{**row, 'states': statuses[row['name']]} for row in rows],
+                  'consumers': self._consumers()}
+        if include_directory:
+            from quickquip.environment.consumption import build_directory
+            result.update(build_directory(
+                self.root, documents, result['variables'],
+                warning_for_name=warning, references=references,
+                mode_for=lambda name: mode(name, references)))
+        return result
 
     def _candidate(self, raw, changes):
         from dotenv.parser import parse_stream

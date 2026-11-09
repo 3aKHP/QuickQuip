@@ -52,15 +52,18 @@ def payload(body):
 
 
 @router.get('')
-def listing():
+def listing(include_directory: bool = False):
     enabled = environment_management_enabled()
     capabilities = {'enabled': enabled, 'restart_required': not enabled,
                     'backend_available': False, 'reason': 'environment_management_disabled'}
     empty = {'version': '', 'variables': [], 'consumers': {}, 'suggestions': []}
+    if include_directory:
+        empty.update(taxonomy=[], directory=[], directory_errors=[])
     if not enabled:
         return {**empty, **capabilities}
     try:
-        result = call('list')
+        result = (call('list', {'include_directory': True}) if include_directory
+                  else call('list'))
     except (OSError, EnvironmentError):
         return {**empty, **capabilities, 'reason': 'environment_backend_unavailable'}
     return {**result, **capabilities, 'backend_available': True, 'reason': None}
