@@ -420,6 +420,8 @@ def build_directory(root, documents, legacy_rows, warning_for_name=None,
                 entry['alias_of'] = catalog_entry['alias_of']
             if catalog_entry['internal']:
                 entry['evidence_flags']['internal'] = True
+            if catalog_entry['suggest']:
+                entry['suggest'] = True
             if catalog_entry['default_present']:
                 entry['default_present'] = True
                 entry['default_origin'] = catalog_entry['default_origin']

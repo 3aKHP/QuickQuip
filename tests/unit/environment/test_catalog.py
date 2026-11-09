@@ -244,3 +244,16 @@ def test_search_and_trace_groups(tmp_path):
     assert trace['definition']['present'] is False
     assert trace['states'] == {}
     assert trace['allowed_actions'] == ['create']
+
+
+def test_catalog_suggest_and_defaults_surface_on_entries(tmp_path):
+    (tmp_path / '.env').write_text('QQ_ACCOUNT=1000000000\n')
+    rows = directory(Store(tmp_path))
+    assert row(rows, 'QQ_ACCOUNT').get('suggest') is True
+    assert 'suggest' not in row(rows, 'TZ')
+    token = row(rows, 'ONEBOT_ACCESS_TOKEN')
+    assert token['default_present'] is True
+    assert token['default_origin'] == 'compose_template'
+    assert row(rows, 'QUICKQUIP_ROOT')['default_present'] is True
+    assert row(rows, 'SEARXNG_PUBLIC_BASE_URL')['default_present'] is True
+    assert 'default_present' not in row(rows, 'WEB_ADMIN_PASSWORD')
