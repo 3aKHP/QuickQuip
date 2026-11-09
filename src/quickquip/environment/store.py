@@ -18,6 +18,17 @@ from quickquip.llm.config_durability import durable_write
 NAME = re.compile(r'[A-Za-z_][A-Za-z0-9_]*\Z')
 ID = re.compile(r'[A-Za-z0-9_-]{1,128}\Z')
 HOT = {'TIEBA_FORUM_KEYWORD', 'TIEBA_FORUM_KEYWORDS'}
+# These consumers read the process environment, outside the live credential snapshot.
+STARTUP = {
+    'DRIVER', 'HOST', 'PORT', 'TZ', 'ONEBOT_ACCESS_TOKEN', 'ONEBOT_WS_URLS', 'QQ_ACCOUNT',
+    'WEB_ADMIN_HOST', 'WEB_ADMIN_PORT', 'WEB_ADMIN_PASSWORD', 'WEB_ADMIN_COOKIE_SECURE',
+    'WEB_ADMIN_SESSION_TTL_HOURS', 'WEB_ADMIN_SESSION_MAX_AGE_HOURS',
+    'QUICKQUIP_ENV_MANAGEMENT_ENABLED', 'QUICKQUIP_ENV_SOCKET',
+    'QUICKQUIP_ENV_WRITE_SOCKET', 'QUICKQUIP_ENV_ROOT', 'QUICKQUIP_MANAGED_CONTAINER',
+    'TIEBA_ENABLED', 'TIEBA_SYNC_INTERVAL_SECONDS', 'TIEBA_MAX_POOL_SIZE',
+    'TIEBA_DETAIL_FETCH_LIMIT', 'TIEBA_RECENT_SENT_LIMIT', 'TIEBA_RANDOM_AVOID_RECENT',
+    'TIEBA_PREFER_IMAGE_THREADS', 'TIEBA_BROWSER_HEADLESS', 'TIEBA_BROWSER_CHANNEL',
+}
 
 
 class EnvironmentError(ValueError):
@@ -29,7 +40,9 @@ def mode(name, references=()):
         return 'hot'
     if name in references:
         return 'credential'
-    return 'restart'
+    if name in STARTUP:
+        return 'restart'
+    return 'unknown'
 
 
 def warning(name):
@@ -37,8 +50,8 @@ def warning(name):
         return '管理开关在进程启动时读取；修改后需重启 Bot 和 Web Admin。'
     if name.startswith(('QUICKQUIP_DEPLOY_', 'PYTHON', 'LD_', 'COMPOSE_', 'DOCKER_')):
         return '修改会影响后续部署或进程执行环境，请确认目标和恢复方式。'
-    if name.startswith(('WEB_ADMIN_', 'ONEBOT_', 'HOST', 'PORT', 'DRIVER')):
-        return '修改可能影响登录、连接或访问；当前进程保持运行，重启后生效。'
+    if name in STARTUP:
+        return '修改后需重启对应服务；Docker 部署需重新创建容器。'
     return ''
 
 
@@ -274,7 +287,10 @@ class Store:
                 if not ack or time.time() - ack['updated_at'] > 20:
                     status = 'waiting'
                 elif row['mode'] != 'restart':
-                    status = 'loaded' if ack['version'] == state['version'] else 'loading'
+                    if ack['version'] != state['version']:
+                        status = 'loading'
+                    else:
+                        status = 'synced' if row['mode'] == 'unknown' else 'loaded'
                 else:
                     startup = ack.get('_startup', {})
                     expected = self._fingerprint(state, name in values, values.get(name, ''))

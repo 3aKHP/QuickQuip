@@ -191,9 +191,25 @@ def test_startup_status_clears_after_new_boot_and_hides_comparison_proofs(store)
 
 
 def test_operation_reclassifies_a_new_key_after_provider_is_saved(store):
+    import time
     from quickquip.llm.config_service import ConfigService
+    before = store.execute('snapshot')
     result = save(store, [{'name': 'NEW_KEY', 'action': 'create', 'value': 'first'}])
-    assert result['changes'][0]['mode'] == 'restart'
+    assert result['changes'][0]['mode'] == 'unknown'
+    assert result['states']['NEW_KEY']['web'] == 'waiting'
+    ack = {'role': 'web', 'boot_id': 'running', 'version': before['version'],
+           'updated_at': time.time(), 'names': sorted(before['values']),
+           'startup_values': before['values']}
+    store.execute('ack', ack)
+    assert store.execute('operation', {'id': result['id']})['states']['NEW_KEY']['web'] == 'loading'
+    current = store.execute('snapshot')
+    store.execute('ack', {**ack, 'version': current['version'],
+                          'names': sorted(current['values'])})
+    operation = store.execute('operation', {'id': result['id']})
+    assert operation['states']['NEW_KEY']['web'] == 'synced'
+    row = next(row for row in store.execute('list')['variables'] if row['name'] == 'NEW_KEY')
+    assert row['mode'] == 'unknown'
+    assert row['states']['web'] == 'synced'
     service = ConfigService(store.root / 'config/managed/config.db')
     service.initialize()
     draft = service.read()
@@ -203,9 +219,32 @@ def test_operation_reclassifies_a_new_key_after_provider_is_saved(store):
         'api_key_env': 'NEW_KEY', 'default_model': 'test', 'models': [{'model': 'test'}],
     }]
     service.replace(document, draft['revision'])
-    assert store.execute('operation', {'id': result['id']})['changes'][0]['mode'] == 'credential'
+    operation = store.execute('operation', {'id': result['id']})
+    assert operation['changes'][0]['mode'] == 'credential'
+    assert operation['states']['NEW_KEY']['web'] == 'loaded'
+    row = next(row for row in store.execute('list')['variables'] if row['name'] == 'NEW_KEY')
+    assert row['mode'] == 'credential'
+    assert row['references'] == ['new-provider']
     save(store, [{'name': 'NEW_KEY', 'action': 'replace', 'value': 'second'}], 'later')
     assert store.execute('operation', {'id': result['id']})['phase'] == 'superseded'
+
+
+def test_preview_distinguishes_known_startup_parameters_from_unclassified_names(store):
+    names = (
+        'NEW_PROVIDER_API_KEY', 'WEB_ADMIN_CUSTOM_API_KEY', 'WEB_ADMIN_PORT',
+        'TIEBA_FORUM_KEYWORDS', 'QUICKQUIP_DEPLOY_LOCATION',
+    )
+    changes = [{'name': name, 'action': 'create',
+                'value': 'local' if name == 'QUICKQUIP_DEPLOY_LOCATION' else 'example'}
+               for name in names]
+    preview = store.execute('preview', {'expected_version': store.execute('list')['version'],
+                                        'changes': changes})
+    modes = {row['name']: row['mode'] for row in preview['changes']}
+    assert modes == {
+        'NEW_PROVIDER_API_KEY': 'unknown', 'WEB_ADMIN_CUSTOM_API_KEY': 'unknown',
+        'WEB_ADMIN_PORT': 'restart', 'TIEBA_FORUM_KEYWORDS': 'hot',
+        'QUICKQUIP_DEPLOY_LOCATION': 'unknown',
+    }
 
 
 def test_metadata_is_read_as_utf8_in_a_non_utf8_native_process(store):
