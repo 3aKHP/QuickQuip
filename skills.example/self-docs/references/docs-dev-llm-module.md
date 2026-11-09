@@ -92,7 +92,9 @@ Gemini GenerateContent 适配器支持默认关闭的空回复补正，配置见
 
 Gemini 在原生工具回合保存并按顺序回放含 `thoughtSignature` 的 parts。Claude 当前工具循环通过通用重建回传签名 thinking 块，已关闭且包含工具的 Loop 在归属匹配和签名有效时跨轮原生回放。Responses 使用 `store:false` 全量回放，当前工具循环回传原生 items，并检查 call_id 记账、冲突和结果配对；已关闭历史经归属校验回放 reasoning 密文，上游返回 HTTP 400 时剥离历史 reasoning 重试一次。当前工具循环内容保留。历史投影规则见第 4.2 节。
 
-Responses 的 `openai-public` 与 `codex-http-relay` Profile 均接受新增的事件类型和附加 JSON 字段。未知事件通过序号与终态顺序校验后跳过，继续等待终态；每条流最多记录八种未知事件，每种记录一次，事件名截取前 128 个字符并转义，原始载荷由 HTTP Trace 开关控制保存。`codex-http-relay` 将 `response.metadata`、`codex.response.metadata` 等已知中转附加事件静默忽略。此策略遵循 OpenAI 将新增流式事件类型视为兼容扩展的[约定](https://developers.openai.com/api/reference/overview#backwards-compatibility)。
+Responses 的 `openai-public`、`codex-http-relay` 与 `codex-relay-hosted-tools` Profile 均接受新增的事件类型和附加 JSON 字段。未知事件通过序号与终态顺序校验后跳过，继续等待终态；每条流最多记录八种未知事件，每种记录一次，事件名截取前 128 个字符并转义，原始载荷由 HTTP Trace 开关控制保存。`codex-http-relay` 与 `codex-relay-hosted-tools` 将 `response.metadata`、`codex.response.metadata` 等已知中转附加事件静默忽略。此策略遵循 OpenAI 将新增流式事件类型视为兼容扩展的[约定](https://developers.openai.com/api/reference/overview#backwards-compatibility)。
+
+`codex-relay-hosted-tools` Profile 继承 `codex-http-relay` 的全部行为，并在 `allow_tool_calls` 开启时由请求侧显式声明 `image_generation` 内置工具（追加进 tools 数组，无 function 工具的请求同样声明）；需要对话内生图而不依赖中转自动注入的渠道使用该档。
 
 Responses 对已消费事件的必要字段、流式正文与工具参数的一致性、终态状态及输出条目类型执行严格校验。不支持的输出条目（含工具条目）或内容类型会使调用失败。
 
@@ -270,7 +272,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续。读取窗口由
 
 MCP 工具也可返回经过校验的内联图片。它们不写入对话数据库、普通日志或 MCP 状态；视觉模型在下一轮工具调用消息中接收图片，非视觉模型仅接收经过二次敏感词扫描的转述文本。工具图片的转述不可用或失败时，Agent Loop 继续使用安全工具文本，而不会把原图或编码降级为文本。
 
-模型产出的图片（Responses 内置 image_generation 工具条目——codex 类后端会在服务端注入，请求未声明也会出现；以及 Gemini 响应的 inlineData 图片 parts）由各协议适配器提取为归一的响应侧 `generated_images` 附件，并从原生回放批次剥除，base64 不进入 native_blocks。工具循环在每轮响应到达时把附件收进外发图片通道——与 draw_svg 等工具路径同通道、同上限（`MAX_OUTBOUND_TOOL_IMAGES`）、同「后续调用失败不丢弃已产出图片」语义，送达由适配层拼在正文后发送；收集侧挂与 svg_render 同风格的独立限流（全局 10 次/分钟、单用户 2 次/分钟）。
+模型产出的图片（Responses 内置 image_generation 工具条目——经中转服务端注入或由 `codex-relay-hosted-tools` Profile 在请求侧显式声明；以及 Gemini 响应的 inlineData 图片 parts）由各协议适配器提取为归一的响应侧 `generated_images` 附件，并从原生回放批次剥除，base64 不进入 native_blocks。工具循环在每轮响应到达时把附件收进外发图片通道——与 draw_svg 等工具路径同通道、同上限（`MAX_OUTBOUND_TOOL_IMAGES`）、同「后续调用失败不丢弃已产出图片」语义，送达由适配层拼在正文后发送；收集侧挂与 svg_render 同风格的独立限流（全局 10 次/分钟、单用户 2 次/分钟）。
 
 ### 4.4 语音输入边界
 
