@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+import os
 
 from quickquip.common.dotenv import load_dotenv
 
@@ -38,3 +39,17 @@ def load_root_env_file() -> None:
 
 def load_project_env_files() -> None:
     load_root_env_file()
+
+
+_ENV_MANAGEMENT_ENABLED = None
+
+
+def environment_management_enabled() -> bool:
+    """Freeze the opt-in switch for this process; changing it requires a restart."""
+    global _ENV_MANAGEMENT_ENABLED
+    if _ENV_MANAGEMENT_ENABLED is None:
+        load_root_env_file()
+        _ENV_MANAGEMENT_ENABLED = os.getenv(
+            'QUICKQUIP_ENV_MANAGEMENT_ENABLED', ''
+        ).strip().lower() in ('1', 'true', 'yes', 'on')
+    return _ENV_MANAGEMENT_ENABLED

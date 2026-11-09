@@ -1,8 +1,8 @@
 <!-- Generated from docs/dev/adr/0028-write-only-environment-management.md; do not edit -->
 
 ---
-status: Accepted
-superseded_by: []
+status: Superseded
+superseded_by: [0029-opt-in-environment-compatibility.md]
 ---
 
 # ADR-0028：环境变量只写管理与运行时凭据快照

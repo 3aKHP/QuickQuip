@@ -42,6 +42,7 @@ def test_private_socket_rotation_and_compose_literal_roundtrip():
         common = ['docker','run','--rm','-e','PYTHONPATH=/app/src',
                   '-v',str(root/'src')+':/app/src:ro']
         agent = subprocess.check_output(common + ['-d','--name',name,
+            '-e','QUICKQUIP_ENV_MANAGEMENT_ENABLED=true',
             '-e','QUICKQUIP_ENV_ROOT=/host/project',
             '-e','QUICKQUIP_ENV_SOCKET=/read/control.sock',
             '-e','QUICKQUIP_ENV_WRITE_SOCKET=/write/control.sock',
@@ -53,7 +54,7 @@ def test_private_socket_rotation_and_compose_literal_roundtrip():
                 if (root/'write/control.sock').exists():break
                 time.sleep(.1)
             program = r"""
-import asyncio, json
+import asyncio, json, os
 from quickquip.environment.transport import call
 from quickquip.common import runtime_environment as runtime
 from quickquip.llm.config import ProviderConfig
@@ -69,17 +70,19 @@ config=ProviderConfig(id='smoke',protocol='openai',base_url='https://example.tes
  api_key_env='EXAMPLE_API_KEY',default_model='m',models=['m'])
 async def run():
  request=LLMRequest(model='m',system_prompt='',messages=[],temperature=0,max_output_tokens=1)
+ baseline=dict(os.environ)
  def load():
-  snap=call('snapshot');runtime.install(snap['values'],snap['version']);return snap
+  snap=call('snapshot');runtime.install_snapshot(snap,baseline);return snap
  def save(changes,identity):
   return call('changes',{'expected_version':call('list')['version'],
     'request_id':identity,'changes':changes})
  load()
+ assert runtime.get('INJECTED_ONLY')=='preserved'
  with runtime.credential_scope():
   old=OpenAIProviderClient(config)
   save([{'name':'EXAMPLE_API_KEY','action':'replace','value':'rotated'}],'rotate')
   load()
-  assert old._get_api_key()=='old'
+  assert old._get_api_key()=='stale-injected'
  assert OpenAIProviderClient(config)._get_api_key()=='rotated'
  save([{'name':'NEW_API_KEY','action':'create','value':"a\\\\b'${PORT}"}],'create')
  snap=load()
@@ -87,7 +90,10 @@ async def run():
   replace(config,api_key_env='NEW_API_KEY'))._get_api_key()=="a\\\\b'${PORT}"
  public=json.dumps(call('list'))+json.dumps(call('operation',{'id':'create'}))
  assert 'rotated' not in public and "a\\\\b'${PORT}" not in public
+ save([{'name':'EXAMPLE_API_KEY','action':'empty'}],'empty');load()
+ assert runtime.get('EXAMPLE_API_KEY')==''
  save([{'name':'EXAMPLE_API_KEY','action':'delete'}],'delete');load()
+ assert runtime.get('EXAMPLE_API_KEY') is None
  try:OpenAIProviderClient(config)._get_api_key()
  except LLMProviderError:pass
  else:raise AssertionError('deleted credential returned')
@@ -95,12 +101,29 @@ async def run():
  print('rotation, new Provider, pinned task, deletion and public metadata passed')
 asyncio.run(run())
 """
-            consumer = common + ['-e','QUICKQUIP_ENV_SOCKET=/read/control.sock',
+            consumer = common + ['-e','QUICKQUIP_ENV_MANAGEMENT_ENABLED=true',
+                '-e','INJECTED_ONLY=preserved',
+                '-e','QUICKQUIP_ENV_SOCKET=/read/control.sock',
                 '-e','QUICKQUIP_ENV_WRITE_SOCKET=/write/control.sock',
                 '-e','EXAMPLE_API_KEY=stale-injected',
                 '-v',str(root/'read')+':/read', '-v',str(root/'write')+':/write',
                 IMAGE,'python','-c',program]
             subprocess.run(consumer, check=True)
+            legacy = r"""
+import os, pathlib, threading
+from quickquip.common import env
+root = pathlib.Path('/tmp/legacy'); root.mkdir()
+(root/'.env').write_text('LEGACY=file\\n')
+env.PROJECT_ROOT = root; env._ROOT_ENV_LOADED = False
+os.environ['LEGACY'] = 'injected'
+os.environ['QUICKQUIP_ENV_MANAGEMENT_ENABLED'] = 'false'
+from quickquip.environment.bootstrap import start
+start('bot')
+assert os.environ['LEGACY'] == 'injected'
+assert not (root/'data').exists()
+assert not any(t.name=='environment-refresh' for t in threading.enumerate())
+"""
+            subprocess.run(common+[IMAGE,'python','-c',legacy],check=True)
             # The read endpoint refuses mutation even if a compromised Bot crafts JSON.
             read_only = r"""
 import json,socket

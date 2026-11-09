@@ -15,6 +15,10 @@ export interface Consumer {
   names: string[]
 }
 export interface EnvironmentList {
+  enabled: boolean
+  restart_required: boolean
+  backend_available: boolean
+  reason: string | null
   suggestions?: string[]
   version: string
   variables: Variable[]

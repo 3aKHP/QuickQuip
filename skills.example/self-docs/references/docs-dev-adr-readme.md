@@ -23,6 +23,8 @@
 | [ADR-0010](0010-global-admin-registry.md) | 由项目注册表维护全局管理员 | Accepted | — |
 | [ADR-0011](0011-transactional-deployment-recovery.md) | 以事务部署版本并保留共享运行数据 | Accepted | — |
 | [ADR-0025](0025-tracked-operations-programs.md) | 统一分发运维程序并分离生产配置 | Accepted | — |
+| [ADR-0028](0028-write-only-environment-management.md) | 环境变量只写管理与运行时凭据快照 | Superseded | [ADR-0029](0029-opt-in-environment-compatibility.md) |
+| [ADR-0029](0029-opt-in-environment-compatibility.md) | 显式启用环境管理并保留部署兼容性 | Accepted | — |
 
 ### 配置、会话与模型请求
 
@@ -52,8 +54,6 @@
 | [ADR-0016](0016-trusted-skill-execution.md) | 由部署者管理受信任 Skill 并约束脚本执行 | Accepted | — |
 | [ADR-0017](0017-preset-skill-distribution.md) | 保留可选 Skill 副本并显式检测和同步漂移 | Accepted | — |
 | [ADR-0018](0018-mcp-result-normalization.md) | 将 MCP 结果归一化为受控内部内容 | Accepted | — |
-
-| [ADR-0028](0028-write-only-environment-management.md) | 环境变量只写管理与运行时凭据快照 | Accepted | — |
 
 ## 何时记录
 

@@ -1,3 +1,4 @@
+from datetime import datetime, timezone
 import os
 
 from quickquip.llm.usage_store import LLMUsageStore
@@ -63,8 +64,9 @@ def test_existing_schema_is_migrated_without_rewriting_rows(tmp_path):
         )
         conn.execute(
             "INSERT INTO llm_usage_events (id, ts, provider_id, protocol, model, stream, "
-            "input_tokens, output_tokens) VALUES (1, '2026-08-11T00:00:00+00:00', "
-            "'p', 'claude', 'm', 1, 10, 5)"
+            "input_tokens, output_tokens) VALUES (1, ?, "
+            "'p', 'claude', 'm', 1, 10, 5)",
+            (datetime.now(timezone.utc).isoformat(),),
         )
     store = LLMUsageStore(path)
     store.record({"provider_id": "p2", "protocol": "openai", "model": "m2",
@@ -171,7 +173,8 @@ def test_half_migrated_schema_is_completed(tmp_path):
         conn.execute("ALTER TABLE llm_usage_events ADD COLUMN feature TEXT")
         conn.execute(
             "INSERT INTO llm_usage_events (ts, provider_id, protocol, model, stream, feature) "
-            "VALUES ('2026-08-11T00:00:00+00:00', 'p', 'claude', 'm', 1, 'chat')"
+            "VALUES (?, 'p', 'claude', 'm', 1, 'chat')",
+            (datetime.now(timezone.utc).isoformat(),),
         )
 
     store = LLMUsageStore(path)

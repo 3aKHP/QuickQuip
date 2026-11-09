@@ -83,9 +83,11 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
 <template>
   <section class="environment-panel">
     <h1>环境变量</h1>
-    <fieldset :disabled="busy" :aria-busy="busy">
-    <p>管理根 .env。所有已有值均不回显；空白输入框表示保持原值。启动参数保存后需人工重启。</p>
+    <p v-if="listing && !listing.enabled" role="status">环境变量管理尚未启用。在根 .env 设置 QUICKQUIP_ENV_MANAGEMENT_ENABLED=true，并重启 Bot 和 Web Admin。Docker 部署还需接入 env-agent 模板。</p>
+    <p v-else-if="listing && !listing.backend_available" role="alert">环境变量服务不可用，请检查 env-agent 与通信卷后刷新页面。</p>
     <p v-if="error" role="alert">{{ error }} <button @click="refresh">刷新状态（保留编辑）</button></p>
+    <fieldset v-if="listing?.enabled && listing.backend_available" :disabled="busy" :aria-busy="busy">
+    <p>管理根 .env。所有已有值均不回显；空白输入框表示保持原值。启动参数保存后需人工重启。</p>
     <input v-model="search" aria-label="搜索变量" placeholder="搜索变量名">
     <div><datalist id="environment-suggestions"><option v-for="name in listing?.suggestions" :key="name" :value="name" /></datalist><input v-model="newName" list="environment-suggestions" aria-label="新变量名" placeholder="NEW_PROVIDER_API_KEY"><button @click="add">新增</button></div>
     <table>

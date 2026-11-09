@@ -10,7 +10,7 @@ import re
 import secrets
 import time
 
-from quickquip.common.dotenv import read_environment
+from quickquip.common.dotenv import DELETED, markers, read_environment
 from quickquip.common.config_writes import configuration_write, write_lock
 from quickquip.configuration.text import parse
 from quickquip.llm.config_durability import durable_write
@@ -33,6 +33,8 @@ def mode(name, references=()):
 
 
 def warning(name):
+    if name == 'QUICKQUIP_ENV_MANAGEMENT_ENABLED':
+        return '管理开关在进程启动时读取；修改后需重启 Bot 和 Web Admin。'
     if name.startswith(('QUICKQUIP_DEPLOY_', 'PYTHON', 'LD_', 'COMPOSE_', 'DOCKER_')):
         return '修改会影响后续部署或进程执行环境，请确认目标和恢复方式。'
     if name.startswith(('WEB_ADMIN_', 'ONEBOT_', 'HOST', 'PORT', 'DRIVER')):
@@ -135,8 +137,13 @@ class Store:
             self._own(self.directory)
             self._recover()
             state, raw = self._state()
+            if action == 'initialize':
+                self._adopt_deletions(state, raw)
+                return {'initialized': True}
             if action == 'snapshot':
-                return {'version': state['version'], 'values': self._values(raw, state)}
+                managed, deleted = markers(raw.decode('utf-8'))
+                return {'version': state['version'], 'values': self._values(raw, state),
+                        'managed': sorted(managed), 'deleted': sorted(deleted)}
             if action == 'list':
                 return self._listing(state, raw)
             if action == 'ack':
@@ -210,13 +217,38 @@ class Store:
                     state, row['name'] in desired, desired.get(row['name'], '')
                 ) for row in changed
             }
-            durable_write(self.directory / 'candidate.env', candidate)
-            self._own(self.directory / 'candidate.env')
-            self._write('active.json', {'state': state, 'operations': operations,
-                                        'before': hashlib.sha256(raw).hexdigest()})
-            self._recover()
+            self._commit(state, raw, candidate, operations)
             return {**result, 'consumers': self._consumers(),
                     'states': self._statuses(state, candidate, changed)}
+
+    def _commit(self, state, raw, candidate, operations):
+        state['version'] = hmac.new(
+            state['salt'].encode(), candidate, hashlib.sha256
+        ).hexdigest()
+        durable_write(self.directory / 'candidate.env', candidate)
+        self._own(self.directory / 'candidate.env')
+        self._write('active.json', {'state': state, 'operations': operations,
+                                    'before': hashlib.sha256(raw).hexdigest()})
+        self._recover()
+
+    def _adopt_deletions(self, state, raw):
+        # Only confirmed last operations qualify. A definition restored manually
+        # or by configuration sync takes precedence over historical operations.
+        operations = self._json('operations.json', {})
+        last = {}
+        for operation in sorted(operations.values(), key=lambda item: item.get('saved_at', 0)):
+            for change in operation.get('changes', []):
+                last[change['name']] = change['action']
+        values = parse('.env', raw)
+        _, deleted = markers(raw.decode('utf-8'))
+        adopted = sorted(name for name, action in last.items()
+                         if action == 'delete' and name not in values and name not in deleted)
+        if adopted:
+            prefix = b'\n' if raw and not raw.endswith(b'\n') else b''
+            candidate = raw + prefix + ''.join(
+                '# quickquip:deleted ' + name + '\n' for name in adopted
+            ).encode()
+            self._commit(state, raw, candidate, operations)
 
     @staticmethod
     def _fingerprint(state, present, value):
@@ -274,6 +306,7 @@ class Store:
         if not isinstance(changes, list) or not changes or len(changes) > 256:
             raise EnvironmentError('Submit between 1 and 256 changes')
         old = parse('.env', raw)
+        _, deleted = markers(raw.decode('utf-8'))
         from quickquip.environment.policy import provider_references
         references = provider_references(self.root)
         edits = {}
@@ -284,7 +317,7 @@ class Store:
                 raise EnvironmentError('Invalid or duplicate variable name')
             if op not in ('create', 'replace', 'empty', 'delete'):
                 raise EnvironmentError('Invalid edit action')
-            if (op == 'create') == (name in old):
+            if (op == 'create') == (name in old and name not in deleted):
                 raise EnvironmentError('Variable existence changed: ' + name)
             value = '' if op == 'empty' else item.get('value', '')
             if not isinstance(value, str) or '\x00' in value or len(value) > 65536:
@@ -301,15 +334,21 @@ class Store:
         output = []
         seen = set()
         for binding in parse_stream(StringIO(raw.decode())):
-            if binding.key not in edits:
+            key = binding.key
+            if key is None:
+                match = DELETED.fullmatch(binding.original.string.strip())
+                if match:
+                    key = match[1]
+            if key not in edits:
                 output.append(binding.original.string)
-            elif binding.key not in seen:
-                output.append(edits[binding.key] or '')
-                seen.add(binding.key)
+            elif key not in seen:
+                output.append(edits[key] or '# quickquip:deleted ' + key + '\n')
+                seen.add(key)
         if output and not output[-1].endswith('\n'):
             output.append('\n')
         output.extend(
-            value for key, value in edits.items() if key not in seen and value is not None
+            value or '# quickquip:deleted ' + key + '\n'
+            for key, value in edits.items() if key not in seen
         )
         candidate = ''.join(output).replace('\r\n', '\n').encode()
         parse('.env', candidate)

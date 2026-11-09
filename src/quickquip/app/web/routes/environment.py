@@ -8,6 +8,8 @@ from pydantic import BaseModel, Field, SecretStr
 from quickquip.app.web import auth
 from quickquip.app.web.audit import audit_logger
 from quickquip.app.web.settings import get_web_admin_password
+from quickquip.common.env import environment_management_enabled
+from quickquip.configuration.errors import ConfigError
 from quickquip.environment.transport import call
 from quickquip.environment.store import EnvironmentError
 from quickquip.app.web.routes.llm_configuration import ConfigurationRoute
@@ -32,6 +34,9 @@ class Submission(Preview):
 
 
 def invoke(action, body=None):
+    if not environment_management_enabled():
+        raise ConfigError('environment_management_disabled',
+                          'Enable environment management and restart Bot/Web first')
     try:
         return call(action, body)
     except EnvironmentError:
@@ -48,7 +53,17 @@ def payload(body):
 
 @router.get('')
 def listing():
-    return invoke('list')
+    enabled = environment_management_enabled()
+    capabilities = {'enabled': enabled, 'restart_required': not enabled,
+                    'backend_available': False, 'reason': 'environment_management_disabled'}
+    empty = {'version': '', 'variables': [], 'consumers': {}, 'suggestions': []}
+    if not enabled:
+        return {**empty, **capabilities}
+    try:
+        result = call('list')
+    except (OSError, EnvironmentError):
+        return {**empty, **capabilities, 'reason': 'environment_backend_unavailable'}
+    return {**result, **capabilities, 'backend_available': True, 'reason': None}
 
 
 @router.post('/preview')
