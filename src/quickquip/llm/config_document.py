@@ -52,12 +52,14 @@ __all__ = [
     "dependencies",
     "resolve_model_provider",
     "effective_parameters",
+    "environment_occurrences",
     "environment_references",
 ]
 FORMAT_VERSION = 2
 ROUTES = ("daily_summary", "daily_briefing", "weekly_report", "monthly_report")
 _VARIABLE = re.compile(r"[A-Za-z_][A-Za-z0-9_]*\Z")
 _REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)\}")
+_OCCURRENCE_REFERENCE = re.compile(r"\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}")
 _SECRET_KEY = re.compile(
     r"(?:(?:.*[-_])?authorization|x-api-key|key|api[_-]?key|access[_-]?token|"
     r"refresh[_-]?token|token|password|secret|cookie|.*[_-](?:token|secret|password|key))$",
@@ -216,6 +218,46 @@ def _secrets(value: Any, path: str = "") -> None:
             if _SECRET_KEY.fullmatch(key) and child:
                 if not _REFERENCE.search(child) or _REFERENCE.sub("", child).strip():
                     reject(path, "地址中的认证值须完全使用环境变量引用", "literal_secret")
+
+
+def environment_occurrences(value: Any, *, path: str = "") -> list[dict]:
+    """Project environment variable occurrences without exposing their source values."""
+    occurrences = []
+
+    def visit(child: Any, location: str) -> None:
+        if isinstance(child, dict):
+            for key, item in child.items():
+                child_path = f"{location}.{key}" if location else str(key)
+                if (
+                    key == "api_key_env"
+                    and isinstance(item, str)
+                    and item
+                    and _VARIABLE.fullmatch(item)
+                ):
+                    occurrences.append({
+                        "name": item,
+                        "path": child_path,
+                        "raw_expression": item,
+                        "default_present": False,
+                        "kind": "configured_name",
+                    })
+                visit(item, child_path)
+        elif isinstance(child, list):
+            for index, item in enumerate(child):
+                visit(item, f"{location}[{index}]")
+        elif isinstance(child, str):
+            for match in _OCCURRENCE_REFERENCE.finditer(child):
+                name = match.group(1)
+                occurrences.append({
+                    "name": name,
+                    "path": location,
+                    "raw_expression": f"${{{name}}}",
+                    "default_present": match.group(2) is not None,
+                    "kind": "interpolation",
+                })
+
+    visit(value, path)
+    return occurrences
 
 
 def environment_references(doc: dict) -> list[str]:

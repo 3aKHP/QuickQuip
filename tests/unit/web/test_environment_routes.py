@@ -83,3 +83,38 @@ def test_enabled_unavailable_backend_exposes_capabilities_without_values(client,
     assert response.json()['backend_available'] is False
     assert response.json()['reason'] == 'environment_backend_unavailable'
     assert 'private socket' not in response.text
+
+
+def test_directory_is_opt_in_and_disabled_directory_does_not_touch_backend(client, monkeypatch):
+    client, store = client
+    client.post('/ops/api/auth/login', json={'password': 'admin-password'})
+    baseline = client.get('/ops/api/environment')
+    assert 'directory' not in baseline.json()
+    response = client.get('/ops/api/environment?include_directory=true')
+    assert response.status_code == 200
+    assert response.json()['directory'][0]['name'] == 'EXISTING_KEY'
+    assert response.json()['directory_errors'] == []
+    assert 'old-secret' not in response.text
+
+    monkeypatch.setattr(routes, 'environment_management_enabled', lambda: False)
+    def unexpected(*args, **kwargs):
+        pytest.fail('Disabled directory accessed its backend')
+    monkeypatch.setattr(routes, 'call', unexpected)
+    disabled = client.get('/ops/api/environment?include_directory=true')
+    assert disabled.json()['directory'] == []
+    assert disabled.json()['taxonomy'] == []
+    assert disabled.json()['directory_errors'] == []
+    assert store.path.read_text() == 'EXISTING_KEY=old-secret\n'
+
+
+def test_unavailable_backend_returns_empty_opt_in_directory(client, monkeypatch):
+    client, _ = client
+    def unavailable(*args, **kwargs):
+        raise OSError('private socket/path must not be echoed')
+    monkeypatch.setattr(routes, 'call', unavailable)
+    client.post('/ops/api/auth/login', json={'password': 'admin-password'})
+    response = client.get('/ops/api/environment?include_directory=true')
+    assert response.json()['directory'] == []
+    assert response.json()['directory_errors'] == []
+    assert response.json()['backend_available'] is False
+    assert 'private socket' not in response.text

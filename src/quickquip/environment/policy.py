@@ -5,21 +5,27 @@ import re
 import sqlite3
 
 
-def provider_references(root):
+def read_llm_documents(root):
     root = Path(root)
-    references = {}
     documents = []
-    for relative, query in (
-        ('config/managed/config.db', 'SELECT document FROM config_meta'),
-        ('data/config_runtime.db', 'SELECT document FROM execution_snapshots '
+    for scope, relative, query in (
+        ('draft', 'config/managed/config.db', 'SELECT document FROM config_meta'),
+        ('published', 'data/config_runtime.db', 'SELECT document FROM execution_snapshots '
          'JOIN publication ON revision=published_revision'),
     ):
         path = root / relative
         if not path.exists():
             continue
         with sqlite3.connect(path.resolve().as_uri() + '?mode=ro', uri=True) as connection:
-            documents.extend(json.loads(row[0]) for row in connection.execute(query))
-    for document in documents:
+            documents.extend((scope, json.loads(row[0])) for row in connection.execute(query))
+    return documents
+
+
+def provider_references(root, documents=None):
+    if documents is None:
+        documents = read_llm_documents(root)
+    references = {}
+    for _, document in documents:
         for provider in document.get('providers', []):
             names = {provider.get('api_key_env', '')}
             for value in provider.get('headers', {}).values():

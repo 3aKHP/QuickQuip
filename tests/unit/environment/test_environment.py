@@ -262,3 +262,64 @@ def test_metadata_is_read_as_utf8_in_a_non_utf8_native_process(store):
         **os.environ, 'PYTHONUTF8': '0', 'PYTHONCOERCECLOCALE': '0', 'LC_ALL': 'C',
         'PYTHONPATH': os.pathsep.join(map(str, sys.path)),
     })
+
+
+def test_directory_is_opt_in_and_reuses_documents_without_exposing_values(store, monkeypatch):
+    from quickquip.llm.config_service import ConfigService
+    from quickquip.environment import policy
+    service = ConfigService(store.root / 'config/managed/config.db')
+    service.initialize()
+    draft = service.read()
+    draft['document']['providers'] = [{
+        'id': 'new-provider', 'protocol': 'openai', 'base_url': 'https://example.test/v1',
+        'api_key_env': 'EXAMPLE_API_KEY', 'default_model': 'test',
+        'models': [{'model': 'test'}],
+    }, {
+        'id': 'missing-provider', 'protocol': 'openai', 'base_url': 'https://example.test/v1',
+        'api_key_env': 'MISSING_KEY', 'default_model': 'test', 'models': [{'model': 'test'}],
+    }]
+    service.replace(draft['document'], draft['revision'])
+    generation = store.root / 'config/generation.toml'
+    generation.write_text('''
+[generation.image]
+enabled = true
+[[generation.image.providers]]
+id = "shared-image"
+protocol = "minimax_images"
+api_key_env = "EXAMPLE_API_KEY"
+''')
+    calls = 0
+    original = policy.read_llm_documents
+    def counted(root):
+        nonlocal calls
+        calls += 1
+        return original(root)
+    monkeypatch.setattr(policy, 'read_llm_documents', counted)
+
+    baseline = store.execute('list')
+    calls = 0
+    result = store.execute('list', {'include_directory': True})
+
+    assert 'directory' not in baseline
+    assert 'directory_errors' not in baseline
+    assert baseline['variables'] == result['variables']
+    assert baseline['suggestions'] == result['suggestions']
+    assert calls == 1
+    shared = next(row for row in result['directory'] if row['name'] == 'EXAMPLE_API_KEY')
+    assert shared['groups'] == ['services.native.generation', 'services.native.llm']
+    missing = next(row for row in result['directory'] if row['name'] == 'MISSING_KEY')
+    assert missing['states'] == {} and missing['assigned'] is False
+    assert missing['relations'][0]['required_action'] == 'publish'
+    assert 'old-key' not in json.dumps(result)
+    preview = store.execute('preview', {
+        'expected_version': result['version'],
+        'changes': [{'name': 'OTHER_KEY', 'action': 'create', 'value': 'sentinel'}],
+    })
+    assert 'directory' not in preview and 'sentinel' not in json.dumps(preview)
+
+
+def test_missing_document_stores_are_not_created_by_readonly_projection(tmp_path):
+    from quickquip.environment.policy import read_llm_documents
+    assert read_llm_documents(tmp_path) == []
+    assert not (tmp_path / 'config/managed/config.db').exists()
+    assert not (tmp_path / 'data/config_runtime.db').exists()

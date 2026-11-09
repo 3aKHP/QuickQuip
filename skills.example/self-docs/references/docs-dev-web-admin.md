@@ -72,4 +72,16 @@
 
 变量元数据的 `mode` 为 `hot`（已适配热更新）、`credential`（草稿或已发布渠道引用的认证变量）、`restart`（已识别启动参数）或 `unknown`（尚未识别用途）。未知用途变量同步到进程快照后，状态为 `synced`；已适配热更新和认证变量确认版本后为 `loaded`。新增变量的预览由后端判定用途；保存渠道引用后，列表与操作查询会重新分类。变量名后缀不参与凭据分类。
 
+### 只读消费目录
+
+`GET /ops/api/environment?include_directory=true` 在旧响应上附加 `taxonomy`、`directory` 和 `directory_errors`。未带该参数的请求不构建或返回目录，响应契约不变。管理关闭或后端不可用时，请求目录会得到这三个字段的空数组，其他能力字段保持原义。
+
+`taxonomy` 提供稳定的领域/小组 ID 和显示名。每个 `directory` 项按变量名唯一归并，保留旧 `assigned/mode/references/warning/states`，并增加 `groups`、`relations`、`sources` 与 `evidence_flags`。根文件未定义但已被配置引用的变量也会进入目录，其 `states` 为空；它们不会进入旧 `variables`，也不会获得伪造的进程状态。
+
+每条消费关系记录组件、对象 ID、原始字段路径、`config_scope=draft/published/file`、声明的 `enabled/required`（无法确定时为 `null`）、名称类型、源变量名、目标服务/类型/名称、解析与传递方式，以及 `required_action`。草稿关系使用 `publish`；已发布 LLM 凭据及按任务展开的参数使用 `next_task`；需要重新编译并重建资源的关系使用 `apply`；generation 进程环境关系使用 `restart_or_recreate`。`observation=not_observed` 表示没有逐消费者回执，Bot/Web 的旧 `states` 只描述进程快照或启动值比较。
+
+`sources` 记录 `llm_config` 或 `generation_file` 的来源类型、生命周期、原始路径和解析上下文。`raw_expression` 只保留变量名或 `${NAME}` 规范 token；默认值原文、完整 Header、URL、配置值和展开结果均不进入响应。目录投影读取原始草稿/已发布文档及 generation 配置，但不启动运行时、MCP 连接、探活或传输层，也不把任意进程环境名称导入目录。
+
+单个新增来源不可读或格式错误时，其他目录项仍返回，`directory_errors` 只含组件和固定错误码，不包含异常正文、配置内容或宿主机路径。目录响应沿用私有传输的 15 秒与 2 MiB 限制，超限按现有后端不可用/响应过大处理，不静默截断关系。
+
 管理关闭时，预览、保存和操作查询返回 `409` 与 `code=environment_management_disabled`，不访问环境存储。管理开关按进程启动值固定；后端不可用时启用进程不会降级到旧凭据。环境值仅通过私有后端快照传给进程，公开接口继续保持只写契约。启用与运维步骤见[环境变量管理](../admin/environment.md)。

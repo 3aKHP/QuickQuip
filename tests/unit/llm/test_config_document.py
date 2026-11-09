@@ -12,6 +12,8 @@ from quickquip.llm.config_document import (
     compile_document,
     effective_parameters,
     empty_document,
+    environment_occurrences,
+    environment_references,
     resolve_model_provider,
     upgrade_document,
     validate_document,
@@ -85,6 +87,108 @@ def test_null_inherits_and_sources_remain_unexpanded(tmp_path, monkeypatch):
     assert effective["temperature"]["source"] == "provider"
     assert effective["user_agent"]["value"] == "${QQ_AGENT}"
     assert "private-sentinel" not in json.dumps(effective)
+
+
+def test_environment_occurrences_project_nested_references_without_source_values():
+    sentinel = "private-occurrence-sentinel"
+    value = {
+        "providers": [
+            {
+                "api_key_env": "QQ_TEST_KEY",
+                "headers": {
+                    "Authorization": f"Bearer ${{QQ_PRIMARY}} ${{QQ_FALLBACK:-{sentinel}}}"
+                },
+            }
+        ],
+        "settings": {
+            "mcp": {
+                "servers": [
+                    {
+                        "headers": {"Authorization": "Bearer ${QQ_MCP_TOKEN:-}"},
+                        "url": f"https://example.test/?token=${{QQ_URL_TOKEN:-{sentinel}}}",
+                    }
+                ]
+            }
+        },
+    }
+
+    occurrences = environment_occurrences(value)
+
+    assert occurrences == [
+        {
+            "name": "QQ_TEST_KEY",
+            "path": "providers[0].api_key_env",
+            "raw_expression": "QQ_TEST_KEY",
+            "default_present": False,
+            "kind": "configured_name",
+        },
+        {
+            "name": "QQ_PRIMARY",
+            "path": "providers[0].headers.Authorization",
+            "raw_expression": "${QQ_PRIMARY}",
+            "default_present": False,
+            "kind": "interpolation",
+        },
+        {
+            "name": "QQ_FALLBACK",
+            "path": "providers[0].headers.Authorization",
+            "raw_expression": "${QQ_FALLBACK}",
+            "default_present": True,
+            "kind": "interpolation",
+        },
+        {
+            "name": "QQ_MCP_TOKEN",
+            "path": "settings.mcp.servers[0].headers.Authorization",
+            "raw_expression": "${QQ_MCP_TOKEN}",
+            "default_present": True,
+            "kind": "interpolation",
+        },
+        {
+            "name": "QQ_URL_TOKEN",
+            "path": "settings.mcp.servers[0].url",
+            "raw_expression": "${QQ_URL_TOKEN}",
+            "default_present": True,
+            "kind": "interpolation",
+        },
+    ]
+    assert sentinel not in json.dumps(occurrences)
+
+
+def test_environment_occurrences_honor_path_prefix_and_ignore_invalid_values():
+    value = [
+        {"api_key_env": "NOT-VALID"},
+        {"api_key_env": "${QQ_VALID}"},
+        {"api_key_env": ""},
+        None,
+        3,
+        False,
+        object(),
+    ]
+
+    assert environment_occurrences(value, path="root") == [
+        {
+            "name": "QQ_VALID",
+            "path": "root[1].api_key_env",
+            "raw_expression": "${QQ_VALID}",
+            "default_present": False,
+            "kind": "interpolation",
+        }
+    ]
+    assert environment_occurrences(object()) == []
+
+
+def test_environment_references_keep_legacy_complete_only_interpolation_semantics():
+    doc = {
+        "api_key_env": "QQ_CONFIGURED",
+        "values": [
+            "${QQ_COMPLETE}",
+            "prefix ${QQ_SECOND} ${QQ_COMPLETE}",
+            "${QQ_DEFAULT:-private-sentinel}",
+            "${QQ_EMPTY_DEFAULT:-}",
+        ],
+    }
+
+    assert environment_references(doc) == ["QQ_COMPLETE", "QQ_CONFIGURED", "QQ_SECOND"]
 
 
 def test_gemini_empty_response_recovery_defaults_and_model_overrides(tmp_path):
