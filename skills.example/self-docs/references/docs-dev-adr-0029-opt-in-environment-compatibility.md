@@ -19,7 +19,7 @@ QuickQuip 支持源码、Windows 懒人包和用户维护的 Compose。环境变
 
 保留只写接口、二次口令确认、版本检查和可恢复文件事务。Docker agent 挂载部署根，通过读取与管理两个私有通信卷分别授权 Bot 与 Web；不挂载 Docker Socket。Trace 保持原始报文契约。
 
-使用 `QUICKQUIP_ENV_MANAGEMENT_ENABLED` 显式启用，默认关闭，并在进程启动时固定。关闭时沿用启动环境、跳过 agent 和轮询，不创建环境管理状态。Docker 模板在 agent、Bot 与 Web 三个服务中显式启用；现有私有 Compose 可继续保持关闭。公开能力元信息让页面展示启用条件和后端状态，关闭时拒绝环境操作。
+使用 `QUICKQUIP_ENV_MANAGEMENT_ENABLED` 显式启用，默认关闭，并在进程启动时固定。关闭时 Bot/Web 沿用启动环境、跳过 agent 和轮询，不创建环境管理状态。关闭态 agent 保留私有 Socket 监听以满足旧编排健康依赖，请求返回 disabled，完全不访问环境存储。Docker 模板在 agent、Bot 与 Web 三个服务中显式启用；现有私有 Compose 可继续保持关闭。公开能力元信息让页面展示启用条件和后端状态，关闭时拒绝环境操作。
 
 未标记的 `.env` 交由 python-dotenv 解析，保留启动加载的外部环境优先和配置工具的文件优先规则。`# quickquip:literal` 绑定通过占位值屏蔽插值，完成依赖解析后恢复字面内容，同时兼容已有保存格式。
 

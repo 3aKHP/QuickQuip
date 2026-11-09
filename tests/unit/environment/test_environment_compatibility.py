@@ -304,3 +304,53 @@ def test_definition_and_deletion_in_one_input_still_require_reconciliation():
 
     with pytest.raises(ConfigError):
         text.parse('.env', b'KEY=defined\n# quickquip:deleted KEY\n')
+
+
+@pytest.mark.skipif(os.name == 'nt', reason='Docker agent uses Unix sockets')
+@pytest.mark.parametrize('configured', [None, 'false'])
+def test_disabled_agent_keeps_legacy_compose_health_without_accessing_store(tmp_path, configured):
+    import json
+    from pathlib import Path
+    import socket
+    import tempfile
+    import time
+
+    (tmp_path / '.env').write_text('KEY=private-sentinel\n', encoding='utf-8')
+    program = (
+        'from pathlib import Path; from quickquip.common import env; '
+        f'env.PROJECT_ROOT=Path({str(tmp_path)!r}); env._ROOT_ENV_LOADED=False; '
+        'from quickquip.environment.transport import main; main()'
+    )
+    environment = {**os.environ, 'QUICKQUIP_ENV_ROOT': str(tmp_path),
+                   'PYTHONPATH': os.pathsep.join(map(str, sys.path))}
+    environment.pop('QUICKQUIP_ENV_MANAGEMENT_ENABLED', None)
+    if configured is not None:
+        environment['QUICKQUIP_ENV_MANAGEMENT_ENABLED'] = configured
+    # Keep Unix socket names below the platform's pathname limit.
+    with tempfile.TemporaryDirectory(prefix='qq-env-disabled-') as directory:
+        read, write = Path(directory) / 'read.sock', Path(directory) / 'write.sock'
+        environment.update(QUICKQUIP_ENV_SOCKET=str(read), QUICKQUIP_ENV_WRITE_SOCKET=str(write))
+        process = subprocess.Popen([sys.executable, '-c', program], env=environment)
+        try:
+            deadline = time.monotonic() + 10
+            while not read.exists() or not write.exists():
+                assert process.poll() is None, 'Disabled agent exited before Compose health check'
+                assert time.monotonic() < deadline, 'Agent sockets did not become ready'
+                time.sleep(0.05)
+            # This is the health check shipped by the previous Compose template.
+            with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as health:
+                health.settimeout(2)
+                health.connect(str(read))
+            for address in (read, write):
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as client:
+                    client.settimeout(2)
+                    client.connect(str(address))
+                    client.sendall(b'{"action":"snapshot"}\n')
+                    assert json.loads(client.makefile('rb').readline()) == {
+                        'error': 'environment_management_disabled'}
+            assert process.poll() is None
+            assert not (tmp_path / 'data').exists()
+            assert (tmp_path / '.env').read_text() == 'KEY=private-sentinel\n'
+        finally:
+            process.terminate()
+            process.wait(timeout=5)

@@ -39,12 +39,11 @@ def call(action, body=None):
 
 
 def main():
-    if not environment_management_enabled():
-        raise EnvironmentError('environment_management_disabled')
-    root = Path(os.environ['QUICKQUIP_ENV_ROOT'])
+    enabled = environment_management_enabled()
     address = Path(os.environ['QUICKQUIP_ENV_SOCKET'])
-    store = Store(root)
-    store.execute('initialize')
+    store = Store(Path(os.environ['QUICKQUIP_ENV_ROOT'])) if enabled else None
+    if store is not None:
+        store.execute('initialize')
     address.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
 
     class Handler(socketserver.StreamRequestHandler):
@@ -56,6 +55,9 @@ def main():
                 if len(raw) > LIMIT:
                     raise EnvironmentError('Request too large')
                 if not raw:
+                    return
+                if store is None:
+                    self.wfile.write(b'{"error":"environment_management_disabled"}\n')
                     return
                 request = json.loads(raw)
                 if request['action'] == 'initialize':
