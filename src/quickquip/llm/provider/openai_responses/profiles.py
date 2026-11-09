@@ -7,6 +7,9 @@ profile 是"有日期的兼容契约"：新能力不得改写既有 profile id �
 - ``codex-http-relay``：Codex 形态中转（HTTP+SSE）。差异点：不发
   ``service_tier``；识别 ``codex.*`` 等预期附加事件并静默忽略；终态 ``output``
   可能缺省可选字段，以流式 ``output_item.done`` 的完整 item 为回放基准。
+- ``codex-relay-hosted-tools``：在 ``codex-http-relay`` 全部能力位之上，
+  由客户端显式声明 hosted 内置工具（2026-11-09 中转注入回归适配，见
+  该注册项注记）。
 
 深搜/MiMo 式 stateless subset profile（无 ``store:false``、明文 reasoning）
 未随首批引入；引入时在此补注册项与能力位，序列化/解析侧按能力位分支。
@@ -47,6 +50,9 @@ class ResponsesProfile:
     recognize_relay_events: bool
     # 终态 output 与流式 output_item.done 逐项子集核对后以流式为准。
     reconcile_relay_items: bool
+    # 客户端在 tools 数组显式声明的 hosted 内置工具类型集合；空 = 不声明。
+    # wire 形状映射单源 request.HOSTED_TOOL_WIRE（与 wire_efforts 同构）。
+    hosted_tools: frozenset[str] = frozenset()
 
 
 PROFILES: dict[str, ResponsesProfile] = {
@@ -71,6 +77,22 @@ PROFILES: dict[str, ResponsesProfile] = {
         service_tier=None,
         recognize_relay_events=True,
         reconcile_relay_items=True,
+    ),
+    # 2026-11-09 起 CLIProxyAPI ≥8.0.57 的 ensureImageGenerationTool 注入被
+    # 模型级 use_responses_lite 目录判定无条件跳过，标准协议请求被连坐，
+    # 对话内生图静默失效（上游 issue router-for-me/CLIProxyAPI#7384）。本档
+    # 让客户端按 Responses 协议正统形态显式声明 hosted 工具，替代中转的
+    # 兼容注入层。上游修复后长期保留：注入自带去重，wire 上仍只有一份工具；
+    # 回退 = config 修订把 profile id 切回 codex-http-relay。
+    "codex-relay-hosted-tools": ResponsesProfile(
+        profile_id="codex-relay-hosted-tools",
+        # 四个能力位与 codex-http-relay 逐位相等（完整继承；守护测试
+        # test_codex_relay_hosted_tools_inherits_relay_bits 断言不漂移）。
+        wire_efforts=frozenset({"low", "medium", "high", "xhigh", "max"}),
+        service_tier=None,
+        recognize_relay_events=True,
+        reconcile_relay_items=True,
+        hosted_tools=frozenset({"image_generation"}),
     ),
 }
 

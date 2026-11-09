@@ -375,6 +375,7 @@
                           "responses_profile": {
                             "enum": [
                               "codex-http-relay",
+                              "codex-relay-hosted-tools",
                               "openai-public",
                               null
                             ],
@@ -596,6 +597,7 @@
                     "responses_profile": {
                       "enum": [
                         "codex-http-relay",
+                        "codex-relay-hosted-tools",
                         "openai-public",
                         null
                       ],
@@ -1827,6 +1829,7 @@
                         "responses_profile": {
                           "enum": [
                             "codex-http-relay",
+                            "codex-relay-hosted-tools",
                             "openai-public",
                             null
                           ],
@@ -2048,6 +2051,7 @@
                   "responses_profile": {
                     "enum": [
                       "codex-http-relay",
+                      "codex-relay-hosted-tools",
                       "openai-public",
                       null
                     ],
@@ -2369,6 +2373,7 @@
                           "responses_profile": {
                             "enum": [
                               "codex-http-relay",
+                              "codex-relay-hosted-tools",
                               "openai-public",
                               null
                             ],
@@ -2590,6 +2595,7 @@
                     "responses_profile": {
                       "enum": [
                         "codex-http-relay",
+                        "codex-relay-hosted-tools",
                         "openai-public",
                         null
                       ],

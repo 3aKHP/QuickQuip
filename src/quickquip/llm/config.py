@@ -233,7 +233,9 @@ DISABLED_PROVIDER_REPLY = (
 # openai_responses 配置词表（单一事实来源）：profile 注册表与六档映射
 # （provider/openai_responses/）从本模块取词表——config 不能 import
 # provider 包（base.py 依赖 config，反向才不构成环），守护测试断言两侧相等。
-RESPONSES_PROFILE_IDS = frozenset({"openai-public", "codex-http-relay"})
+RESPONSES_PROFILE_IDS = frozenset(
+    {"openai-public", "codex-http-relay", "codex-relay-hosted-tools"}
+)
 REASONING_EFFORT_CHOICES = ("low", "medium", "high", "xhigh", "max", "ultra")
 DEFAULT_RESPONSES_PROFILE_ID = "openai-public"
 

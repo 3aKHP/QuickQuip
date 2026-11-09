@@ -31,6 +31,8 @@ from quickquip.llm.provider.openai_responses.profiles import (
     resolve_profile,
 )
 from quickquip.llm.provider.openai_responses.request import (
+    HOSTED_TOOL_WIRE,
+    _append_hosted_tools,
     build_responses_payload,
     reasoning_control,
     serialize_input_items,
@@ -155,6 +157,59 @@ def test_payload_tools_declaration():
     ]
     assert payload["tool_choice"] == "auto"
     assert payload["parallel_tool_calls"] is True
+
+
+_HOSTED_IMAGE_TOOL = {"type": "image_generation", "output_format": "png"}
+
+
+def test_payload_hosted_tools_declaration_appends_image_tool():
+    """codex-relay-hosted-tools：function specs 后追加 image_generation 声明。"""
+    payload = _payload(
+        _request(
+            [LLMConversationMessage(role="user", content="画一只猫")],
+            tools=[_tool_spec()],
+            allow_tool_calls=True,
+        ),
+        _config(responses_profile="codex-relay-hosted-tools"),
+    )
+    assert payload["tools"] == [
+        {
+            "type": "function",
+            "name": "get_identity",
+            "description": "身份查询",
+            "parameters": _tool_spec().input_schema,
+            "strict": False,
+        },
+        _HOSTED_IMAGE_TOOL,
+    ]
+    assert payload["tool_choice"] == "auto"
+    assert payload["parallel_tool_calls"] is True
+    assert "service_tier" not in payload  # 继承 codex-http-relay
+
+
+def test_payload_hosted_tools_declares_on_bare_request():
+    """裸请求（无 function specs）也声明 hosted 工具，形状对齐旧中转注入
+    的 no-tools 分支：只带 tools 数组，不发 tool_choice/parallel。"""
+    payload = _payload(
+        _request(
+            [LLMConversationMessage(role="user", content="画一只猫")],
+            tools=[],
+            allow_tool_calls=True,
+        ),
+        _config(responses_profile="codex-relay-hosted-tools"),
+    )
+    assert payload["tools"] == [_HOSTED_IMAGE_TOOL]
+    assert "tool_choice" not in payload
+    assert "parallel_tool_calls" not in payload
+
+
+def test_payload_hosted_tools_skipped_when_tool_calls_disallowed():
+    """工具总开关关闭时不声明 hosted 工具（quick_judge 等裸链路不受影响）。"""
+    payload = _payload(
+        _request([LLMConversationMessage(role="user", content="画一只猫")]),
+        _config(responses_profile="codex-relay-hosted-tools"),
+    )
+    assert "tools" not in payload
 
 
 # ── reasoning 档位映射 ─────────────────────────────────────────────────────
@@ -832,6 +887,34 @@ def test_profiles_registry_matches_config_vocabulary():
     for profile in PROFILES.values():
         assert profile.wire_efforts <= set(REASONING_EFFORT_TIERS)
         assert profile.wire_efforts
+        # hosted 工具类型必须有 wire 形状（失配 = 静态编程错误）
+        assert profile.hosted_tools <= set(HOSTED_TOOL_WIRE)
+
+
+def test_codex_relay_hosted_tools_inherits_relay_bits():
+    """codex-relay-hosted-tools 完整继承 codex-http-relay 四能力位，不漂移。"""
+    relay = PROFILES["codex-http-relay"]
+    hosted = PROFILES["codex-relay-hosted-tools"]
+    assert (
+        hosted.wire_efforts,
+        hosted.service_tier,
+        hosted.recognize_relay_events,
+        hosted.reconcile_relay_items,
+    ) == (
+        relay.wire_efforts,
+        relay.service_tier,
+        relay.recognize_relay_events,
+        relay.reconcile_relay_items,
+    )
+    assert hosted.hosted_tools == frozenset({"image_generation"})
+
+
+def test_append_hosted_tools_dedupes_existing_type():
+    """契约守卫：请求侧已含同型条目时不重复声明（防 tools 表达扩展叠加）。"""
+    tools = _append_hosted_tools(
+        [dict(_HOSTED_IMAGE_TOOL)], frozenset({"image_generation"})
+    )
+    assert tools == [_HOSTED_IMAGE_TOOL]
 
 
 def _load_config(tmp_path: Path, provider_body: str):

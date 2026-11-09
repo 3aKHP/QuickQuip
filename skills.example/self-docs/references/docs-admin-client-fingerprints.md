@@ -33,7 +33,7 @@ Profile 定义了 QuickQuip 向模型上游 API 发送请求时的**客户端名
 - **缺省行为与本地覆盖**：渠道未配置或选择 `default` 时，自动采用上表对应的协议默认模板。如果你在本地 `config/client_profiles/default.toml` 放置了自定义覆盖文件，整份模板以本地文件为准（升级版本前请核对本地文件中的协议配置及手工 Header／Body 字段）。若需要传统通用请求形态，可直接切换为 `legacy-claude`、`legacy-gemini`，或按后文示例编写自定义模板。
 - **配置层级与职责边界**：
   - 在导出 JSON 中，`client_fingerprint` 位于**渠道（Provider）对象层级**；模型级的 `parameters` 覆盖**不接受**该字段。
-  - 它与 OpenAI Responses 协议的后端能力开关 `responses_profile`（`openai-public` / `codex-http-relay`）相互独立、分别配置。
+  - 它与 OpenAI Responses 协议的后端能力开关 `responses_profile`（`openai-public` / `codex-http-relay` / `codex-relay-hosted-tools`）相互独立、分别配置。
 - **首次从旧版 `llm.toml` 迁移时的冲突处理**：
   如果旧 TOML 中手写了被新版默认 Profile 接管的 Body 或 Header 字段，首次运行 `init` 初始化会先报错拦截。请先按[首次迁移的 Profile 字段冲突](llm-configuration.md#首次迁移的-profile-字段冲突)清理迁移输入完成入库，再进入 Web 后台切换兼容 Profile（数据库就绪后，切换 Profile 与调整手工字段可在同一个草稿中一并保存并应用）。
 

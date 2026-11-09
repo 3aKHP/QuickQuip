@@ -13,6 +13,9 @@
 - 当前循环 assistant 的原生 output items（含 reasoning 密文）按原顺序
   原样回放，同一原生批次只序列化一次；通用字段（content/tool_calls/
   thinking_blocks）此时不再二次投影。
+- profile.hosted_tools 声明的 hosted 内置工具按 ``HOSTED_TOOL_WIRE``
+  追加进 tools 数组；无 function specs 的裸请求也声明（对齐中转注入层
+  的 no-tools 分支行为）。
 """
 from __future__ import annotations
 
@@ -47,6 +50,14 @@ _EFFORT_ORDER = REASONING_EFFORT_TIERS
 
 _TOOL_IMAGE_NOTICE = TOOL_IMAGE_FLUSH_NOTICE
 
+# hosted 内置工具的 wire 声明形状（键 = 工具类型，值 = wire 条目），镜像
+# 中转 ensureImageGenerationTool 注入的 imageGenToolArrayJSON。profile 的
+# hosted_tools 必须是键集的子集（守护测试断言；失配属静态编程错误，直接
+# 索引不做运行时分支）。
+HOSTED_TOOL_WIRE: dict[str, dict[str, Any]] = {
+    "image_generation": {"type": "image_generation", "output_format": "png"},
+}
+
 
 def reasoning_control(
     config: ProviderConfig, profile: ResponsesProfile, *, tier: str | None = None
@@ -72,6 +83,42 @@ def reasoning_control(
     return {"effort": effort, "summary": "auto"}
 
 
+def _append_hosted_tools(
+    tools: list[dict[str, Any]], hosted_tools: frozenset[str]
+) -> list[dict[str, Any]]:
+    """按 profile.hosted_tools 追加 hosted 工具声明（客户端侧去重）。
+
+    wire 形状单源 ``HOSTED_TOOL_WIRE``，``sorted`` 保证追加顺序确定性；
+    请求侧已含同型条目时跳过——当前公共 API 的 tools 只能表达 function
+    spec，该去重是防未来表达扩展后声明层叠加重复的契约守卫。
+    """
+    existing = {tool["type"] for tool in tools}
+    appended = [
+        dict(HOSTED_TOOL_WIRE[tool_type])
+        for tool_type in sorted(hosted_tools)
+        if tool_type not in existing
+    ]
+    return [*tools, *appended]
+
+
+def _serialize_tools(
+    request: LLMRequest, profile: ResponsesProfile
+) -> list[dict[str, Any]]:
+    """function specs 序列化 + profile.hosted_tools 的 hosted 工具声明。"""
+    tools: list[dict[str, Any]] = [
+        {
+            "type": "function",
+            "name": spec.name,
+            "description": spec.description,
+            "parameters": spec.input_schema,
+            # 保留工具的可选参数，避免上游自动转为严格模式。
+            "strict": False,
+        }
+        for spec in request.tools
+    ]
+    return _append_hosted_tools(tools, profile.hosted_tools)
+
+
 def build_responses_payload(
     request: LLMRequest,
     config: ProviderConfig,
@@ -93,20 +140,15 @@ def build_responses_payload(
     }
     if request.system_prompt:
         payload["instructions"] = request.system_prompt
-    if request.allow_tool_calls and request.tools:
-        payload["tools"] = [
-            {
-                "type": "function",
-                "name": spec.name,
-                "description": spec.description,
-                "parameters": spec.input_schema,
-                # 保留工具的可选参数，避免上游自动转为严格模式。
-                "strict": False,
-            }
-            for spec in request.tools
-        ]
-        payload["tool_choice"] = request.tool_choice
-        payload["parallel_tool_calls"] = True
+    if request.allow_tool_calls:
+        tools = _serialize_tools(request, profile)
+        if tools:
+            payload["tools"] = tools
+            # tool_choice/parallel 仅在 function specs 存在时发送；裸请求的
+            # hosted-only 声明与旧中转注入 no-tools 分支同形（最小形状）。
+            if request.tools:
+                payload["tool_choice"] = request.tool_choice
+                payload["parallel_tool_calls"] = True
     reasoning = reasoning_control(
         config, profile, tier=request.reasoning_effort or None
     )
