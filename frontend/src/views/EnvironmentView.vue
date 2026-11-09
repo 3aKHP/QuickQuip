@@ -37,10 +37,12 @@ const taxonomy = computed(() => listing.value?.taxonomy ?? [])
 
 const baseRows = computed<Row[]>(() => {
   if (hasDirectory.value) return listing.value?.directory ?? []
+  // Legacy rows always exist in the root file (store lists parsed values only);
+  // bare and empty keys are defined too, so every row keeps full edit actions.
   return (listing.value?.variables ?? []).map(variable => ({
     ...variable, states: variable.states ?? {}, references: variable.references ?? [],
     groups: [], relations: [], sources: [], evidence_flags: {},
-    allowed_actions: (variable.assigned ? ['replace', 'empty', 'delete'] : ['create']) as EditAction[],
+    allowed_actions: ['replace', 'empty', 'delete'] as EditAction[],
   }))
 })
 
@@ -99,18 +101,14 @@ const scopeLabels: Record<string, string> = {
 }
 const HOT_ACTIONS = new Set(['next_task', 'next_tieba_task'])
 const BLOCKING_ACTIONS = new Set(['restart_or_recreate', 'apply', 'publish'])
-const SLOW_ACTIONS = new Set(['rebuild_image', 'redeploy', 'edit_compose_then_recreate', 'next_deployment'])
 
 function usageSummary(row: Row): string | null {
   const actions = new Set(row.relations.map(relation => relation.required_action))
   if (!actions.size) return null
   const hot = [...actions].some(action => HOT_ACTIONS.has(action))
   const blocking = [...actions].some(action => BLOCKING_ACTIONS.has(action))
-  const slow = [...actions].some(action => SLOW_ACTIONS.has(action))
-  const kinds = [hot, blocking, slow].filter(Boolean).length
-  if (kinds > 1) return '部分用途需重启或重建'
-  if (slow) return requiredActionLabels[[...actions][0]!] ?? null
-  return null
+  const kinds = [hot, blocking].filter(Boolean).length
+  return kinds > 1 ? '部分用途需重启或重建' : null
 }
 function summaryChips(row: Row): string[] {
   return [...new Set(row.relations.map(relation => relation.required_action))]

@@ -336,3 +336,21 @@ it('expands the deep-linked variable from the query', async () => {
   expect(view.find('#environment-details-MINIMAX_API_KEY').exists()).toBe(true)
   view.unmount()
 })
+
+it('keeps full edit actions for legacy empty and bare keys', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValueOnce({ enabled: true, restart_required: false,
+    backend_available: true, reason: null, version: 'v1', consumers: {}, variables: [
+      { name: 'EMPTY_KEY', assigned: false, mode: 'unknown', warning: '' },
+    ]})
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  await view.find('textarea[aria-label="EMPTY_KEY 新值"]').setValue('filled')
+  await view.findAll('button').find(b => b.text() === '预览修改')!.trigger('click')
+  await flushPromises()
+  expect(api.previewEnvironment).toHaveBeenLastCalledWith('v1', [
+    { name: 'EMPTY_KEY', action: 'replace', value: 'filled' },
+  ])
+  expect(view.findAll('button').some(b => b.text() === '设置空值')).toBe(true)
+  expect(view.findAll('button').some(b => b.text() === '删除')).toBe(true)
+  view.unmount()
+})
