@@ -2,12 +2,14 @@ import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import { mount, flushPromises } from '@vue/test-utils'
 import EnvironmentView from '@/views/EnvironmentView.vue'
 import * as api from '@/api/environment'
-vi.mock('vue-router', () => ({ onBeforeRouteLeave: vi.fn(), useRoute: () => ({ query: {} }) }))
+const routeQuery = { variable: '' }
+vi.mock('vue-router', () => ({ onBeforeRouteLeave: vi.fn(), useRoute: () => ({ query: routeQuery }) }))
 vi.mock('@/api/environment', () => ({
   loadEnvironment: vi.fn(), previewEnvironment: vi.fn(), saveEnvironment: vi.fn(),
   getEnvironmentOperation: vi.fn(),
 }))
 beforeEach(() => {
+  routeQuery.variable = ''
   vi.mocked(api.loadEnvironment).mockResolvedValue({ enabled: true, restart_required: false, backend_available: true, reason: null, version: 'v1', consumers: {}, variables: [
     { name: 'TEST_API_KEY', assigned: true, mode: 'credential', warning: '', references: ['test-channel'] },
   ] })
@@ -187,5 +189,217 @@ it('shows unclassified snapshot synchronization separately from provider loading
   expect(rows[0]!.text()).not.toContain('已加载')
   expect(rows[1]!.text()).toContain('热更新')
   expect(rows[1]!.text()).toContain('已加载')
+  view.unmount()
+})
+
+const taxonomy = [
+  { id: 'services', label: '服务与扩展', groups: [
+    { id: 'services.native.llm', label: '原生接入 / LLM' },
+    { id: 'services.native.generation', label: '原生接入 / 多模态生成' },
+  ]},
+  { id: 'deployment', label: '部署与构建', groups: [
+    { id: 'deployment.image', label: '镜像与依赖' },
+  ]},
+]
+function directoryListing() {
+  const relation = (component: string, required_action: string) => ({
+    component, object_id: 'shared', field_path: 'providers[0].api_key_env',
+    config_scope: 'published' as const, enabled: true, required: true,
+    name_kind: 'configured_name' as const, source_name: 'MINIMAX_API_KEY',
+    raw_expression: 'MINIMAX_API_KEY', target_service: 'bot',
+    target_kind: 'environment_name', target_name: 'MINIMAX_API_KEY',
+    resolution: 'process', delivery: 'provider_credential',
+    required_action, observation: 'not_observed',
+  })
+  return { enabled: true, restart_required: false, backend_available: true, reason: null,
+    version: 'v1', consumers: {}, taxonomy,
+    directory_errors: [{ component: 'generation', code: 'directory_source_unavailable' }],
+    variables: [{ name: 'MINIMAX_API_KEY', assigned: true, mode: 'credential', warning: '', references: ['shared'], states: { bot: 'loaded' } }],
+    directory: [
+      { name: 'MINIMAX_API_KEY', assigned: true, mode: 'credential' as const, warning: '', references: ['shared'],
+        states: { bot: 'loaded' }, groups: ['services.native.llm', 'services.native.generation'],
+        relations: [relation('llm.provider', 'next_task'), relation('generation.audio', 'restart_or_recreate')],
+        sources: [{ kind: 'llm_config', context: 'published', path: 'providers[0].api_key_env',
+          raw_expression: 'MINIMAX_API_KEY', resolution_context: 'managed_snapshot',
+          evidence_scope: 'config', observation: 'not_observed' }],
+        evidence_flags: {},
+        definition: { present: true, value_state: 'nonempty' as const, managed_literal: false, deletion_marker: false },
+        allowed_actions: ['replace', 'empty', 'delete'], description: 'MiniMax 凭据' },
+      { name: 'PIP_INDEX_URL', assigned: false, mode: 'unknown' as const, warning: '', references: [],
+        states: {}, groups: ['deployment.image'],
+        relations: [{ component: 'image.build', object_id: 'quickquip-app', field_path: 'docker/Dockerfile.prod:ARG PIP_INDEX_URL',
+          config_scope: 'code' as const, enabled: null, required: null, name_kind: 'fixed' as const,
+          source_name: 'PIP_INDEX_URL', raw_expression: 'PIP_INDEX_URL', target_service: 'image',
+          target_kind: 'build_arg', target_name: 'PIP_INDEX_URL', resolution: 'image_build',
+          delivery: 'build_arg', required_action: 'rebuild_image', observation: 'not_observed' }],
+        sources: [], evidence_flags: {},
+        definition: { present: false, value_state: 'missing' as const, managed_literal: false, deletion_marker: false },
+        allowed_actions: ['create'], description: '镜像构建 pip 源', default_present: true },
+      { name: 'PYTHONPATH', assigned: false, mode: 'unknown' as const, warning: '', references: [],
+        states: {}, groups: ['runtime.framework'],
+        relations: [{ component: 'compose', object_id: null, field_path: 'services.quickquip.environment.PYTHONPATH',
+          config_scope: 'template' as const, enabled: null, required: null, name_kind: 'fixed' as const,
+          source_name: 'PYTHONPATH', raw_expression: 'PYTHONPATH', target_service: 'bot',
+          target_kind: 'environment_name', target_name: 'PYTHONPATH', resolution: 'compose',
+          delivery: 'container_env_fixed', required_action: 'edit_compose_then_recreate', observation: 'not_observed' }],
+        sources: [], evidence_flags: { internal: true },
+        definition: { present: false, value_state: 'missing' as const, managed_literal: false, deletion_marker: false },
+        allowed_actions: [] },
+    ] }
+}
+
+it('shows one mixed row per shared key with an honest summary', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValueOnce(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  const rows = view.findAll('tbody tr')
+  expect(rows.filter(row => row.text().includes('MINIMAX_API_KEY'))).toHaveLength(1)
+  const minimax = rows.find(row => row.text().includes('MINIMAX_API_KEY'))!
+  expect(minimax.text()).toContain('部分用途需重启或重建')
+  expect(minimax.text()).toContain('原生接入 / LLM · 原生接入 / 多模态生成')
+  expect(view.text()).toContain('generation')
+  view.unmount()
+})
+
+it('hides undefined catalog items until the full directory is requested', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  expect(view.text()).not.toContain('PIP_INDEX_URL')
+  expect(view.text()).not.toContain('PYTHONPATH')
+  await view.find('select[aria-label="目录范围"]').setValue('full')
+  expect(view.text()).toContain('PIP_INDEX_URL')
+  expect(view.text()).toContain('PYTHONPATH')
+  await view.find('select[aria-label="变量领域"]').setValue('deployment')
+  expect(view.text()).toContain('PIP_INDEX_URL')
+  expect(view.text()).not.toContain('MINIMAX_API_KEY')
+  view.unmount()
+})
+
+it('filters and expansion keep draft edits, and ARIA wiring matches the region', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  await view.find('textarea[aria-label="MINIMAX_API_KEY 新值"]').setValue('draft-secret')
+  const toggle = view.findAll('button').find(b => b.text() === '详情')!
+  expect(toggle.attributes('aria-expanded')).toBe('false')
+  expect(toggle.attributes('aria-controls')).toBeUndefined()
+  await toggle.trigger('click')
+  expect(toggle.attributes('aria-expanded')).toBe('true')
+  expect(toggle.attributes('aria-controls')).toBe('environment-details-MINIMAX_API_KEY')
+  const region = view.find('#environment-details-MINIMAX_API_KEY')
+  expect(region.attributes('role')).toBe('region')
+  expect(region.text()).toContain('llm.provider（shared）')
+  expect(region.text()).toContain('新任务生效')
+  expect(region.text()).toContain('此处不宣称远端已生效')
+  expect((view.find('textarea[aria-label="MINIMAX_API_KEY 新值"]').element as HTMLTextAreaElement).value).toBe('draft-secret')
+  view.unmount()
+})
+
+it('creates undefined fixed items and refuses internal ones', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  await view.find('select[aria-label="目录范围"]').setValue('full')
+  await view.find('textarea[aria-label="PIP_INDEX_URL 新值"]').setValue('https://mirror.example/simple')
+  expect(view.text()).toContain('待新增')
+  await view.findAll('button').find(b => b.text() === '预览修改')!.trigger('click')
+  await flushPromises()
+  expect(api.previewEnvironment).toHaveBeenLastCalledWith('v1', [
+    { name: 'PIP_INDEX_URL', action: 'create', value: 'https://mirror.example/simple' },
+  ])
+  expect(view.find('textarea[aria-label="PYTHONPATH 新值"]').exists()).toBe(false)
+  expect(view.text()).toContain('由编排或进程内部提供')
+  view.unmount()
+})
+
+it('locates an existing directory row instead of duplicating a local add', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  await view.find('input[aria-label="新变量名"]').setValue('PIP_INDEX_URL')
+  await view.find('input[aria-label="新变量名"]').trigger('keyup', {key: 'Enter'})
+  await flushPromises()
+  expect(view.text()).toContain('PIP_INDEX_URL')
+  expect(view.findAll('textarea[aria-label="PIP_INDEX_URL 新值"]')).toHaveLength(1)
+  expect(view.find('input[aria-label="新变量名"]').element).toBeTruthy()
+  view.unmount()
+})
+
+it('falls back to legacy rows when the backend has no directory', async () => {
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  expect(view.find('select[aria-label="变量领域"]').exists()).toBe(false)
+  expect(view.find('textarea[aria-label="TEST_API_KEY 新值"]').exists()).toBe(true)
+  await view.find('textarea[aria-label="TEST_API_KEY 新值"]').setValue('still-works')
+  await view.findAll('button').find(b => b.text() === '预览修改')!.trigger('click')
+  await flushPromises()
+  expect(api.previewEnvironment).toHaveBeenLastCalledWith('v1', [
+    { name: 'TEST_API_KEY', action: 'replace', value: 'still-works' },
+  ])
+  view.unmount()
+})
+
+it('expands the deep-linked variable from the query', async () => {
+  routeQuery.variable = 'MINIMAX_API_KEY'
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  expect(view.find('#environment-details-MINIMAX_API_KEY').exists()).toBe(true)
+  view.unmount()
+})
+
+it('keeps full edit actions for legacy empty and bare keys', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValueOnce({ enabled: true, restart_required: false,
+    backend_available: true, reason: null, version: 'v1', consumers: {}, variables: [
+      { name: 'EMPTY_KEY', assigned: false, mode: 'unknown', warning: '' },
+    ]})
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  await view.find('textarea[aria-label="EMPTY_KEY 新值"]').setValue('filled')
+  await view.findAll('button').find(b => b.text() === '预览修改')!.trigger('click')
+  await flushPromises()
+  expect(api.previewEnvironment).toHaveBeenLastCalledWith('v1', [
+    { name: 'EMPTY_KEY', action: 'replace', value: 'filled' },
+  ])
+  expect(view.findAll('button').some(b => b.text() === '设置空值')).toBe(true)
+  expect(view.findAll('button').some(b => b.text() === '删除')).toBe(true)
+  view.unmount()
+})
+
+it('resets the group filter when the domain changes', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  await view.find('select[aria-label="变量领域"]').setValue('services')
+  await view.find('select[aria-label="使用小组"]').setValue('services.native.llm')
+  expect(view.find('tbody').text()).toContain('MINIMAX_API_KEY')
+  await view.find('select[aria-label="变量领域"]').setValue('deployment')
+  const groupSelect = view.find('select[aria-label="使用小组"]')
+  expect((groupSelect.element as HTMLSelectElement).value).toBe('all')
+  await view.find('select[aria-label="目录范围"]').setValue('full')
+  expect(view.find('tbody').text()).toContain('PIP_INDEX_URL')
+  view.unmount()
+})
+
+it('drops an emptied creation draft on directory rows', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  await view.find('select[aria-label="目录范围"]').setValue('full')
+  await view.find('textarea[aria-label="PIP_INDEX_URL 新值"]').setValue('https://mirror.example/simple')
+  expect(view.text()).toContain('待提交 1 项修改')
+  await view.find('textarea[aria-label="PIP_INDEX_URL 新值"]').setValue('')
+  expect(view.text()).not.toContain('待提交')
+  view.unmount()
+})
+
+it('deep links to a full-scope-only entry reveal it', async () => {
+  routeQuery.variable = 'PIP_INDEX_URL'
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  expect(view.find('#environment-details-PIP_INDEX_URL').exists()).toBe(true)
+  expect((view.find('select[aria-label="目录范围"]').element as HTMLSelectElement).value).toBe('full')
   view.unmount()
 })

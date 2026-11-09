@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, onUnmounted, reactive, ref } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute } from 'vue-router'
 import { loadEnvironment, previewEnvironment, saveEnvironment, getEnvironmentOperation } from '../api/environment'
-import type { EnvironmentList, Edit, Operation, Variable } from '../api/environment'
+import type { DirectoryEntry, Edit, EnvironmentList, Operation, Variable } from '../api/environment'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
@@ -10,6 +10,9 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
+
+type Row = DirectoryEntry & { local?: boolean }
+type EditAction = Edit['action']
 
 const listing = ref<EnvironmentList | null>(null)
 const edits = reactive<Record<string, Edit>>({})
@@ -24,51 +27,179 @@ const reviewed = ref(false)
 const preview = ref<Operation | null>(null)
 const operation = ref<Operation | null>(null)
 const requestId = ref(crypto.randomUUID())
+const domainFilter = ref('all')
+const groupFilter = ref('all')
+const scopeFilter = ref<'defined' | 'full'>('defined')
+const expanded = ref<string | null>(null)
 const changes = computed(() => Object.values(edits))
-const rows = computed(() => {
-  const stored = listing.value?.variables ?? []
-  const added = changes.value.filter(e => e.action === 'create').map(e => {
+const hasDirectory = computed(() => Array.isArray(listing.value?.directory))
+const taxonomy = computed(() => listing.value?.taxonomy ?? [])
+
+const baseRows = computed<Row[]>(() => {
+  if (hasDirectory.value) return listing.value?.directory ?? []
+  // Legacy rows always exist in the root file (store lists parsed values only);
+  // bare and empty keys are defined too, so every row keeps full edit actions.
+  return (listing.value?.variables ?? []).map(variable => ({
+    ...variable, states: variable.states ?? {}, references: variable.references ?? [],
+    groups: [], relations: [], sources: [], evidence_flags: {},
+    allowed_actions: ['replace', 'empty', 'delete'] as EditAction[],
+  }))
+})
+
+const localRows = computed<Row[]>(() => changes.value
+  .filter(e => e.action === 'create' && !baseRows.value.some(row => row.name === e.name))
+  .map(e => {
     const description = reviewed.value ? preview.value?.changes.find(row => row.name === e.name) : undefined
     return { name: e.name, assigned: false, mode: description?.mode ?? 'unknown' as const,
-      warning: description?.warning ?? '', references: description?.references ?? [], states: {} as Record<string, string> }
-  })
-  return [...stored, ...added].filter(e => [e.name, ...(e.references ?? [])].join(' ').toLowerCase().includes(search.value.trim().toLowerCase()))
+      warning: description?.warning ?? '', references: description?.references ?? [],
+      states: {} as Record<string, string>, groups: [], relations: [], sources: [],
+      evidence_flags: {}, local: true,
+      allowed_actions: ['create'] as EditAction[] }
+  }))
+
+const domainOptions = computed(() => [
+  { id: 'all', label: '全部领域' },
+  ...taxonomy.value.map(domain => ({ id: domain.id, label: domain.label })),
+])
+const groupOptions = computed(() => {
+  const domain = taxonomy.value.find(item => item.id === domainFilter.value)
+  const groups = domain ? domain.groups : taxonomy.value.flatMap(item => item.groups)
+  return [{ id: 'all', label: '全部小组' }, ...groups.map(group => ({ id: group.id, label: group.label }))]
 })
+
+function engaged(row: Row): boolean {
+  // Root definitions and live config references define the default scope;
+  // static catalog/template declarations alone stay behind the full-catalog switch.
+  return Boolean(row.definition?.present || row.definition?.deletion_marker
+    || row.relations.some(relation => DYNAMIC_SCOPES.has(relation.config_scope)))
+}
+
+const rows = computed(() => {
+  const needle = search.value.trim().toLowerCase()
+  return [...baseRows.value, ...localRows.value].filter(row => {
+    if (domainFilter.value !== 'all' && !row.groups.some(group => group.startsWith(`${domainFilter.value}.`))
+      && !(domainFilter.value === 'unknown' && row.groups.includes('unknown.unidentified'))) return false
+    if (groupFilter.value !== 'all' && !row.groups.includes(groupFilter.value)) return false
+    if (hasDirectory.value && scopeFilter.value === 'defined' && !row.local) {
+      if (!engaged(row)) return false
+    }
+    if (!needle) return true
+    const haystack = [row.name, row.description ?? '', ...(row.references ?? []),
+      ...row.relations.map(relation => `${relation.component} ${relation.object_id ?? ''}`)].join(' ').toLowerCase()
+    return haystack.includes(needle)
+  })
+})
+
 function stateLabel(state: string) {
   return ({ loaded: '已加载', synced: '快照已同步', restart: '待重启', loading: '加载中', waiting: '等待启动或重新连接' } as Record<string, string>)[state] ?? state
 }
 const modeLabel = (mode: Variable['mode']) => ({ hot: '热更新', credential: '热更新', restart: '重启生效', unknown: '按用途生效' })[mode]
 const usageHint = '用于 Provider 密钥时，绑定渠道后可热更新。'
-function valueState(row: Variable) {
-  const action = edits[row.name]?.action
-  return action === 'delete' ? '待删除' : action === 'create' ? '待新增' : action === 'empty' ? '待清空' : action ? '已变更' : row.assigned ? '已赋值' : '未赋值'
+const actionLabels: Record<EditAction, string> = { create: '新增', replace: '覆写', empty: '设置空值', delete: '删除' }
+const requiredActionLabels: Record<string, string> = {
+  publish: '需发布草稿', next_task: '新任务生效', next_tieba_task: '下轮任务生效',
+  apply: '需应用配置', restart_or_recreate: '需重启或重建', rebuild_image: '需重新构建镜像',
+  redeploy: '需重新部署', edit_compose_then_recreate: '需修改编排模板',
+  next_deployment: '下次部署生效', unknown: '待确认',
 }
-const actionLabel = (action: Edit['action']) => ({ create: '新增', replace: '覆写', empty: '设置空值', delete: '删除' })[action]
+const scopeLabels: Record<string, string> = {
+  draft: '草稿', published: '已发布', file: '配置文件', code: '代码', template: '打包模板',
+}
+const HOT_ACTIONS = new Set(['next_task', 'next_tieba_task'])
+const BLOCKING_ACTIONS = new Set(['restart_or_recreate', 'apply', 'publish'])
+const DYNAMIC_SCOPES = new Set(['draft', 'published', 'file'])
+
+function usageSummary(row: Row): string | null {
+  const actions = new Set(row.relations.map(relation => relation.required_action))
+  if (!actions.size) return null
+  const hot = [...actions].some(action => HOT_ACTIONS.has(action))
+  const blocking = [...actions].some(action => BLOCKING_ACTIONS.has(action))
+  if (hot && blocking) {
+    if (actions.has('restart_or_recreate')) return '部分用途需重启或重建'
+    if (actions.has('apply')) return '部分用途需应用配置'
+    if (actions.has('publish')) return '部分用途需发布草稿'
+    return '部分用途需另行操作'
+  }
+  return null
+}
+function summaryChips(row: Row): string[] {
+  return [...new Set(row.relations.map(relation => relation.required_action))]
+    .map(action => requiredActionLabels[action] ?? action)
+}
+function definitionLabel(row: Row): string {
+  const action = edits[row.name]?.action
+  if (action === 'delete') return '待删除'
+  if (action === 'create') return '待新增'
+  if (action === 'empty') return '待清空'
+  if (action) return '已变更'
+  const definition = row.definition
+  if (!definition) return row.assigned ? '已赋值' : '未赋值'
+  if (definition.conflict) return '定义与删除冲突'
+  if (definition.deletion_marker) return definition.present ? '定义与删除冲突' : '已删除标记'
+  if (!definition.present) return '未定义'
+  return ({ bare: '裸键', empty: '空值', nonempty: '已赋值' } as Record<string, string>)[definition.value_state] ?? definition.value_state
+}
+const actionLabel = (action: EditAction) => actionLabels[action]
+function allowedActions(row: Row): EditAction[] {
+  return row.allowed_actions ?? []
+}
+function editable(row: Row): boolean {
+  return allowedActions(row).length > 0
+}
+function definitionVariant(row: Row): 'success' | 'warn' | 'danger' | 'info' {
+  const action = edits[row.name]?.action
+  if (action === 'delete') return 'danger'
+  if (action) return 'warn'
+  const definition = row.definition
+  if (definition?.conflict || (definition?.deletion_marker && definition.present)) return 'warn'
+  if (definition?.deletion_marker) return 'info'
+  if (definition?.present || row.assigned) return 'success'
+  return 'info'
+}
+function detailId(name: string) { return `environment-details-${name}` }
+function toggleDetail(name: string) {
+  expanded.value = expanded.value === name ? null : name
+}
 async function refresh() {
   refreshing.value = true
   try {
-    listing.value = await loadEnvironment()
+    listing.value = await loadEnvironment(true)
     error.value = ''
     if (changes.value.length) reviewed.value = false
   } catch (e) { error.value = String(e) }
   finally { refreshing.value = false }
 }
-function edit(name: string, value: string) {
-  const create = edits[name]?.action === 'create'
-  if (!value && !create) { delete edits[name] } else { edits[name] = { name, action: create ? 'create' : 'replace', value } }
+function edit(row: Row, value: string) {
+  const existing = edits[row.name]?.action
+  const action: EditAction = existing === 'create' ? 'create'
+    : allowedActions(row).includes('create') && !allowedActions(row).includes('replace') ? 'create' : 'replace'
+  // Directory rows drop an emptied creation draft; explicit local adds keep it,
+  // matching the legacy flow where the user typed the name on purpose.
+  if (!value && (action !== 'create' || !row.local)) { delete edits[row.name] } else { edits[row.name] = { name: row.name, action, value } }
   reviewed.value = false
 }
-function mark(name: string, action: Edit['action']) {
+function mark(name: string, action: EditAction) {
   edits[name] = { name, action }; reviewed.value = false
+}
+async function focusRow(name: string) {
+  await nextTick()
+  document.getElementById(`environment-value-${name}`)?.focus()
 }
 function add() {
   const name = newName.value.trim()
-  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || listing.value?.variables.some(r => r.name === name) || Boolean(edits[name])) {
+  if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name) || Boolean(edits[name])) {
     error.value = '变量名无效或已存在'; return
   }
+  const existing = baseRows.value.find(row => row.name === name)
+  if (existing) {
+    if (!editable(existing)) { error.value = '变量由编排或进程内部提供，不可在此修改'; return }
+    search.value = name; domainFilter.value = 'all'; groupFilter.value = 'all'; scopeFilter.value = 'full'
+    newName.value = ''
+    void focusRow(name); return
+  }
   edits[name] = { name, action: 'create', value: '' }; newName.value = ''; reviewed.value = false
-  search.value = name
-  void nextTick(() => document.getElementById(`environment-value-${name}`)?.focus())
+  search.value = name; domainFilter.value = 'all'; groupFilter.value = 'all'
+  void focusRow(name)
 }
 function undo(name: string) { delete edits[name]; reviewed.value = false }
 async function submit() {
@@ -89,11 +220,30 @@ function guard(event: BeforeUnloadEvent) {
   if (changes.value.length) { event.preventDefault(); event.returnValue = '' }
 }
 onBeforeRouteLeave(() => !changes.value.length || window.confirm('存在未提交的环境变量修改，离开页面？'))
+watch(domainFilter, () => { groupFilter.value = 'all' })
+watch(() => route.query.variable, value => {
+  const name = String(value ?? '').trim()
+  if (name) {
+    search.value = name
+    const target = baseRows.value.find(row => row.name === name)
+    if (target) {
+      expanded.value = name
+      if (!engaged(target)) scopeFilter.value = 'full'
+    }
+  }
+})
 let timer: ReturnType<typeof setInterval> | undefined
 onMounted(() => {
   void refresh().then(() => {
     const name = String(route.query.variable ?? '')
-    if (name && !listing.value?.variables.some(row => row.name === name)) newName.value = name
+    if (name) {
+      const target = baseRows.value.find(row => row.name === name)
+      if (target) {
+        expanded.value = name
+        if (!engaged(target)) scopeFilter.value = 'full'
+      }
+      else if (!listing.value?.variables.some(row => row.name === name)) newName.value = name
+    }
   }); window.addEventListener('beforeunload', guard)
   timer = setInterval(async () => {
     if (operation.value) {
@@ -133,13 +283,27 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
         <div class="variable-toolbar">
           <div class="search-field">
             <UiIcon name="Search" :size="16" />
-            <input v-model="search" type="search" aria-label="搜索变量" placeholder="搜索变量名或引用渠道">
+            <input v-model="search" type="search" aria-label="搜索变量" placeholder="搜索变量名、用途或消费者">
           </div>
+          <select v-if="hasDirectory" v-model="domainFilter" aria-label="变量领域" class="filter-select">
+            <option v-for="option in domainOptions" :key="option.id" :value="option.id">{{ option.label }}</option>
+          </select>
+          <select v-if="hasDirectory" v-model="groupFilter" aria-label="使用小组" class="filter-select">
+            <option v-for="option in groupOptions" :key="option.id" :value="option.id">{{ option.label }}</option>
+          </select>
+          <select v-if="hasDirectory" v-model="scopeFilter" aria-label="目录范围" class="filter-select">
+            <option value="defined">已定义与引用</option>
+            <option value="full">完整目录</option>
+          </select>
           <div class="create-field">
             <datalist id="environment-suggestions"><option v-for="name in listing.suggestions" :key="name" :value="name" /></datalist>
             <input v-model="newName" list="environment-suggestions" aria-label="新变量名" placeholder="NEW_PROVIDER_API_KEY" spellcheck="false" @keyup.enter="add">
             <UiButton icon="Plus" variant="primary" @click="add">新增</UiButton>
           </div>
+        </div>
+        <div v-if="listing.directory_errors?.length" class="privacy-note directory-errors" role="status">
+          <UiIcon name="AlertTriangle" :size="14" />
+          <span>部分目录来源暂不可用（{{ listing.directory_errors.map(item => item.component).join('、') }}），相关详情可能不完整。</span>
         </div>
         <div class="privacy-note"><UiIcon name="Lock" :size="14" /><span>已有值不回显，留空保持原值。启动参数保存后需重启。</span></div>
         <div v-if="rows.length" class="variable-scroll">
@@ -147,34 +311,81 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
             <colgroup><col class="col-variable"><col class="col-value"><col class="col-status"><col class="col-actions"></colgroup>
             <thead><tr><th scope="col">变量</th><th scope="col">新值</th><th scope="col">生效与加载</th><th scope="col">操作</th></tr></thead>
             <tbody>
-              <tr v-for="row in rows" :key="row.name" :class="{ 'row-edited': edits[row.name], 'row-deleted': edits[row.name]?.action === 'delete' }">
-                <td>
-                  <div class="variable-identity"><span class="variable-name">{{ row.name }}</span>
-                    <UiTag size="sm" :variant="edits[row.name]?.action === 'delete' ? 'danger' : edits[row.name] ? 'warn' : row.assigned ? 'success' : 'info'">{{ valueState(row) }}</UiTag>
-                  </div>
-                  <p v-if="row.references?.length" class="row-reference">渠道：{{ row.references.join('、') }}</p>
-                  <p v-if="row.warning" class="row-warning"><UiIcon name="AlertTriangle" :size="13" />{{ row.warning }}</p>
-                </td>
-                <td class="value-cell">
-                  <textarea :id="`environment-value-${row.name}`" class="secret-value" :rows="Math.min(4, (edits[row.name]?.value ?? '').split('\n').length)" autocomplete="off" spellcheck="false" :aria-label="`${row.name} 新值`" :placeholder="edits[row.name]?.action === 'delete' ? '已标记删除' : edits[row.name]?.action === 'empty' ? '将保存为空值' : '输入新值以覆写'" :value="edits[row.name]?.value ?? ''" :disabled="edits[row.name]?.action === 'delete'" @input="edit(row.name, ($event.target as HTMLTextAreaElement).value)"></textarea>
-                </td>
-                <td>
-                  <UiTag size="sm" class="mode-tag" :variant="row.mode === 'restart' ? 'warn' : 'info'"><UiIcon :name="row.mode === 'restart' ? 'RotateCw' : row.mode === 'unknown' ? 'Info' : 'Zap'" :size="12" />{{ modeLabel(row.mode) }}</UiTag>
-                  <p v-if="row.mode === 'unknown'" class="row-reference">{{ usageHint }}</p>
-                  <div v-if="!edits[row.name]" class="consumer-states"><span v-for="(state, role) in row.states" :key="role"><i :class="['state-dot', { 'state-dot--loaded': state === 'loaded' || state === 'synced' }]" />{{ role === 'bot' ? 'Bot' : role === 'web' ? 'Web' : role }} {{ stateLabel(state) }}</span></div>
-                  <p v-else class="row-reference">保存后确认加载状态</p>
-                </td>
-                <td><div class="row-actions">
-                  <UiButton v-if="edits[row.name]?.action !== 'create'" size="sm" variant="ghost" @click="mark(row.name, 'empty')">设置空值</UiButton>
-                  <UiButton v-if="edits[row.name]?.action !== 'create'" size="sm" variant="ghost" class="delete-action" icon="Trash2" @click="mark(row.name, 'delete')">删除</UiButton>
-                  <UiButton v-if="edits[row.name]" size="sm" variant="ghost" icon="RotateCcw" @click="undo(row.name)">撤销</UiButton>
-                </div></td>
-              </tr>
+              <template v-for="row in rows" :key="row.name">
+                <tr :class="{ 'row-edited': edits[row.name], 'row-deleted': edits[row.name]?.action === 'delete' }">
+                  <td>
+                    <div class="variable-identity">
+                      <UiButton size="sm" variant="ghost" class="detail-toggle"
+                        :aria-expanded="expanded === row.name"
+                        :aria-controls="expanded === row.name ? detailId(row.name) : undefined"
+                        :aria-label="`${expanded === row.name ? '收起' : '展开'} ${row.name} 详情`"
+                        @click="toggleDetail(row.name)">{{ expanded === row.name ? '收起' : '详情' }}</UiButton>
+                      <span class="variable-name">{{ row.name }}</span>
+                      <UiTag size="sm" :variant="definitionVariant(row)">{{ definitionLabel(row) }}</UiTag>
+                    </div>
+                    <p v-if="row.description" class="row-reference">{{ row.description }}</p>
+                    <p v-if="row.groups.length && hasDirectory" class="row-reference row-groups">{{ row.groups.map(group => taxonomy.flatMap(domain => domain.groups).find(item => item.id === group)?.label ?? group).join(' · ') }}</p>
+                    <p v-if="row.references?.length" class="row-reference">渠道：{{ row.references.join('、') }}</p>
+                    <p v-if="row.warning" class="row-warning"><UiIcon name="AlertTriangle" :size="13" />{{ row.warning }}</p>
+                  </td>
+                  <td class="value-cell">
+                    <textarea v-if="editable(row)" :id="`environment-value-${row.name}`" class="secret-value" :rows="Math.min(4, (edits[row.name]?.value ?? '').split('\n').length)" autocomplete="off" spellcheck="false" :aria-label="`${row.name} 新值`" :placeholder="edits[row.name]?.action === 'delete' ? '已标记删除' : edits[row.name]?.action === 'empty' ? '将保存为空值' : allowedActions(row).includes('create') && !allowedActions(row).includes('replace') ? '输入值以创建定义' : '输入新值以覆写'" :value="edits[row.name]?.value ?? ''" :disabled="edits[row.name]?.action === 'delete'" @input="edit(row, ($event.target as HTMLTextAreaElement).value)"></textarea>
+                    <p v-else class="row-reference">由编排或进程内部提供，不在此创建或修改。</p>
+                  </td>
+                  <td>
+                    <UiTag size="sm" class="mode-tag" :variant="row.mode === 'restart' ? 'warn' : 'info'"><UiIcon :name="row.mode === 'restart' ? 'RotateCw' : row.mode === 'unknown' ? 'Info' : 'Zap'" :size="12" />{{ modeLabel(row.mode) }}</UiTag>
+                    <UiTag v-if="usageSummary(row)" size="sm" variant="warn">{{ usageSummary(row) }}</UiTag>
+                    <p v-else-if="row.relations.length" class="row-reference">{{ summaryChips(row).join('、') }}</p>
+                    <p v-if="row.mode === 'unknown' && !row.relations.length" class="row-reference">{{ usageHint }}</p>
+                    <div v-if="!edits[row.name] && Object.keys(row.states).length" class="consumer-states"><span v-for="(state, role) in row.states" :key="role"><i :class="['state-dot', { 'state-dot--loaded': state === 'loaded' || state === 'synced' }]" />{{ role === 'bot' ? 'Bot' : role === 'web' ? 'Web' : role }} {{ stateLabel(state) }}</span></div>
+                    <p v-else-if="edits[row.name]" class="row-reference">保存后确认加载状态</p>
+                  </td>
+                  <td><div class="row-actions">
+                    <UiButton v-if="edits[row.name]?.action !== 'create' && allowedActions(row).includes('empty')" size="sm" variant="ghost" @click="mark(row.name, 'empty')">设置空值</UiButton>
+                    <UiButton v-if="edits[row.name]?.action !== 'create' && allowedActions(row).includes('delete')" size="sm" variant="ghost" class="delete-action" icon="Trash2" @click="mark(row.name, 'delete')">删除</UiButton>
+                    <UiButton v-if="edits[row.name]" size="sm" variant="ghost" icon="RotateCcw" @click="undo(row.name)">撤销</UiButton>
+                  </div></td>
+                </tr>
+                <tr v-if="expanded === row.name" class="detail-row">
+                  <td colspan="4">
+                    <div :id="detailId(row.name)" class="detail-region" role="region" :aria-label="`${row.name} 详情`">
+                      <section class="detail-section">
+                        <h3>消费关系</h3>
+                        <p v-if="!row.relations.length" class="row-reference">未发现已确认的消费者；这不代表没有任何使用。</p>
+                        <dl v-for="(relation, index) in row.relations" :key="index" class="detail-dl">
+                          <dt>消费者</dt><dd>{{ relation.component }}{{ relation.object_id ? `（${relation.object_id}）` : '' }}</dd>
+                          <dt>配置阶段</dt><dd>{{ scopeLabels[relation.config_scope] ?? relation.config_scope }}{{ relation.enabled === false ? ' · 已停用' : relation.enabled === true ? '' : '' }}</dd>
+                          <dt>字段</dt><dd class="mono">{{ relation.field_path }}</dd>
+                          <dt>引用</dt><dd class="mono">{{ relation.raw_expression }}<span v-if="relation.name_kind === 'computed_name'">（名称经配置计算，未确认）</span></dd>
+                          <dt>目标</dt><dd>{{ relation.target_service }} · {{ relation.target_kind }}<span v-if="relation.target_name && relation.target_name !== row.name" class="mono"> → {{ relation.target_name }}</span></dd>
+                          <dt>生效</dt><dd>{{ requiredActionLabels[relation.required_action] ?? relation.required_action }} · 确认状态：未观测</dd>
+                        </dl>
+                      </section>
+                      <section class="detail-section">
+                        <h3>来源与传递</h3>
+                        <p v-if="!row.sources.length" class="row-reference">暂无来源记录。</p>
+                        <dl v-for="(source, index) in row.sources" :key="index" class="detail-dl">
+                          <dt>来源</dt><dd>{{ source.kind }}<span v-if="source.context"> · {{ source.context }}</span><span v-if="source.evidence_scope === 'compose_template'"> · 公开模板声明，实际部署未观测</span></dd>
+                          <dt>位置</dt><dd class="mono">{{ source.path }}</dd>
+                          <dt v-if="source.override_kind">覆盖方式</dt><dd v-if="source.override_kind">{{ source.override_kind }}</dd>
+                        </dl>
+                      </section>
+                      <section class="detail-section">
+                        <h3>加载与后续动作</h3>
+                        <div v-if="Object.keys(row.states).length" class="consumer-states"><span v-for="(state, role) in row.states" :key="role"><i :class="['state-dot', { 'state-dot--loaded': state === 'loaded' || state === 'synced' }]" />{{ role === 'bot' ? 'Bot' : role === 'web' ? 'Web' : role }} {{ stateLabel(state) }}（进程快照）</span></div>
+                        <p v-else class="row-reference">无进程快照记录。</p>
+                        <p v-if="summaryChips(row).length" class="row-reference">后续动作：{{ summaryChips(row).join('、') }}。</p>
+                        <p class="row-reference">快照同步、配置装载与上游可用是不同事实；此处不宣称远端已生效。</p>
+                      </section>
+                    </div>
+                  </td>
+                </tr>
+              </template>
             </tbody>
           </table>
         </div>
-        <UiEmpty v-else icon="Search" title="没有匹配的变量" description="调整搜索条件，或在上方新增变量。" />
-        <div class="list-footer">显示 {{ rows.length }} 项<span v-if="search.trim()"> · 共 {{ listing.variables.length }} 项已有变量</span></div>
+        <UiEmpty v-else icon="Search" title="没有匹配的变量" description="调整筛选或搜索条件，或在上方新增变量。" />
+        <div class="list-footer">显示 {{ rows.length }} 项<span v-if="hasDirectory"> · 完整目录 {{ (listing.directory ?? []).length }} 项</span><span v-else-if="search.trim()"> · 共 {{ listing.variables.length }} 项已有变量</span></div>
       </UiCard>
 
       <UiCard v-if="changes.length" class="submission" accent="primary">
@@ -189,7 +400,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
     </fieldset>
 
     <UiCard v-if="operation" class="operation-card" accent="success" role="status">
-      <h2 class="section-title">{{ operation.phase === 'superseded' ? '已被后续修改替代' : '修改已保存' }}</h2>
+      <h2 class="section-title">{{ operation.phase === 'superseded' ? '已被后续修改替代' : '根 .env 修改已保存' }}</h2>
       <p class="row-reference">以下为当前加载状态。操作 <span class="operation-id">{{ operation.id }}</span></p>
       <div v-for="(states, name) in operation.states" :key="name" class="operation-row"><span class="variable-name">{{ name }}</span><span v-for="(state, role) in states" :key="role">{{ role === 'bot' ? 'Bot' : 'Web' }}：{{ stateLabel(state) }}</span></div>
       <div class="consumer-states"><span v-for="(consumer, role) in operation.consumers" :key="role">{{ role === 'bot' ? 'Bot' : 'Web' }}：{{ consumer && Date.now() / 1000 - consumer.updated_at < 20 ? '运行中' : '等待进程确认' }}</span></div>
@@ -205,10 +416,12 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
 .search-field { display: flex; align-items: center; position: relative; flex: 1; min-width: 200px; }
 .search-field > .qq-ico, .search-field > svg { position: absolute; left: 11px; color: var(--qq-text-muted); pointer-events: none; }
 .search-field input { width: 100%; padding-left: 34px; font-size: var(--qq-text-base); }
+.filter-select { flex: 0 1 auto; min-width: 120px; max-width: 180px; }
 .create-field { display: flex; gap: var(--qq-gap-sm); flex: 0 1 370px; min-width: 0; }
 .create-field input { min-width: 0; flex: 1; font-family: var(--qq-font-mono); font-size: var(--qq-text-base); }
 .privacy-note { display: flex; gap: 6px; align-items: center; padding: 0 var(--qq-gap-md) var(--qq-gap-md); font-size: var(--qq-text-sm); color: var(--qq-text-muted); }
 .privacy-note > svg { flex-shrink: 0; }
+.directory-errors { color: var(--qq-warn); padding-top: var(--qq-gap-sm); }
 .variable-scroll { max-height: 64vh; overflow: auto; }
 .variable-table { table-layout: fixed; }
 .col-variable { width: 31%; } .col-value { width: 29%; } .col-status { width: 23%; } .col-actions { width: 17%; }
@@ -217,7 +430,9 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
 .variable-table td { padding: 13px 16px; }
 .variable-identity { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; }
 .variable-name { font-family: var(--qq-font-mono); font-size: var(--qq-text-sm); font-weight: 600; overflow-wrap: anywhere; }
+.detail-toggle { padding-inline: 7px; }
 .row-reference { margin-top: 4px; color: var(--qq-text-muted); font-size: var(--qq-text-sm); line-height: 1.6; overflow-wrap: anywhere; }
+.row-groups { margin-top: 2px; font-size: var(--qq-text-xs); }
 .row-warning { display: flex; align-items: flex-start; gap: 4px; margin-top: 6px; color: var(--qq-warn); font-size: var(--qq-text-sm); overflow-wrap: anywhere; }
 .row-warning svg { flex-shrink: 0; margin-top: 3px; }
 .secret-value { width: 100%; min-height: 36px; height: auto; resize: vertical; max-height: 160px; font-family: var(--qq-font-mono); font-size: var(--qq-text-base); -webkit-text-security: disc; }
@@ -232,6 +447,13 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
 .consumer-states > span { display: inline-flex; align-items: center; gap: 4px; }
 .state-dot { width: 5px; height: 5px; flex-shrink: 0; border-radius: var(--qq-radius-full); background: var(--qq-warn); }
 .state-dot--loaded { background: var(--qq-success); }
+.detail-row > td { padding: 0 16px 16px; }
+.detail-region { display: grid; gap: var(--qq-gap-md); padding: var(--qq-gap-sm) var(--qq-gap-md); background: var(--qq-surface-strong); border: 1px solid var(--qq-border); border-radius: var(--qq-radius-sm); }
+.detail-section h3 { margin: 0 0 6px; font-size: var(--qq-text-sm); font-weight: 600; }
+.detail-dl { display: grid; grid-template-columns: 5.5em minmax(0, 1fr); gap: 2px 10px; margin: 0 0 8px; font-size: var(--qq-text-xs); }
+.detail-dl dt { color: var(--qq-text-muted); }
+.detail-dl dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.detail-dl .mono, .mono { font-family: var(--qq-font-mono); }
 .list-footer { padding: 10px var(--qq-gap-md); border-top: 1px solid var(--qq-border); color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 .submission { position: sticky; bottom: 0; z-index: 2; box-shadow: var(--qq-shadow-md); }
 .submission-summary, .confirmation { display: flex; align-items: center; justify-content: space-between; gap: var(--qq-gap-md); flex-wrap: wrap; }
@@ -246,7 +468,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
 .error-note { display: flex; align-items: center; flex-wrap: wrap; gap: var(--qq-gap-sm); }
 @media (max-width: 767px) {
   .variable-toolbar { gap: var(--qq-gap-sm); }
-  .search-field, .create-field { flex-basis: 100%; }
+  .search-field, .create-field, .filter-select { flex-basis: 100%; max-width: none; }
   .variable-scroll { max-height: 62vh; }
   .variable-table colgroup, .variable-table thead { display: none; }
   .variable-table, .variable-table tbody { display: block; }
@@ -259,5 +481,6 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
   .consumer-states { display: inline-flex; margin-left: 12px; margin-top: 0; }
   .row-actions { justify-content: flex-end; }
   .confirmation label, .confirmation input { width: 100%; }
+  .detail-dl { grid-template-columns: 1fr; }
 }
 </style>
