@@ -306,6 +306,7 @@ class Store:
         if not isinstance(changes, list) or not changes or len(changes) > 256:
             raise EnvironmentError('Submit between 1 and 256 changes')
         old = parse('.env', raw)
+        _, deleted = markers(raw.decode('utf-8'))
         from quickquip.environment.policy import provider_references
         references = provider_references(self.root)
         edits = {}
@@ -316,7 +317,7 @@ class Store:
                 raise EnvironmentError('Invalid or duplicate variable name')
             if op not in ('create', 'replace', 'empty', 'delete'):
                 raise EnvironmentError('Invalid edit action')
-            if (op == 'create') == (name in old):
+            if (op == 'create') == (name in old and name not in deleted):
                 raise EnvironmentError('Variable existence changed: ' + name)
             value = '' if op == 'empty' else item.get('value', '')
             if not isinstance(value, str) or '\x00' in value or len(value) > 65536:

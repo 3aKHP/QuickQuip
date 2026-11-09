@@ -45,9 +45,9 @@ def parse(name, content):
                 else:
                     match = DELETED.fullmatch(binding.original.string.strip())
                     if match:
-                        result['# quickquip:deleted ' + match[1]] = [None]
-            if any(key.startswith('# quickquip:deleted ') and key.split()[-1] in result
-                   for key in result):
+                        result.setdefault(match[1], []).append({'deleted': True})
+            if any({'deleted': True} in items and len(items) != 1
+                   for items in result.values()):
                 raise ValueError('definition and deletion conflict')
             return result
         return text
@@ -56,8 +56,10 @@ def parse(name, content):
 
 
 def _env_value(key, value, previous=""):
-    if key.startswith('# quickquip:deleted '):
-        return key + '\n'
+    if value == {'deleted': True}:
+        return '# quickquip:deleted ' + key + '\n'
+    if DELETED.fullmatch(previous.strip()):
+        previous = ''
     is_literal = isinstance(value, dict)
     if is_literal:
         value = value['literal']
@@ -94,7 +96,7 @@ def render_env(value, original):
         if key is None:
             match = DELETED.fullmatch(raw.strip())
             if match:
-                key = '# quickquip:deleted ' + match[1]
+                key = match[1]
         if key is None:
             result.append(raw)
         elif key not in value:

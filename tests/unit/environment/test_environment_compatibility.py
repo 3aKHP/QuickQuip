@@ -262,3 +262,45 @@ else:
                         + '\nMODE=' + repr(mode) + '\n' + program], check=True, timeout=20,
                        env={**os.environ, 'QUICKQUIP_ENV_MANAGEMENT_ENABLED': 'true',
                             'PYTHONPATH': os.pathsep.join(map(str, sys.path))})
+
+
+@pytest.mark.parametrize('source_deletes', [True, False])
+@pytest.mark.parametrize('preference', [None, 'source', 'target'])
+def test_sync_conflict_selects_definition_or_deletion_as_one_variable(source_deletes, preference):
+    from quickquip.configuration import comparison
+
+    base = {'document': {}, 'scopes': {}, 'text_modes': {},
+            'files': {'.env': entry(b'KEY=old\nOTHER=base\n')}}
+    source, target = deepcopy(base), deepcopy(base)
+    definition = literal('KEY', 'rotated')
+    deletion = '# quickquip:deleted KEY\n'
+    source['files']['.env'] = entry(
+        ((deletion if source_deletes else definition) + 'OTHER=base\n').encode())
+    target['files']['.env'] = entry(
+        ((definition if source_deletes else deletion) + 'OTHER=receiver\n').encode())
+    result = plan(base, source, target, prefer=preference)
+    assert [conflict['field'] for conflict in result['conflicts']] == ['.env.KEY']
+    if preference is None:
+        return
+    raw = body(result['target']['files']['.env']).decode()
+    chooses_deletion = source_deletes == (preference == 'source')
+    values = read_environment(raw)
+    assert values['OTHER'] == 'receiver'
+    if chooses_deletion:
+        assert 'KEY' not in values
+        assert markers(raw) == (set(), {'KEY'})
+    else:
+        assert values['KEY'] == 'rotated'
+        assert markers(raw) == ({'KEY'}, set())
+    # qqconf uses this same merge entrypoint with workspace/source naming.
+    merged, conflicts = comparison.merge(
+        base, source, target, 'workspace' if preference == 'source' else 'source')
+    assert [conflict['field'] for conflict in conflicts] == ['.env.KEY']
+    assert text.parse('.env', body(merged['files']['.env'])) == text.parse('.env', raw.encode())
+
+
+def test_definition_and_deletion_in_one_input_still_require_reconciliation():
+    from quickquip.configuration.errors import ConfigError
+
+    with pytest.raises(ConfigError):
+        text.parse('.env', b'KEY=defined\n# quickquip:deleted KEY\n')
