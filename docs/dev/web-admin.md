@@ -78,7 +78,7 @@
 
 每条消费关系记录组件、对象 ID、原始字段路径、`config_scope=draft/published/file`、声明的 `enabled/required`（无法确定时为 `null`）、名称类型、源变量名、目标服务/类型/名称、解析与传递方式，以及 `required_action`。草稿关系使用 `publish`；已发布 LLM 凭据及按任务展开的参数使用 `next_task`；需要重新编译并重建资源的关系使用 `apply`；generation 进程环境关系使用 `restart_or_recreate`。`observation=not_observed` 表示没有逐消费者回执，Bot/Web 的旧 `states` 只描述进程快照或启动值比较。
 
-`sources` 记录 `llm_config` 或 `generation_file` 的来源类型、生命周期、原始路径和解析上下文。`raw_expression` 只保留变量名或 `${NAME}` 规范 token；默认值原文、完整 Header、URL、配置值和展开结果均不进入响应。目录投影读取原始草稿/已发布文档及 generation 配置，但不启动运行时、MCP 连接、探活或传输层，也不把任意进程环境名称导入目录。
+`sources` 记录 `llm_config` 或 `generation_file` 的来源类型、生命周期、原始路径和解析上下文。`raw_expression` 只保留变量名或 `${NAME}` 规范 token；默认值原文、完整 Header、URL、配置值和展开结果均不进入响应。只有显式声明的凭据变量名和插值引用会进入目录；请求体、子进程环境等嵌套结构中的同名普通字面量不会被当作根环境变量引用。目录投影读取原始草稿/已发布文档及 generation 配置，但不启动运行时、MCP 连接、探活或传输层，也不把任意进程环境名称导入目录。
 
 单个新增来源不可读或格式错误时，其他目录项仍返回，`directory_errors` 只含组件和固定错误码，不包含异常正文、配置内容或宿主机路径。目录响应沿用私有传输的 15 秒与 2 MiB 限制，超限按现有后端不可用/响应过大处理，不静默截断关系。
 

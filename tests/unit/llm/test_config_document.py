@@ -13,6 +13,7 @@ from quickquip.llm.config_document import (
     effective_parameters,
     empty_document,
     environment_occurrences,
+    environment_name_occurrence,
     environment_references,
     resolve_model_provider,
     upgrade_document,
@@ -116,13 +117,6 @@ def test_environment_occurrences_project_nested_references_without_source_values
 
     assert occurrences == [
         {
-            "name": "QQ_TEST_KEY",
-            "path": "providers[0].api_key_env",
-            "raw_expression": "QQ_TEST_KEY",
-            "default_present": False,
-            "kind": "configured_name",
-        },
-        {
             "name": "QQ_PRIMARY",
             "path": "providers[0].headers.Authorization",
             "raw_expression": "${QQ_PRIMARY}",
@@ -152,6 +146,22 @@ def test_environment_occurrences_project_nested_references_without_source_values
         },
     ]
     assert sentinel not in json.dumps(occurrences)
+
+
+def test_environment_name_occurrence_strips_and_validates_declared_names():
+    assert environment_name_occurrence("  QQ_PADDED_KEY  ", "providers[0].api_key_env") == {
+        "name": "QQ_PADDED_KEY",
+        "path": "providers[0].api_key_env",
+        "raw_expression": "QQ_PADDED_KEY",
+        "default_present": False,
+        "kind": "configured_name",
+    }
+    assert environment_name_occurrence("QQ_KEY", "p.api_key_env")["name"] == "QQ_KEY"
+    assert environment_name_occurrence("NOT-VALID", "p.api_key_env") is None
+    assert environment_name_occurrence("${QQ_SELECTOR}", "p.api_key_env") is None
+    assert environment_name_occurrence("", "p.api_key_env") is None
+    assert environment_name_occurrence(None, "p.api_key_env") is None
+    assert environment_name_occurrence(3, "p.api_key_env") is None
 
 
 def test_environment_occurrences_honor_path_prefix_and_ignore_invalid_values():

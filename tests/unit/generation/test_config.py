@@ -174,23 +174,27 @@ def test_generation_environment_sections_preserves_raw_references(monkeypatch):
     raw_audio = {"value": "${QQ_PROJECTED_VALUE}"}
     raw_music = {"value": "${QQ_PROJECTED_VALUE:-false}"}
     raw_asr = {"enabled": True}
+    raw_svg = {"enabled": "${QQ_PROJECTED_VALUE:-true}"}
     data = {
         "generation": {"image": raw_image},
         "audio": raw_audio,
         "music_generation": raw_music,
         "asr": raw_asr,
+        "svg": raw_svg,
     }
 
     sections = generation_environment_sections(data)
 
-    assert [entry["modality"] for entry in sections] == ["image", "audio", "music", "asr"]
+    assert [entry["modality"] for entry in sections] == [
+        "image", "audio", "music", "asr", "svg"]
     assert [entry["path"] for entry in sections] == [
         "generation.image",
         "audio",
         "music_generation",
         "asr",
+        "svg",
     ]
-    raw_sections = [raw_image, raw_audio, raw_music, raw_asr]
+    raw_sections = [raw_image, raw_audio, raw_music, raw_asr, raw_svg]
     assert all(
         entry["section"] is raw_section
         for entry, raw_section in zip(sections, raw_sections, strict=True)

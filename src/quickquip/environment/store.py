@@ -320,7 +320,10 @@ class Store:
                   'consumers': self._consumers()}
         if include_directory:
             from quickquip.environment.consumption import build_directory
-            result.update(build_directory(self.root, documents, result['variables']))
+            result.update(build_directory(
+                self.root, documents, result['variables'],
+                warning_for_name=warning, references=references,
+                mode_for=lambda name: mode(name, references)))
         return result
 
     def _candidate(self, raw, changes):

@@ -24,6 +24,7 @@ def generation_api_key_required(modality: str, protocol: Any) -> bool | None:
     """Return the declared credential requirement without expanding protocol names."""
     if not isinstance(protocol, str) or "${" in protocol:
         return None
+    protocol = protocol.strip()
     if modality == "audio":
         protocol = protocol or "minimax_t2a_http"
         if protocol in _NO_AUTH_AUDIO_PROTOCOLS:
@@ -548,6 +549,7 @@ def generation_environment_sections(data: dict[str, Any]) -> list[dict[str, Any]
         ("audio", "audio_generation"),
         ("music", "music_generation"),
         ("asr", "asr"),
+        ("svg", "svg"),
     ):
         section, path = _select_generation_section(data, modality, legacy_section_name)
         sections.append({"modality": modality, "path": path, "section": section})
