@@ -313,17 +313,21 @@ class Store:
         example = self.root / '.env.example'
         if not example.exists():
             example = Path('/app/.env.example')
-        suggestions = (sorted(set(read_environment(example.read_text(encoding='utf-8')))
-                              - set(values)) if example.exists() else [])
+        example_values = (read_environment(example.read_text(encoding='utf-8'))
+                          if example.exists() else {})
+        suggestions = sorted(set(example_values) - set(values))
         result = {'version': state['version'], 'suggestions': suggestions,
                   'variables': [{**row, 'states': statuses[row['name']]} for row in rows],
                   'consumers': self._consumers()}
         if include_directory:
             from quickquip.environment.consumption import build_directory
+            managed, deleted = markers(raw.decode('utf-8'))
             result.update(build_directory(
                 self.root, documents, result['variables'],
                 warning_for_name=warning, references=references,
-                mode_for=lambda name: mode(name, references)))
+                mode_for=lambda name: mode(name, references),
+                values=values, deleted=deleted, managed=managed,
+                example_names=set(example_values)))
         return result
 
     def _candidate(self, raw, changes):
