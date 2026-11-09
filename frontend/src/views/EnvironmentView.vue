@@ -67,6 +67,13 @@ const groupOptions = computed(() => {
   return [{ id: 'all', label: '全部小组' }, ...groups.map(group => ({ id: group.id, label: group.label }))]
 })
 
+function engaged(row: Row): boolean {
+  // Root definitions and live config references define the default scope;
+  // static catalog/template declarations alone stay behind the full-catalog switch.
+  return Boolean(row.definition?.present || row.definition?.deletion_marker
+    || row.relations.some(relation => DYNAMIC_SCOPES.has(relation.config_scope)))
+}
+
 const rows = computed(() => {
   const needle = search.value.trim().toLowerCase()
   return [...baseRows.value, ...localRows.value].filter(row => {
@@ -74,8 +81,7 @@ const rows = computed(() => {
       && !(domainFilter.value === 'unknown' && row.groups.includes('unknown.unidentified'))) return false
     if (groupFilter.value !== 'all' && !row.groups.includes(groupFilter.value)) return false
     if (hasDirectory.value && scopeFilter.value === 'defined' && !row.local) {
-      const engaged = row.definition?.present || row.definition?.deletion_marker || row.relations.length > 0
-      if (!engaged) return false
+      if (!engaged(row)) return false
     }
     if (!needle) return true
     const haystack = [row.name, row.description ?? '', ...(row.references ?? []),
@@ -101,14 +107,20 @@ const scopeLabels: Record<string, string> = {
 }
 const HOT_ACTIONS = new Set(['next_task', 'next_tieba_task'])
 const BLOCKING_ACTIONS = new Set(['restart_or_recreate', 'apply', 'publish'])
+const DYNAMIC_SCOPES = new Set(['draft', 'published', 'file'])
 
 function usageSummary(row: Row): string | null {
   const actions = new Set(row.relations.map(relation => relation.required_action))
   if (!actions.size) return null
   const hot = [...actions].some(action => HOT_ACTIONS.has(action))
   const blocking = [...actions].some(action => BLOCKING_ACTIONS.has(action))
-  const kinds = [hot, blocking].filter(Boolean).length
-  return kinds > 1 ? '部分用途需重启或重建' : null
+  if (hot && blocking) {
+    if (actions.has('restart_or_recreate')) return '部分用途需重启或重建'
+    if (actions.has('apply')) return '部分用途需应用配置'
+    if (actions.has('publish')) return '部分用途需发布草稿'
+    return '部分用途需另行操作'
+  }
+  return null
 }
 function summaryChips(row: Row): string[] {
   return [...new Set(row.relations.map(relation => relation.required_action))]
@@ -134,6 +146,16 @@ function allowedActions(row: Row): EditAction[] {
 function editable(row: Row): boolean {
   return allowedActions(row).length > 0
 }
+function definitionVariant(row: Row): 'success' | 'warn' | 'danger' | 'info' {
+  const action = edits[row.name]?.action
+  if (action === 'delete') return 'danger'
+  if (action) return 'warn'
+  const definition = row.definition
+  if (definition?.conflict || (definition?.deletion_marker && definition.present)) return 'warn'
+  if (definition?.deletion_marker) return 'info'
+  if (definition?.present || row.assigned) return 'success'
+  return 'info'
+}
 function detailId(name: string) { return `environment-details-${name}` }
 function toggleDetail(name: string) {
   expanded.value = expanded.value === name ? null : name
@@ -151,7 +173,9 @@ function edit(row: Row, value: string) {
   const existing = edits[row.name]?.action
   const action: EditAction = existing === 'create' ? 'create'
     : allowedActions(row).includes('create') && !allowedActions(row).includes('replace') ? 'create' : 'replace'
-  if (!value && action !== 'create') { delete edits[row.name] } else { edits[row.name] = { name: row.name, action, value } }
+  // Directory rows drop an emptied creation draft; explicit local adds keep it,
+  // matching the legacy flow where the user typed the name on purpose.
+  if (!value && (action !== 'create' || !row.local)) { delete edits[row.name] } else { edits[row.name] = { name: row.name, action, value } }
   reviewed.value = false
 }
 function mark(name: string, action: EditAction) {
@@ -168,7 +192,7 @@ function add() {
   }
   const existing = baseRows.value.find(row => row.name === name)
   if (existing) {
-    if (!allowedActions(existing).includes('create')) { error.value = '变量已存在且不可从此处修改'; return }
+    if (!editable(existing)) { error.value = '变量由编排或进程内部提供，不可在此修改'; return }
     search.value = name; domainFilter.value = 'all'; groupFilter.value = 'all'; scopeFilter.value = 'full'
     newName.value = ''
     void focusRow(name); return
@@ -196,12 +220,16 @@ function guard(event: BeforeUnloadEvent) {
   if (changes.value.length) { event.preventDefault(); event.returnValue = '' }
 }
 onBeforeRouteLeave(() => !changes.value.length || window.confirm('存在未提交的环境变量修改，离开页面？'))
+watch(domainFilter, () => { groupFilter.value = 'all' })
 watch(() => route.query.variable, value => {
   const name = String(value ?? '').trim()
   if (name) {
     search.value = name
     const target = baseRows.value.find(row => row.name === name)
-    if (target) expanded.value = name
+    if (target) {
+      expanded.value = name
+      if (!engaged(target)) scopeFilter.value = 'full'
+    }
   }
 })
 let timer: ReturnType<typeof setInterval> | undefined
@@ -210,7 +238,10 @@ onMounted(() => {
     const name = String(route.query.variable ?? '')
     if (name) {
       const target = baseRows.value.find(row => row.name === name)
-      if (target) expanded.value = name
+      if (target) {
+        expanded.value = name
+        if (!engaged(target)) scopeFilter.value = 'full'
+      }
       else if (!listing.value?.variables.some(row => row.name === name)) newName.value = name
     }
   }); window.addEventListener('beforeunload', guard)
@@ -285,11 +316,12 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
                   <td>
                     <div class="variable-identity">
                       <UiButton size="sm" variant="ghost" class="detail-toggle"
-                        :aria-expanded="expanded === row.name" :aria-controls="detailId(row.name)"
+                        :aria-expanded="expanded === row.name"
+                        :aria-controls="expanded === row.name ? detailId(row.name) : undefined"
                         :aria-label="`${expanded === row.name ? '收起' : '展开'} ${row.name} 详情`"
                         @click="toggleDetail(row.name)">{{ expanded === row.name ? '收起' : '详情' }}</UiButton>
                       <span class="variable-name">{{ row.name }}</span>
-                      <UiTag size="sm" :variant="edits[row.name]?.action === 'delete' ? 'danger' : edits[row.name] ? 'warn' : row.definition?.present || row.assigned ? 'success' : 'info'">{{ definitionLabel(row) }}</UiTag>
+                      <UiTag size="sm" :variant="definitionVariant(row)">{{ definitionLabel(row) }}</UiTag>
                     </div>
                     <p v-if="row.description" class="row-reference">{{ row.description }}</p>
                     <p v-if="row.groups.length && hasDirectory" class="row-reference row-groups">{{ row.groups.map(group => taxonomy.flatMap(domain => domain.groups).find(item => item.id === group)?.label ?? group).join(' · ') }}</p>

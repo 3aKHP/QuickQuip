@@ -226,12 +226,23 @@ function directoryListing() {
         definition: { present: true, value_state: 'nonempty' as const, managed_literal: false, deletion_marker: false },
         allowed_actions: ['replace', 'empty', 'delete'], description: 'MiniMax 凭据' },
       { name: 'PIP_INDEX_URL', assigned: false, mode: 'unknown' as const, warning: '', references: [],
-        states: {}, groups: ['deployment.image'], relations: [], sources: [],
-        evidence_flags: {}, definition: { present: false, value_state: 'missing' as const, managed_literal: false, deletion_marker: false },
+        states: {}, groups: ['deployment.image'],
+        relations: [{ component: 'image.build', object_id: 'quickquip-app', field_path: 'docker/Dockerfile.prod:ARG PIP_INDEX_URL',
+          config_scope: 'code' as const, enabled: null, required: null, name_kind: 'fixed' as const,
+          source_name: 'PIP_INDEX_URL', raw_expression: 'PIP_INDEX_URL', target_service: 'image',
+          target_kind: 'build_arg', target_name: 'PIP_INDEX_URL', resolution: 'image_build',
+          delivery: 'build_arg', required_action: 'rebuild_image', observation: 'not_observed' }],
+        sources: [], evidence_flags: {},
+        definition: { present: false, value_state: 'missing' as const, managed_literal: false, deletion_marker: false },
         allowed_actions: ['create'], description: '镜像构建 pip 源', default_present: true },
       { name: 'PYTHONPATH', assigned: false, mode: 'unknown' as const, warning: '', references: [],
-        states: {}, groups: ['runtime.framework'], relations: [], sources: [],
-        evidence_flags: { internal: true },
+        states: {}, groups: ['runtime.framework'],
+        relations: [{ component: 'compose', object_id: null, field_path: 'services.quickquip.environment.PYTHONPATH',
+          config_scope: 'template' as const, enabled: null, required: null, name_kind: 'fixed' as const,
+          source_name: 'PYTHONPATH', raw_expression: 'PYTHONPATH', target_service: 'bot',
+          target_kind: 'environment_name', target_name: 'PYTHONPATH', resolution: 'compose',
+          delivery: 'container_env_fixed', required_action: 'edit_compose_then_recreate', observation: 'not_observed' }],
+        sources: [], evidence_flags: { internal: true },
         definition: { present: false, value_state: 'missing' as const, managed_literal: false, deletion_marker: false },
         allowed_actions: [] },
     ] }
@@ -272,9 +283,10 @@ it('filters and expansion keep draft edits, and ARIA wiring matches the region',
   await view.find('textarea[aria-label="MINIMAX_API_KEY 新值"]').setValue('draft-secret')
   const toggle = view.findAll('button').find(b => b.text() === '详情')!
   expect(toggle.attributes('aria-expanded')).toBe('false')
-  expect(toggle.attributes('aria-controls')).toBe('environment-details-MINIMAX_API_KEY')
+  expect(toggle.attributes('aria-controls')).toBeUndefined()
   await toggle.trigger('click')
   expect(toggle.attributes('aria-expanded')).toBe('true')
+  expect(toggle.attributes('aria-controls')).toBe('environment-details-MINIMAX_API_KEY')
   const region = view.find('#environment-details-MINIMAX_API_KEY')
   expect(region.attributes('role')).toBe('region')
   expect(region.text()).toContain('llm.provider（shared）')
@@ -352,5 +364,42 @@ it('keeps full edit actions for legacy empty and bare keys', async () => {
   ])
   expect(view.findAll('button').some(b => b.text() === '设置空值')).toBe(true)
   expect(view.findAll('button').some(b => b.text() === '删除')).toBe(true)
+  view.unmount()
+})
+
+it('resets the group filter when the domain changes', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  await view.find('select[aria-label="变量领域"]').setValue('services')
+  await view.find('select[aria-label="使用小组"]').setValue('services.native.llm')
+  expect(view.find('tbody').text()).toContain('MINIMAX_API_KEY')
+  await view.find('select[aria-label="变量领域"]').setValue('deployment')
+  const groupSelect = view.find('select[aria-label="使用小组"]')
+  expect((groupSelect.element as HTMLSelectElement).value).toBe('all')
+  await view.find('select[aria-label="目录范围"]').setValue('full')
+  expect(view.find('tbody').text()).toContain('PIP_INDEX_URL')
+  view.unmount()
+})
+
+it('drops an emptied creation draft on directory rows', async () => {
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  await view.find('select[aria-label="目录范围"]').setValue('full')
+  await view.find('textarea[aria-label="PIP_INDEX_URL 新值"]').setValue('https://mirror.example/simple')
+  expect(view.text()).toContain('待提交 1 项修改')
+  await view.find('textarea[aria-label="PIP_INDEX_URL 新值"]').setValue('')
+  expect(view.text()).not.toContain('待提交')
+  view.unmount()
+})
+
+it('deep links to a full-scope-only entry reveal it', async () => {
+  routeQuery.variable = 'PIP_INDEX_URL'
+  vi.mocked(api.loadEnvironment).mockResolvedValue(directoryListing())
+  const view = mount(EnvironmentView)
+  await flushPromises()
+  expect(view.find('#environment-details-PIP_INDEX_URL').exists()).toBe(true)
+  expect((view.find('select[aria-label="目录范围"]').element as HTMLSelectElement).value).toBe('full')
   view.unmount()
 })
