@@ -3,7 +3,7 @@ import { request } from './index'
 export interface Variable {
   name: string
   assigned: boolean
-  mode: 'hot' | 'credential' | 'restart'
+  mode: 'hot' | 'credential' | 'restart' | 'unknown'
   states?: Record<string, string>
   references?: string[]
   warning: string

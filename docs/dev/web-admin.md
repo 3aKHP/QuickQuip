@@ -68,4 +68,6 @@
 
 `GET /ops/api/environment` 在登录鉴权后返回 `enabled`、`restart_required`、`backend_available` 与 `reason`，以及可用时的变量名、赋值状态和加载状态。`restart_required` 在管理关闭时为 `true`，表示启用需重启。管理关闭时 `reason` 为 `environment_management_disabled`；启用但后端不可用时为 `environment_backend_unavailable`。两个状态都返回空变量列表，页面按能力展示说明。
 
+变量元数据的 `mode` 为 `hot`（已适配热更新）、`credential`（草稿或已发布渠道引用的认证变量）、`restart`（已识别启动参数）或 `unknown`（尚未识别用途）。未知用途变量同步到进程快照后，状态为 `synced`；已适配热更新和认证变量确认版本后为 `loaded`。新增变量的预览由后端判定用途；保存渠道引用后，列表与操作查询会重新分类。变量名后缀不参与凭据分类。
+
 管理关闭时，预览、保存和操作查询返回 `409` 与 `code=environment_management_disabled`，不访问环境存储。管理开关按进程启动值固定；后端不可用时启用进程不会降级到旧凭据。环境值仅通过私有后端快照传给进程，公开接口继续保持只写契约。启用与运维步骤见[环境变量管理](../admin/environment.md)。
