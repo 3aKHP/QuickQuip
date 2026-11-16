@@ -143,7 +143,7 @@ def _build_builtin_service(tmp_path, tool_calling_enabled: bool = True):
 
 
 async def test_builtin_search_gemini_flow(tmp_path, monkeypatch, patch_provider_builder):
-    """声明入载荷、search_web 移除、提示词引导切换、来源块追加的完整链路。"""
+    """Grounding 声明、来源持久化及显示隐藏的完整链路。"""
     from tests.fixtures.provider_fakes import FakeGeminiClient
 
     service = _build_builtin_service(tmp_path)
@@ -172,9 +172,12 @@ async def test_builtin_search_gemini_flow(tmp_path, monkeypatch, patch_provider_
     declarations = tool_entries[0]["functionDeclarations"]
     assert "search_web" not in [item["name"] for item in declarations]
     # 2. 提示词引导切换为 grounding 块，SearXNG 引导被压制
-    # 3. 回复末尾追加来源块
-    assert result["reply"].endswith(
-        "来源：\n- QuickQuip README — example.test"
+    # 3. 显示隐藏来源尾块，完整 grounding 元数据仍可提取。
+    assert result["reply"] == "QuickQuip 是一个 QQ 群聊机器人项目。"
+    turn = service.store.load_closed_loops("1001")[0].turns[-1]
+    assert turn.text.endswith("来源：\n- QuickQuip README — example.test")
+    assert turn.presentation["search"]["raw_metadata"] == (
+        _grounding_response_data()["candidates"][0]["groundingMetadata"]
     )
 
 
@@ -204,5 +207,7 @@ async def test_builtin_search_works_with_tool_calling_disabled(
 
     client = stub_holder["client"]
     assert client.last_payload["tools"] == [{"google_search": {}}]
-    assert "QuickQuip README" in result["reply"]
-    assert "example.test" in result["reply"]
+    assert result["reply"] == "QuickQuip 是一个 QQ 群聊机器人项目。"
+    turn = service.store.load_closed_loops("1001")[0].turns[-1]
+    assert "QuickQuip README" in turn.text
+    assert turn.presentation["search"]["sources"][0]["url"].startswith("https://example.test/")

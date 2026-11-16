@@ -211,6 +211,7 @@ class DeliveryPlanItem:
     wrappers: tuple[str, str] = ("", "")
     attachment_refs: tuple[tuple[str, int], ...] = ()
     notice_text: str | None = None
+    display_text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -225,6 +226,7 @@ class TurnResponseRecord:
     native_state: dict[str, Any] | None = None
     native_omission_reason: NativeOmissionReason | None = None
     owner: ResponseOwner | None = None
+    presentation: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

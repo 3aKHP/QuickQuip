@@ -12,7 +12,6 @@
 from __future__ import annotations
 
 import logging
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Protocol
 
@@ -38,7 +37,9 @@ from quickquip.llm.agent_records import (
     new_agent_id,
 )
 from quickquip.llm.delivery import SplitLimitError, SplitParams, plan_text_chunks
-from quickquip.llm.provider import LLMResponse, strip_leading_reasoning_content
+from quickquip.llm.provider import LLMResponse
+from quickquip.llm.reply_presentation import PreparedReply, plain_reply, prepare_reply
+from quickquip.common.sensitive_filter import DEFAULT_OUTPUT_FALLBACK
 from quickquip.llm.store_parts.agent_records import (
     LoopHandle,
     LoopRecordBudgetExceeded,
@@ -140,24 +141,21 @@ class TurnRecorder:
         """记录未完成 Loop 的领域终止原因，由 service 在收尾时关闭。"""
         self._terminal_reason = reason
 
-    def _clean_text(self, raw: str) -> str:
-        text = strip_leading_reasoning_content(raw or "")
-        text = re.sub(r"\n{3,}", "\n\n", text).strip()
-        return text
-
-    def _scrubbed_text(self, raw: str) -> tuple[str, TextPolicy]:
-        text = self._clean_text(raw)
+    def _scrubbed_reply(self, response: LLMResponse) -> tuple[PreparedReply, TextPolicy]:
+        prepared = prepare_reply(response)
         if self._sensitive_scan is not None:
-            scan = self._sensitive_scan(text)
+            scan = self._sensitive_scan(prepared.text)
             if scan.blocked:
-                return "本次回复内容未能通过安全检查，已替换。", TextPolicy.REPLACED_BY_FILTER
-        return text, TextPolicy.ALLOWED
+                return plain_reply(DEFAULT_OUTPUT_FALLBACK), TextPolicy.REPLACED_BY_FILTER
+        return prepared, TextPolicy.ALLOWED
 
     def _plan_deliveries(
-        self, turn_id: str, text: str, *, is_final: bool
+        self, turn_id: str, prepared: PreparedReply, *, is_final: bool
     ) -> tuple[list[DeliveryPlanItem], set[str]]:
         """规划交付项并单独返回抑制项 ID——抑制判定的唯一归属者。"""
         policy = self._config
+        text = prepared.text
+        projection = prepared.display
         items: list[DeliveryPlanItem] = []
         if not text:
             return items, set()
@@ -177,9 +175,17 @@ class TurnRecorder:
             return items, {item.delivery_id}
         if self._sink is None:
             raise RuntimeError("交付开关开启但缺少 DeliverySink（编程错误）")
+        if not projection.text:
+            item = DeliveryPlanItem(
+                delivery_id=new_agent_id("dlv"), kind=DeliveryKind.TEXT_CHUNK,
+                turn_id=turn_id, chunk_index=0, source_start=0, source_end=len(text),
+                display_text="",
+            )
+            self._delivery_stats["suppressed"] += 1
+            return [item], {item.delivery_id}
         try:
             chunks, limit_reason = plan_text_chunks(
-                text,
+                projection.text,
                 policy.split_params(),
                 reserved_delivery_slots=self._delivery_count,
                 max_chunks=policy.reply_max_chunks_per_loop,
@@ -199,8 +205,9 @@ class TurnRecorder:
                     kind=DeliveryKind.TEXT_CHUNK,
                     turn_id=turn_id,
                     chunk_index=chunk.chunk_index,
-                    source_start=chunk.start,
-                    source_end=chunk.end,
+                    source_start=projection.boundary(chunk.start),
+                    source_end=projection.boundary(chunk.end),
+                    display_text=projection.text[chunk.start:chunk.end],
                 )
             )
         return items, set()
@@ -224,7 +231,8 @@ class TurnRecorder:
         ``native_state_omission`` 由调用方强制省略原生副本（ephemeral
         工具触达后的 Loop：原生块可能携带临时载荷，§8.2）。
         """
-        text, text_policy = self._scrubbed_text(response.text)
+        prepared, text_policy = self._scrubbed_reply(response)
+        text = prepared.text
         is_final = not executable_calls or not has_more_rounds
         turn_id = new_agent_id("turn")
         output_status = (
@@ -271,7 +279,7 @@ class TurnRecorder:
                 )
             else:
                 native_state = candidate
-        plan, suppressed_ids = self._plan_deliveries(turn_id, text, is_final=is_final)
+        plan, suppressed_ids = self._plan_deliveries(turn_id, prepared, is_final=is_final)
         record = self._store.commit_turn(
             self._handle,
             TurnResponseRecord(
@@ -283,6 +291,7 @@ class TurnRecorder:
                 native_state=native_state,
                 native_omission_reason=native_omission,
                 owner=_owner_payload(response.owner),
+                presentation=(prepared.presentation if native_state_omission is None else None),
             ),
             declarations,
             plan,
@@ -323,7 +332,10 @@ class TurnRecorder:
                 # 中间轮关闭的 suppressed 项不进入 sink：防止把抑制正文发出。
                 continue
             item = plan.get(delivery_id)
-            chunk_text = text[item.source_start : item.source_end] if item else text
+            chunk_text = (
+                item.display_text if item is not None and item.display_text is not None
+                else text[item.source_start:item.source_end] if item is not None else text
+            )
             # 范围恒等要求段落分隔换行归前段（§6.1），段尾空白只属于显示层：
             # 发送前 rstrip；剥离后为空的纯空白段按策略抑制，不发送空消息。
             chunk_text = chunk_text.rstrip()

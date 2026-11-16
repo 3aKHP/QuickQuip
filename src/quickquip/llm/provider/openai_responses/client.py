@@ -82,7 +82,31 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
                 del headers[key]
         headers["authorization"] = f"Bearer {self._get_api_key()}"
         headers["content-type"] = "application/json"
-        return url, headers, self._project_body(request, payload)
+        payload = self._project_body(request, payload)
+        tools = payload.get("tools", [])
+        items = payload.get("input", [])
+        if (not isinstance(tools, list) or not all(
+                isinstance(t, dict) and isinstance(t.get("type"), str) for t in tools
+            )
+                or not isinstance(items, list) or not all(isinstance(i, dict) for i in items)):
+            raise LLMProviderError("请求覆盖参数包含畸形 tools 或 input。")
+        search_declarations = [t.get("type") for t in tools if t.get("type") in {
+            "web_search", "web_search_preview", "web_search_preview_2025_03_11",
+        }]
+        search_allowed = (request.allow_tool_calls and request.builtin_search
+                          and "web_search" in self._profile().hosted_tools)
+        if not search_allowed and any(i.get("type") == "web_search_call" for i in items):
+            raise LLMProviderError("搜索未启用，覆盖参数不能回放搜索状态。")
+        include = payload.get("include", [])
+        if not isinstance(include, list) or (
+            ("web_search_call.action.sources" in include) != bool(search_allowed)
+        ):
+            raise LLMProviderError("请求覆盖参数与搜索来源 include 许可不一致。")
+        if search_declarations != (["web_search"] if search_allowed else []):
+            raise LLMProviderError("请求覆盖参数与原生搜索许可不一致。")
+        if not request.allow_tool_calls and payload.get("tools"):
+            raise LLMProviderError("本次工具已禁用，请求覆盖参数不能声明工具。")
+        return url, headers, payload
 
     def _parse_response(self, data: dict[str, Any], fallback_model: str) -> LLMResponse:
         return parse_responses_body(
@@ -141,10 +165,20 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
             "output": [],
         }
 
+    def _validate_search_response(self, response: LLMResponse, request: LLMRequest) -> None:
+        has_search = any(item.get("type") == "web_search_call"
+                         for item in (response.native_blocks or []))
+        if has_search and not (
+            request.allow_tool_calls and request.builtin_search
+            and "web_search" in self._profile().hosted_tools
+        ):
+            raise LLMProviderError("Provider 返回了本次未启用的原生搜索调用。")
+
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         url, headers, payload = await self._build_request_parts(request)
         data, final_url = await self._post_json_candidate(url, headers, payload)
         response = self._parse_response(data, request.model)
+        self._validate_search_response(response, request)
         response.owner = build_response_owner(
             self.config, final_url, request.model, effort=_payload_wire_effort(payload)
         )
@@ -155,6 +189,7 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
         payload["stream"] = True
         chunks, final_url = await self._post_stream_sse_candidate(url, headers, payload)
         response = self._assemble_stream_response(chunks, request.model)
+        self._validate_search_response(response, request)
         response.owner = build_response_owner(
             self.config, final_url, request.model, effort=_payload_wire_effort(payload)
         )

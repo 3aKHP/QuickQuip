@@ -827,3 +827,27 @@ def test_trigger_projection_preserves_identity_quote_and_caption(budget):
     )
     trigger = result.messages[0].content
     assert all(value in trigger for value in ("Alice", "123", "QUOTE", "FORWARD", "CAPTION"))
+
+
+def test_search_disabled_demotes_whole_loop_and_preserves_function_pairing():
+    from copy import deepcopy
+    from quickquip.llm.provider.openai_responses.request import serialize_input_items
+    items = deepcopy(RESPONSES_OUTPUT_ITEMS)
+    items.insert(0, {"type": "web_search_call", "id": "ws_test", "status": "completed",
+                     "action": {"type": "search", "query": "weather"},
+                     "encrypted_content": "opaque-search"})
+    loop = _loop("loop_1", (_responses_turn(
+        "turn_0", items=items, tools=(_tool_exec(
+            "exec_0", provider_call_id="call_resp_identity"),), owner=RESPONSES_OWNER),))
+    enabled = project_loops([loop], target=RESPONSES_OWNER, protocol="openai_responses")
+    disabled = project_loops([loop], target=RESPONSES_OWNER, protocol="openai_responses",
+                             responses_search_enabled=False)
+    assert enabled.decisions[0].path == PATH_NATIVE
+    assert disabled.decisions[0].reason == "native_search_disabled"
+    wire = serialize_input_items(disabled.messages, [[] for _ in disabled.messages],
+                                 provider_id="test")
+    assert not any(i.get("type") in {"web_search_call", "reasoning"} for i in wire)
+    declared = [i["call_id"] for i in wire if i.get("type") == "function_call"]
+    answered = [i["call_id"] for i in wire if i.get("type") == "function_call_output"]
+    assert declared and declared == answered
+    assert loop.turns[0].native_state["blocks"] == items

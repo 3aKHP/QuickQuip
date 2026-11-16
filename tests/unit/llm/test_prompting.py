@@ -1071,3 +1071,12 @@ def test_forward_images_follow_direct_and_quoted_and_share_limit():
     )
     assert msgs[-1].image_urls == ["direct", "same", "quoted", "f1", "f2"]
     assert "1 张图片未附带" in msgs[-1].content
+
+
+def test_hosted_search_guidance_is_available_without_function_specs():
+    prompt = build_system_prompt(persona=_builtin_persona(), group_id=1001,
+                                 tool_specs=[], search_tool_name="search_web",
+                                 search_mode="responses_hosted")
+    assert "web_search" in prompt
+    assert "SearXNG" not in prompt
+    assert "服务端自动完成" not in prompt

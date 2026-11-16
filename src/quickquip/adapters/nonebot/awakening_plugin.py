@@ -117,8 +117,10 @@ def register_boredom_scan_job(sched=None) -> int | None:
                 generate=_generate_with_delivery,
             ):
                 try:
+                    delivered = bool(str(plan.reply_result.get("delivered_text") or "").strip())
                     with bot_action_trace(**plan.trace_kwargs()):
-                        if str(plan.reply_result.get("reply") or "").strip():
+                        if (str(plan.reply_result.get("reply") or "").strip()
+                                or plan.reply_result.get("images")):
                             mention_resolver = build_outbound_mention_resolver(
                                 plan.group_id, bot.self_id, svc
                             )
@@ -134,6 +136,7 @@ def register_boredom_scan_job(sched=None) -> int | None:
                                 str(resp.get("message_id", "") or "").strip()
                                 if isinstance(resp, dict) else ""
                             )
+                            delivered = delivered or bool(sent_msg_id)
                             if sent_msg_id and mention_resolver is not None:
                                 commit_mentions(
                                     str(plan.group_id),
@@ -141,7 +144,7 @@ def register_boredom_scan_job(sched=None) -> int | None:
                                     cooldown_seconds=mention_cooldown_seconds(svc),
                                 )
                             record_final_receipt(svc, plan.reply_result, sent_msg_id)
-                    if not plan.reply_result.get("cancelled_reason"):
+                    if delivered and not plan.reply_result.get("cancelled_reason"):
                         # 排队超耐心取消的轮零发送：确认冷却/统计会把
                         # 未发送写进已发送，违反 confirm 的传输成功前提。
                         confirm_boredom_sent(plan, stats_tracker)

@@ -51,7 +51,6 @@ async def run_tool_call_loop(
     # ephemeral 工具触达标记（§8.2）：单调置位，此后本 Loop 的 Turn 原生
     # 副本不再入业务持久层（工具参数与引用其内容的 reasoning 都可能携带
     # 临时载荷）；内存协议状态不受影响。
-    ephemeral_touched = False
     history_state = getattr(context, "history", None)
     discovery = ToolDiscovery(
         enabled=tool_discovery_enabled,
@@ -76,6 +75,7 @@ async def run_tool_call_loop(
             current_request, tools=discovery.loaded_specs(current_request.tools),
         )
 
+    hosted_search_count = 0
     for round_index in range(search_failsafe_max_rounds + 1):
         if request_guard is not None:
             # §8.3：每次 provider HTTP 尝试前对最终 payload 复检预算；
@@ -94,20 +94,35 @@ async def run_tool_call_loop(
         # 模型产出图片（Responses 内置生图 / Gemini inlineData）收进外发
         # 通道：与工具路径同上限同语义，后续调用失败不丢弃已产出图片。
         collect_generated_images(response, context)
+        search_items = [item for item in (response.native_blocks or [])
+                        if item.get("type") == "web_search_call"]
+        hosted_search_count += len(search_items)
+        for item in search_items:
+            action = item.get("action", {})
+            logger.info(
+                "LLM hosted search: loop=%s round=%s call=%s action=%s status=%s "
+                "sources=%s encrypted=%s",
+                getattr(getattr(turn_recorder, "handle", None), "loop_id", None),
+                round_index, item.get("id"),
+                action.get("type"), item.get("status"), len(action.get("sources", [])),
+                bool(item.get("encrypted_content")),
+            )
         # R03：触达检测先于任何记录分支——首个响应声明 ephemeral 工具但
         # 被整批拒绝/提前结束时，原生副本同样必须省略
-        if not ephemeral_touched and response.tool_calls:
-            ephemeral_touched = any(
+        if not context.ephemeral_touched and response.tool_calls:
+            context.ephemeral_touched = any(
                 tool_registry.retention_of(call.name) == "ephemeral"
                 for call in response.tool_calls
             )
         logger.info(
-            "LLM completion: provider=%s model=%s finish_reason=%s tool_calls=%s round=%s",
+            "LLM completion: provider=%s model=%s finish_reason=%s tool_calls=%s round=%s "
+            "hosted_search_calls=%s",
             provider.id,
             response.model,
             response.finish_reason,
             len(response.tool_calls),
             round_index,
+            hosted_search_count,
         )
         if not response.tool_calls or not current_request.allow_tool_calls:
             if turn_recorder is not None:
@@ -119,7 +134,7 @@ async def run_tool_call_loop(
                     # 最终轮恰是引用临时内容最密集的一轮（模型据检索结果
                     # 合成答案），ephemeral 触达后原生副本同样必须省略
                     native_state_omission=(
-                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                        NativeOmissionReason.EPHEMERAL_POLICY if context.ephemeral_touched else None
                     ),
                 )
                 await turn_recorder.deliver_turn()
@@ -143,7 +158,7 @@ async def run_tool_call_loop(
                     executable_calls=[],
                     has_more_rounds=False,
                     native_state_omission=(
-                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                        NativeOmissionReason.EPHEMERAL_POLICY if context.ephemeral_touched else None
                     ),
                 )
                 turn_recorder.mark_interrupted("tool_round_limit")
@@ -190,7 +205,8 @@ async def run_tool_call_loop(
                         executable_calls=[],
                         has_more_rounds=False,
                         native_state_omission=(
-                            NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                            NativeOmissionReason.EPHEMERAL_POLICY
+                            if context.ephemeral_touched else None
                         ),
                     )
                     await turn_recorder.deliver_turn()
@@ -216,7 +232,7 @@ async def run_tool_call_loop(
                     executable_calls=[],
                     has_more_rounds=False,
                     native_state_omission=(
-                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                        NativeOmissionReason.EPHEMERAL_POLICY if context.ephemeral_touched else None
                     ),
                 )
                 await turn_recorder.deliver_turn()
@@ -237,7 +253,7 @@ async def run_tool_call_loop(
                     executable_calls=[],
                     has_more_rounds=False,
                     native_state_omission=(
-                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                        NativeOmissionReason.EPHEMERAL_POLICY if context.ephemeral_touched else None
                     ),
                 )
                 turn_recorder.mark_interrupted("search_failsafe_limit")
@@ -260,7 +276,7 @@ async def run_tool_call_loop(
                 executable_calls=selected_calls,
                 has_more_rounds=True,
                 native_state_omission=(
-                    NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                    NativeOmissionReason.EPHEMERAL_POLICY if context.ephemeral_touched else None
                 ),
             )
             await turn_recorder.deliver_turn()
@@ -303,23 +319,31 @@ async def run_tool_call_loop(
             # 每轮刷新"当前请求剩余空间"（§8.1）：结果预算由当前 request
             # 实况推导，工具不自行从初始请求猜测。
             history_state.begin_round(result_space_probe(current_request))
+        declared_names = {spec.name for spec in current_request.tools}
         for call in selected_calls:
             if request_guard is not None:
                 request_guard(current_request)
             execution_id = execution_ids.get(call.id)
-            if turn_recorder is not None and execution_id is not None:
-                turn_recorder.on_tool_started(execution_id)
-            if tool_discovery_enabled and not discovery.is_loaded(call.name):
+            permitted = call.name in declared_names and (
+                not tool_discovery_enabled or discovery.is_loaded(call.name)
+            )
+            if not permitted:
                 result = LLMToolResult(
                     call_id=call.id,
                     name=call.name,
                     content=(
-                        f"工具 {call.name} 尚未加载，"
-                        f"请先调用 {tool_search_name} 搜索并加载相关工具。"
+                        (f"工具 {call.name} 尚未加载，"
+                         f"请先调用 {tool_search_name} 搜索并加载相关工具。")
+                        if tool_discovery_enabled else
+                        f"工具 {call.name} 未在当前请求声明，已拒绝执行。"
                     ),
                     is_error=True,
                 )
+                if turn_recorder is not None and execution_id is not None:
+                    turn_recorder.on_tool_skipped(execution_id, ToolSkipReason.BLOCKED)
             else:
+                if turn_recorder is not None and execution_id is not None:
+                    turn_recorder.on_tool_started(execution_id)
                 blocked_result = result_pipeline.check_call_arguments(call)
                 if blocked_result is not None:
                     result = blocked_result
@@ -357,7 +381,7 @@ async def run_tool_call_loop(
                         newly_loaded,
                     )
             tool_results.append(result)
-            if turn_recorder is not None and execution_id is not None:
+            if permitted and turn_recorder is not None and execution_id is not None:
                 turn_recorder.on_tool_finished(
                     execution_id, result,
                     retention=tool_registry.retention_of(call.name),

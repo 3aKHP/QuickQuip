@@ -8,6 +8,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import json
+
+import pytest
 
 from plugins.llm_runtime import LLMService
 from tests.fixtures.agent_loop import (
@@ -131,3 +134,92 @@ async def test_delivery_invalid_domain_rejected(tmp_path: Path, patch_provider_b
     service = await _service(tmp_path)
     with pytest.raises(ValueError):
         service.set_chat_agent_delivery_enabled(1001, True, chat_type="group", domain="interim")
+
+
+async def test_hosted_sources_hidden_in_both_delivery_paths_but_preserved(
+    tmp_path, patch_provider_builder,
+):
+    from quickquip.llm.provider.base import LLMResponse, LLMWebSearchReport, LLMWebSearchSource
+    service = await _service(tmp_path)
+
+    class SearchClient:
+        async def complete(self, request):
+            return LLMResponse(text="检索结论", model=request.model, web_search=LLMWebSearchReport(
+                queries=["example"], sources=[LLMWebSearchSource(
+                    title="Example", url="https://example.test/source")], link_urls=True))
+
+    patch_provider_builder(lambda provider: SearchClient())
+    for group_id, split in [(1001, False), (1002, True)]:
+        service.set_chat_agent_delivery_enabled(group_id, split, domain="final")
+        sink = CollectingSink()
+        service.bind_delivery_sink(sink)
+        result = await service.generate_reply(group_id=group_id, user_id="2002",
+                                             sender_name="测试", prompt="查询")
+        text = "\n".join(_sink_texts(sink)) if split else result["reply"]
+        assert text == "检索结论"
+        with service.store._connect() as conn:
+            stored = conn.execute(
+                "SELECT content FROM conversation_messages WHERE id = ?",
+                (result["agent_turn_row_id"],),
+            ).fetchone()[0]
+            metadata = conn.execute(
+                "SELECT presentation_json FROM agent_turns WHERE message_row_id = ?",
+                (result["agent_turn_row_id"],),
+            ).fetchone()[0]
+        assert stored.count("来源：") == 1
+        assert "https://example.test/source" in stored
+        assert "https://example.test/source" in metadata
+
+
+@pytest.mark.parametrize("ephemeral", [False, True])
+async def test_synthetic_reply_preserves_sources_only_outside_ephemeral_boundary(
+    tmp_path, patch_provider_builder, ephemeral,
+):
+    from quickquip.llm.provider.base import LLMResponse, LLMWebSearchReport, LLMWebSearchSource
+    from quickquip.llm.tools import LLMToolCall, LLMToolSpec
+
+    service = await _service(tmp_path)
+    if ephemeral:
+        service.tool_registry.register(
+            LLMToolSpec(name="get_identity", description="Temporary lookup",
+                        input_schema={"type": "object", "properties": {}}),
+            lambda args, ctx: "temporary-result", result_retention="ephemeral",
+            redact_arguments=lambda raw: "{}",
+        )
+
+    class SearchClient:
+        calls = 0
+
+        async def complete(self, request):
+            self.calls += 1
+            if ephemeral and self.calls == 1:
+                return LLMResponse(text="", model=request.model, tool_calls=[LLMToolCall(
+                    id="identity-call", name="get_identity", arguments_json='{"query":"tester"}',
+                )])
+            return LLMResponse(text="检索结论", model=request.model, web_search=LLMWebSearchReport(
+                queries=["source-query-sentinel"], sources=[LLMWebSearchSource(
+                    title="Example", url="https://example.test/source")],
+                raw_metadata={"original": "source-query-sentinel"}, link_urls=True,
+            ))
+
+    client = SearchClient()
+    patch_provider_builder(lambda provider: client)
+    result = await service.generate_reply(
+        group_id=1001, user_id="2002", sender_name="测试", prompt="查询",
+        store_user_message=False,
+    )
+    assert "agent_turn_row_id" not in result
+    assert result["reply"] == "检索结论"
+    with service.store._connect() as conn:
+        row = conn.execute(
+            "SELECT content,presentation_json FROM conversation_messages "
+            "WHERE group_id='1001' AND role='assistant' ORDER BY id DESC LIMIT 1",
+        ).fetchone()
+    assert "来源：" in row["content"]
+    if ephemeral:
+        assert client.calls == 2
+        assert row["presentation_json"] is None
+    else:
+        assert json.loads(row["presentation_json"])["search"]["queries"] == [
+            "source-query-sentinel",
+        ]

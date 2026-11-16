@@ -501,6 +501,7 @@ style_profile = "openai_family"
 # responses_profile：后端能力位。"openai-public"（官方 API）、
 # "codex-http-relay"（Codex 形态中转：不发 service_tier、容忍 codex.*
 # 结构事件、终态缺省字段时以流式完整 item 为回放基准）或
+# hosted 搜索会话自动移除本地 search_web；禁用工具后历史搜索使用通用投影。
 # "codex-relay-hosted-tools"（在 codex-http-relay 之上，开启工具调用时
 # 由请求侧显式声明 image_generation 生图及 web_search 搜索工具）。
 # 模型可自主使用搜索并产生额外费用；渠道不支持时切回 codex-http-relay。

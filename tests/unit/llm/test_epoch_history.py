@@ -119,3 +119,27 @@ def test_already_archived_loop_rebuilds_when_scrubbed_turn_changes():
     assert "PRIVATE_SENTINEL" not in str(second.frozen.segments)
     assert "[内容已过滤]" in str(second.frozen.segments)
     assert _select(cleaned, rows, second.frozen, archive_loop_ids=archived).reason is None
+
+
+def test_hosted_only_search_enters_frozen_native_history_and_can_be_disabled():
+    owner = replace(OWNER, protocol="openai_responses")
+    blocks = [{"type": "reasoning", "encrypted_content": "opaque-reasoning"},
+              {"type": "web_search_call", "id": "ws_test", "status": "completed",
+               "action": {"type": "search", "query": "weather"}},
+              {"type": "message", "role": "assistant", "content": [
+                  {"type": "output_text", "text": "grounded answer"}]}]
+    loops, rows = _sources(1)
+    loops = [replace(loops[0], turns=(_turn(
+        "turn_0", tools=(), native_state=_native_state(owner, blocks),
+        owner=_owner_dict(owner)),))]
+    first = _select(loops, rows, protocol="openai_responses", target=owner)
+    assert first.frozen.segments["loop_0"][1].native_content == blocks
+    second = _select(loops, rows, first.frozen, protocol="openai_responses", target=owner)
+    assert second.frozen.segments == first.frozen.segments
+    disabled = select_history(rows, loops, previous=second.frozen, target=owner,
+                              protocol="openai_responses", profile="search-disabled",
+                              budget=10000, target_ratio=0.5, archive_loop_ids=frozenset(),
+                              effort="", responses_search_enabled=False)
+    assert disabled.reason == "profile"
+    assert all(m.native_content is None for m in disabled.frozen.segments["loop_0"])
+    assert first.frozen.segments["loop_0"][1].native_content == blocks

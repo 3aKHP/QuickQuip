@@ -20,7 +20,7 @@ from quickquip.llm.provider.base import (
 )
 from quickquip.llm.tools import LLMToolCall
 from quickquip.llm.provider.openai_responses.web_search import (
-    cited_text, search_report, validate_search_item,
+    cited_text_and_spans, search_report, validate_search_item,
 )
 
 # image_generation_call.output_format → media_type（未知格式按 image/<fmt> 透传）
@@ -202,14 +202,10 @@ def parse_responses_body(
 
     generated_images, stripped_items = _extract_generated_images(body["output"])
     items = validate_output_items(stripped_items, provider_id=provider_id)
-    text = _message_text(items)
+    citation_spans: list[tuple[int, int]] = []
+    opaque_spans: list[tuple[int, int]] = []
+    text = _message_text(items, citation_spans=citation_spans, opaque_spans=opaque_spans)
     web_search = search_report(items)
-    if web_search is not None and text:
-        missing = [source for source in web_search.sources if source.url not in text][:3]
-        if missing:
-            text += "\n\n来源：\n" + "\n".join(
-                f"- {source.title or '来源'} ({source.url})" for source in missing
-            )
     tool_calls = [
         LLMToolCall(
             id=str(item["call_id"]),
@@ -249,6 +245,8 @@ def parse_responses_body(
         thinking_blocks=thinking_blocks,
         generated_images=generated_images,
         web_search=web_search,
+        citation_spans=citation_spans,
+        opaque_citation_spans=opaque_spans,
         **usage,
     )
 
@@ -280,8 +278,13 @@ def parse_usage(usage: Any) -> dict[str, int | None]:
     }
 
 
-def _message_text(items: list[dict[str, Any]], *, render_citations: bool = True) -> str:
+def _message_text(
+    items: list[dict[str, Any]], *, render_citations: bool = True,
+    citation_spans: list[tuple[int, int]] | None = None,
+    opaque_spans: list[tuple[int, int]] | None = None,
+) -> str:
     parts: list[str] = []
+    length = 0
     for item in items:
         if item.get("type") != "message":
             continue
@@ -289,9 +292,18 @@ def _message_text(items: list[dict[str, Any]], *, render_citations: bool = True)
             if not isinstance(part, dict):
                 continue
             if part.get("type") == "output_text":
-                parts.append(cited_text(part) if render_citations else part["text"])
+                markers: list[tuple[int, int]] = []
+                text, spans = (cited_text_and_spans(part, opaque_spans=markers) if render_citations
+                               else (part["text"], []))
+                if citation_spans is not None:
+                    citation_spans.extend((length + a, length + b) for a, b in spans)
+                if opaque_spans is not None:
+                    opaque_spans.extend((length + a, length + b) for a, b in markers)
+                parts.append(text)
+                length += len(text)
             elif part.get("type") == "refusal":
                 parts.append(str(part.get("refusal") or ""))
+                length += len(parts[-1])
     return "".join(parts)
 
 

@@ -7,6 +7,8 @@ from contextlib import contextmanager
 from datetime import datetime
 from dataclasses import replace
 import sqlite3
+import json
+from typing import Any
 
 from quickquip.llm.session import (
     SessionIdentity, SessionInvalidated, SessionStoreError, SessionModelProjection,
@@ -289,6 +291,7 @@ class SessionLifecycleMixin:
         self, scope: str, identity: SessionIdentity, generation: int,
         *, user_message: dict | None, assistant_text: str | None,
         floor_id: int | None = None, keep_last: int | None = None,
+        assistant_presentation: dict[str, Any] | None = None,
     ) -> None:
         """Commit the legacy reply atomically under the captured session fence."""
         with self._session_connection(write=True) as conn:
@@ -305,9 +308,20 @@ class SessionLifecycleMixin:
                      user_message.get("sender_role", "unknown")),
                 )
             if assistant_text is not None:
+                metadata = None
+                if assistant_presentation is not None:
+                    from quickquip.llm.reply_presentation import validate_presentation
+                    from quickquip.llm.agent_records import MAX_LOOP_RECORD_BYTES
+
+                    validate_presentation(assistant_presentation, assistant_text)
+                    metadata = json.dumps(assistant_presentation, ensure_ascii=False)
+                    if len(metadata.encode("utf-8")) > MAX_LOOP_RECORD_BYTES:
+                        raise ValueError("reply presentation exceeds storage budget")
                 conn.execute(
-                    "INSERT INTO conversation_messages (group_id, role, content, created_at) "
-                    "VALUES (?, 'assistant', ?, ?)", (scope, assistant_text, _utc_now()),
+                    "INSERT INTO conversation_messages "
+                    "(group_id, role, content, created_at, presentation_json) "
+                    "VALUES (?, 'assistant', ?, ?, ?)",
+                    (scope, assistant_text, _utc_now(), metadata),
                 )
             if keep_last is not None:
                 conn.execute(

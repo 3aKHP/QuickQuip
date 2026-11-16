@@ -117,7 +117,10 @@ def _serialize_tools(
         }
         for spec in request.tools
     ]
-    return _append_hosted_tools(tools, profile.hosted_tools)
+    hosted = profile.hosted_tools
+    if not request.builtin_search:
+        hosted = hosted - {"web_search"}
+    return _append_hosted_tools(tools, hosted)
 
 
 def build_responses_payload(
@@ -128,6 +131,13 @@ def build_responses_payload(
     prepared_images: list[list[LLMImageInput]],
 ) -> dict[str, Any]:
     profile = resolve_profile(config.responses_profile)
+    search_enabled = (request.allow_tool_calls and request.builtin_search
+                      and "web_search" in profile.hosted_tools)
+    if not search_enabled and any(
+        item.get("type") == "web_search_call"
+        for message in request.messages for item in (message.native_content or [])
+    ):
+        raise LLMProviderError("搜索未启用，不能回放原生搜索状态。")
     payload: dict[str, Any] = {
         "model": request.model,
         "input": serialize_input_items(
@@ -139,7 +149,7 @@ def build_responses_payload(
         "temperature": request.temperature,
         "max_output_tokens": request.max_output_tokens,
     }
-    if request.allow_tool_calls and "web_search" in profile.hosted_tools:
+    if request.allow_tool_calls and request.builtin_search and "web_search" in profile.hosted_tools:
         payload["include"].append("web_search_call.action.sources")
     if request.system_prompt:
         payload["instructions"] = request.system_prompt

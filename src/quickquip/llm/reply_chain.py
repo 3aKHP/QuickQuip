@@ -7,7 +7,6 @@ messages 拼装等运行时依赖由 service 调用点以绑定可调用现取�
 """
 from __future__ import annotations
 
-import re
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -19,9 +18,9 @@ from quickquip.common.sensitive_filter import (
     log_hits as _log_sensitive_hits,
 )
 from quickquip.llm.image_preprocessor import ImageDescription
-from quickquip.llm.rendering import append_web_search_source_block
+from quickquip.llm.reply_presentation import PreparedReply, plain_reply, prepare_reply
 from quickquip.llm.reply_types import ChatTurnRequest, ReplyResult
-from quickquip.llm.provider import LLMRequest, strip_leading_reasoning_content
+from quickquip.llm.provider import LLMRequest
 from quickquip.llm.session import SessionIdentity
 
 if TYPE_CHECKING:
@@ -269,6 +268,8 @@ class TurnRequestAssembler:
     builtin_search_active: bool
     system_prompt: str
 
+    tools_allowed: bool = False
+
     # 装配产物（assemble() 每次重建）
     history: list[dict[str, object]] = field(default_factory=list)
     participants: list[dict[str, str]] = field(default_factory=list)
@@ -363,7 +364,7 @@ class TurnRequestAssembler:
             temperature=self.provider.temperature,
             max_output_tokens=self.provider.max_output_tokens,
             tools=self.tool_specs,
-            allow_tool_calls=bool(self.tool_specs),
+            allow_tool_calls=self.tools_allowed,
             tool_choice="auto",
             builtin_search=self.builtin_search_active,
             reasoning_effort=self.settings.reasoning_effort or None,
@@ -374,7 +375,7 @@ class TurnRequestAssembler:
 EMPTY_REPLY_PLACEHOLDER = "模型没有返回可显示的文本。"
 
 
-def finalize_reply_text(
+def finalize_reply(
     response: "LLMResponse",
     *,
     provider_id: str,
@@ -382,17 +383,17 @@ def finalize_reply_text(
     sensitive: SensitiveFilter,
     scope_key: str,
     allow_empty: bool = False,
-) -> str:
+) -> PreparedReply:
     """输出后处理：剥推理头、折叠空行、内置搜索来源块与敏感词输出扫描。
 
     敏感命中只观察不改变重试；blocked 时正文与落库共用 fallback 文本
     （毒化下一轮上下文的内容不落 history）。``allow_empty``：响应携带
     模型产出图片而无正文时保持空文本（占位提示会跟图片一起发给用户）。
     """
-    text = strip_leading_reasoning_content(response.text)
-    text = re.sub(r"\n{3,}", "\n\n", text).strip()
-    if not text and not allow_empty:
-        text = EMPTY_REPLY_PLACEHOLDER
+    prepared = prepare_reply(
+        response, empty_placeholder="" if allow_empty else EMPTY_REPLY_PLACEHOLDER,
+    )
+    text = prepared.text
 
     if response.web_search is not None:
         logger.info(
@@ -402,12 +403,20 @@ def finalize_reply_text(
             response.web_search.queries,
             [source.url for source in response.web_search.sources],
         )
-        text = append_web_search_source_block(text, response.web_search)
 
     if sensitive.is_loaded:
         output_scan = sensitive.scan(text)
         if output_scan.hits:
             _log_sensitive_hits("output", scope_key, output_scan)
         if output_scan.blocked:
-            text = DEFAULT_OUTPUT_FALLBACK
-    return text
+            return plain_reply(DEFAULT_OUTPUT_FALLBACK)
+    return prepared
+
+
+def finalize_reply_text(
+    response: "LLMResponse", *, provider_id: str, model: str,
+    sensitive: SensitiveFilter, scope_key: str, allow_empty: bool = False,
+) -> str:
+    """Canonical saved reply, including citations; display projection is separate."""
+    return finalize_reply(response, provider_id=provider_id, model=model, sensitive=sensitive,
+                          scope_key=scope_key, allow_empty=allow_empty).text

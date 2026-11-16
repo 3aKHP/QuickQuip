@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from quickquip.llm.responses_capabilities import RESPONSES_HOSTED_TOOLS
+
 from quickquip.llm.config import (
     DEFAULT_RESPONSES_PROFILE_ID,
     REASONING_EFFORT_CHOICES,
@@ -93,7 +95,7 @@ PROFILES: dict[str, ResponsesProfile] = {
         service_tier=None,
         recognize_relay_events=True,
         reconcile_relay_items=True,
-        hosted_tools=frozenset({"image_generation", "web_search"}),
+        hosted_tools=RESPONSES_HOSTED_TOOLS["codex-relay-hosted-tools"],
     ),
 }
 

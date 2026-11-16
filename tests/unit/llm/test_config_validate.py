@@ -740,3 +740,20 @@ reasoning_effort = "extreme"
     loaded_bad = load_llm_config(bad)
     assert "o1" not in loaded_bad.providers
     assert "o1" in (loaded_bad.load_error or "")
+
+
+def test_responses_search_policy_tracks_profile_and_request_permission():
+    from quickquip.llm.config import ProviderConfig
+    from quickquip.llm.search_policy import resolve_search_mode
+    provider = ProviderConfig(id="test", protocol="openai_responses", base_url="https://e.test",
+                              api_key_env="TEST", default_model="test", models=["test"],
+                              responses_profile="codex-relay-hosted-tools")
+    assert resolve_search_mode(provider, tools_allowed=True,
+                               local_search_enabled=True) == "responses_hosted"
+    assert resolve_search_mode(provider, tools_allowed=False,
+                               local_search_enabled=True) == "none"
+    provider.responses_profile = "codex-http-relay"
+    assert resolve_search_mode(provider, tools_allowed=True,
+                               local_search_enabled=True) == "local"
+    assert resolve_search_mode(provider, tools_allowed=True,
+                               local_search_enabled=False) == "none"
