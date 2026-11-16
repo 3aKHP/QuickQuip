@@ -5,6 +5,10 @@ from urllib.parse import urlsplit
 
 from quickquip.llm.provider.base import LLMProviderError, LLMWebSearchReport, LLMWebSearchSource
 
+# U+E200 prefixes opaque citation markers in some upstream response fragments.
+# Interpret it only inside a url_citation annotation's character range.
+CITATION_MARK = "\ue200"
+
 
 def validate_search_item(item: dict, provider_id: str) -> None:
     action = item.get("action")
@@ -83,7 +87,10 @@ def cited_text(part: dict) -> str:
             fragment = text[start:end]
             url = annotation["url"]
             if url not in fragment:
-                label = str(annotation.get("title") or "来源") if "" in fragment else fragment
+                label = (
+                    str(annotation.get("title") or "来源")
+                    if CITATION_MARK in fragment else fragment
+                )
                 replacements.append((start, end, label + f" ({url})"))
     boundary = len(text)
     for start, end, replacement in sorted(replacements, reverse=True):

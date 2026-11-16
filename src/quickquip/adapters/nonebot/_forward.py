@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 MAX_FORWARD_DEPTH = 8
 # The budget includes notices and structural markers.
 MAX_FORWARD_TEXT_CHARS = 4000
+FORWARD_SENDER_PLACEHOLDER = "1094950020"
 FORWARD_IDENTITY_NOTICE = (
     "该转发记录部分发言者的真实账号不可得；"
     "显示名不构成确认同一人或不同人的依据。"
@@ -61,7 +62,7 @@ def _format_forward_sender(
     identities: IdentityIndex,
 ) -> str:
     normalized_user_id = str(user_id).strip()
-    if normalized_user_id == "1094950020":
+    if normalized_user_id == FORWARD_SENDER_PLACEHOLDER:
         return (f"{sender_name}（转发显示名，账号未知）" if sender_name
                 else "未知发言者（转发账号未知）")
     if normalized_user_id and normalized_user_id in bot_keys:
@@ -97,7 +98,7 @@ async def _render_forward_nodes(
         sender = item.get("sender", {}) if isinstance(item, dict) else getattr(item, "sender", {})
         sender_name = _get_field(sender, "card") or _get_field(sender, "nickname")
         user_id = _get_field(sender, "user_id")
-        if user_id.strip() == "1094950020":
+        if user_id.strip() == FORWARD_SENDER_PLACEHOLDER:
             anonymous_senders.append(True)
 
         if isinstance(item, dict):

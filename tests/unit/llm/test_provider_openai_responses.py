@@ -1868,3 +1868,20 @@ async def test_malformed_search_enum_does_not_fall_back_to_second_request(field,
     with pytest.raises(LLMProviderError):
         await client.complete(_request([LLMConversationMessage("user", "搜索")]))
     assert client.fallback_calls == 0
+
+
+@pytest.mark.parametrize(("fragment", "title", "label"), [
+    ("\ue200cite\ue202turn0search0\ue201", "天气来源", "天气来源"),
+    ("\ue200cite\ue202turn0search0\ue201", "", "来源"),
+    ("天气晴朗", "不同的来源标题", "天气晴朗"),
+])
+def test_citation_marker_uses_title_and_plain_text_is_preserved(fragment, title, label):
+    from quickquip.llm.provider.openai_responses.web_search import cited_text
+    prefix, suffix = "开头：", "。后文保留"
+    text = prefix + fragment + suffix
+    part = {"type": "output_text", "text": text, "annotations": [{
+        "type": "url_citation", "url": "https://example.test/weather", "title": title,
+        "start_index": len(prefix), "end_index": len(prefix) + len(fragment),
+    }]}
+    assert cited_text(part) == prefix + label + " (https://example.test/weather)" + suffix
+    assert part["text"] == text
