@@ -89,9 +89,6 @@ def _citation_ranges(fragment: str, offset: int) -> list[tuple[int, int]]:
             end -= 1
         ranges.append((start, end))
     if not ranges:
-        # A separate opaque-marker label range supplied by the protocol parser.
-        if _STUB.fullmatch(fragment.strip()):
-            return [(offset, offset + len(fragment))]
         return []
     # Grow around now-empty parentheses/brackets and pure source labels.
     mask = [False] * len(fragment)
@@ -129,10 +126,15 @@ def project_citations(
     citation_spans: list[tuple[int, int]] | tuple[tuple[int, int], ...] = (),
     *,
     generated_tail_start: int | None = None,
+    opaque_spans: tuple[tuple[int, int], ...] | list[tuple[int, int]] = (),
 ) -> DisplayProjection:
     """Project confirmed citations and unambiguous source lists; preserve normal links."""
     code = [m.span() for m in _CODE.finditer(text)]
     hidden: list[tuple[int, int]] = []
+    for start, end in opaque_spans:
+        if (type(start) is int and type(end) is int and 0 <= start < end <= len(text)
+                and not _overlaps(start, end, code)):
+            hidden.append((start, end))
     # Numbered/source-labelled references, or parenthesized domain citations.
     # An ordinary named action link (even one also in search sources) is untouched.
     for link in _LINK.finditer(text):

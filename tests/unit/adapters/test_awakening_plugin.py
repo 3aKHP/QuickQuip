@@ -106,6 +106,7 @@ def test_boredom_check_sends_segments_and_confirms_only_success(monkeypatch):
         sent.append(kwargs)
         if kwargs["group_id"] == 456:
             raise RuntimeError("send failed")
+        return {"message_id": "sent-123"}
 
     bot = types.SimpleNamespace(send_group_msg=fake_send_group_msg, self_id="999")
     plan = types.SimpleNamespace(
@@ -151,3 +152,42 @@ def test_boredom_check_sends_segments_and_confirms_only_success(monkeypatch):
     assert message[0].data == {"text": "冒个泡 [CQ:at,qq=all]"}
     assert message[1].type == "image"
     assert message[1].data == {"file": "base64://cXctaW1n"}
+
+
+def test_boredom_confirms_only_visible_single_or_sink_delivery(monkeypatch):
+    sched = FakeScheduler()
+    _use_config(monkeypatch, boredom_scan_interval=120)
+    awakening_plugin.register_boredom_scan_job(sched)
+    func = sched.jobs[awakening_plugin.BOREDOM_SCAN_JOB_ID]["func"]
+    sent, confirmed = [], []
+
+    async def send(**kwargs):
+        sent.append(kwargs["group_id"])
+        return {} if kwargs["group_id"] == 5 else {"message_id": "trusted"}
+
+    async def plans(*args, **kwargs):
+        for group, result in [
+            (1, {"reply": ""}),
+            (2, {"reply": "", "delivered_text": "已经分段发送"}),
+            (3, {"reply": "", "images": ["aW1n"]}),
+            (4, {"reply": "", "cancelled_reason": "queue_patience_exceeded"}),
+            (5, {"reply": "缺少可信回执"}),
+        ]:
+            yield types.SimpleNamespace(group_id=str(group), reply_result=result,
+                                        trace_kwargs=lambda: {})
+
+    monkeypatch.setattr(awakening_plugin, "nonebot", types.SimpleNamespace(
+        get_bot=lambda: types.SimpleNamespace(send_group_msg=send, self_id="999"),
+    ))
+    monkeypatch.setattr(awakening_plugin, "Message", DummyMessage)
+    monkeypatch.setattr(awakening_plugin, "MessageSegment", DummySegment)
+    monkeypatch.setattr(awakening_plugin, "_ensure_llm_bindings", lambda: None)
+    monkeypatch.setattr(awakening_plugin, "get_llm_service", lambda: object())
+    monkeypatch.setattr(awakening_plugin, "iter_boredom_send_plans", plans)
+    monkeypatch.setattr(group_messages, "build_outbound_mention_resolver", lambda *a, **k: None)
+    monkeypatch.setattr(awakening_plugin, "bot_action_trace", lambda **kw: contextlib.nullcontext())
+    monkeypatch.setattr(awakening_plugin, "confirm_boredom_sent",
+                        lambda plan, stats: confirmed.append(plan.group_id))
+    asyncio.run(func())
+    assert sent == [3, 5]
+    assert confirmed == ["2", "3"]

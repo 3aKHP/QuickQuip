@@ -312,6 +312,8 @@ class LLMResponse:
     web_search: LLMWebSearchReport | None = None
     # Ranges in normalized text carrying provider-confirmed source citations.
     citation_spans: list[tuple[int, int]] = field(default_factory=list)
+    # Opaque citation labels inserted by the parser, never original prose.
+    opaque_citation_spans: list[tuple[int, int]] = field(default_factory=list)
     # 模型产出的图片附件（见 LLMGeneratedImage）：与 web_search 同级的
     # 响应侧归一能力，由各协议适配器按自身能力提取。
     generated_images: list[LLMGeneratedImage] = field(default_factory=list)

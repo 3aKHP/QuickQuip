@@ -69,6 +69,14 @@ def test_plain_annotation_cannot_turn_a_scalar_fact_into_a_source_label(fact):
     assert prepare_reply(response).display.text == fact
 
 
+@pytest.mark.parametrize("title", ["国务院最新公告", "Example News", "docs.example"])
+def test_opaque_citation_titles_are_source_labels_not_original_facts(title):
+    marker = "\ue200cite\ue202reference\ue201"
+    response = response_with_citation("结论。" + marker + "结束。", marker, title=title)
+    assert prepare_reply(response).display.text == "结论。结束。"
+    assert title in response.text
+
+
 def test_cleanup_and_multiple_parts_keep_citation_coordinates():
     first = response_with_citation(
         " <think>私有推理</think>\n\n\n甲😀([docs.example](https://docs.example/policy))乙 ",

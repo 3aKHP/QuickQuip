@@ -42,6 +42,10 @@ def prepare_reply(response: LLMResponse, *, empty_placeholder: str = "") -> Prep
     for start, end in getattr(response, "citation_spans", ()):
         if type(start) is int and type(end) is int and 0 <= start < end <= len(raw):
             spans.append((bisect_left(positions, start), bisect_left(positions, end)))
+    markers = []
+    for start, end in getattr(response, "opaque_citation_spans", ()):
+        if type(start) is int and type(end) is int and 0 <= start < end <= len(raw):
+            markers.append((bisect_left(positions, start), bisect_left(positions, end)))
     tail_start = None
     report = getattr(response, "web_search", None)
     if report is not None and text:
@@ -49,13 +53,14 @@ def prepare_reply(response: LLMResponse, *, empty_placeholder: str = "") -> Prep
         if appended != text:
             tail_start = len(text)
             text = appended
-    display = project_citations(text, spans, generated_tail_start=tail_start)
+    display = project_citations(text, spans, generated_tail_start=tail_start, opaque_spans=markers)
     metadata = None
     if report is not None or spans or display.hidden_ranges:
         metadata = {
             "version": 1,
             "text_sha256": hashlib.sha256(text.encode("utf-8")).hexdigest(),
             "citation_spans": [list(span) for span in spans],
+            "opaque_spans": [list(span) for span in markers],
             "hidden_ranges": [list(span) for span in display.hidden_ranges],
             "display_text": display.text,
             "generated_tail_start": tail_start,
@@ -74,8 +79,8 @@ def validate_presentation(value: dict[str, Any], text: str) -> None:
             or value["version"] != 1
             or value.get("text_sha256") != hashlib.sha256(text.encode("utf-8")).hexdigest()):
         raise ValueError("invalid reply presentation version or text fingerprint")
-    for key in ("citation_spans", "hidden_ranges"):
-        ranges = value.get(key)
+    for key in ("citation_spans", "hidden_ranges", "opaque_spans"):
+        ranges = value.get(key, [] if key == "opaque_spans" else None)
         if not isinstance(ranges, list):
             raise ValueError("invalid reply presentation ranges")
         for pair in ranges:

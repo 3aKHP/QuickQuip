@@ -195,19 +195,25 @@ def test_non_loop_session_write_preserves_sources_without_changing_history_text(
     assert json.loads(row["presentation_json"])["search"] == prepared.presentation["search"]
 
 
-def test_source_metadata_does_not_bypass_native_cipher_size_limit(tmp_path):
+@pytest.mark.parametrize("location", ["root", "source", "annotation"])
+def test_source_metadata_does_not_bypass_native_cipher_size_limit(tmp_path, location):
     from quickquip.llm.agent_records import MAX_NATIVE_STATE_BYTES
     from quickquip.llm.provider.openai_responses.response import parse_responses_body
 
     store = LLMStore(tmp_path / "bounded.db")
-    response = parse_responses_body({"status": "completed", "output": [
+    items = [
         {"type": "web_search_call", "id": "search", "status": "completed",
-         "encrypted_content": "cipher-sentinel" + "x" * MAX_NATIVE_STATE_BYTES,
          "action": {"type": "search", "query": "test", "sources": [
              {"type": "url", "url": "https://source.example/"}]}},
         {"type": "message", "role": "assistant",
-         "content": [{"type": "output_text", "text": "结论。"}]},
-    ]}, provider_id="test", fallback_model="test")
+         "content": [{"type": "output_text", "text": "结论。", "annotations": [
+             {"type": "url_citation", "url": "https://source.example/", "title": "来源"}]}]},
+    ]
+    payload = {"root": items[0], "source": items[0]["action"]["sources"][0],
+               "annotation": items[1]["content"][0]["annotations"][0]}[location]
+    payload["encrypted_content"] = "cipher-sentinel" + "x" * MAX_NATIVE_STATE_BYTES
+    response = parse_responses_body({"status": "completed", "output": items},
+                                    provider_id="test", fallback_model="test")
     recorder = _recorder(store, enabled=False)
     recorder.on_turn(response, declared_calls=[], executable_calls=[], has_more_rounds=False)
     recorder.close(LoopStatus.COMPLETED, None)

@@ -319,23 +319,31 @@ async def run_tool_call_loop(
             # 每轮刷新"当前请求剩余空间"（§8.1）：结果预算由当前 request
             # 实况推导，工具不自行从初始请求猜测。
             history_state.begin_round(result_space_probe(current_request))
+        declared_names = {spec.name for spec in current_request.tools}
         for call in selected_calls:
             if request_guard is not None:
                 request_guard(current_request)
             execution_id = execution_ids.get(call.id)
-            if turn_recorder is not None and execution_id is not None:
-                turn_recorder.on_tool_started(execution_id)
-            if tool_discovery_enabled and not discovery.is_loaded(call.name):
+            permitted = call.name in declared_names and (
+                not tool_discovery_enabled or discovery.is_loaded(call.name)
+            )
+            if not permitted:
                 result = LLMToolResult(
                     call_id=call.id,
                     name=call.name,
                     content=(
-                        f"工具 {call.name} 尚未加载，"
-                        f"请先调用 {tool_search_name} 搜索并加载相关工具。"
+                        (f"工具 {call.name} 尚未加载，"
+                         f"请先调用 {tool_search_name} 搜索并加载相关工具。")
+                        if tool_discovery_enabled else
+                        f"工具 {call.name} 未在当前请求声明，已拒绝执行。"
                     ),
                     is_error=True,
                 )
+                if turn_recorder is not None and execution_id is not None:
+                    turn_recorder.on_tool_skipped(execution_id, ToolSkipReason.BLOCKED)
             else:
+                if turn_recorder is not None and execution_id is not None:
+                    turn_recorder.on_tool_started(execution_id)
                 blocked_result = result_pipeline.check_call_arguments(call)
                 if blocked_result is not None:
                     result = blocked_result
@@ -373,7 +381,7 @@ async def run_tool_call_loop(
                         newly_loaded,
                     )
             tool_results.append(result)
-            if turn_recorder is not None and execution_id is not None:
+            if permitted and turn_recorder is not None and execution_id is not None:
                 turn_recorder.on_tool_finished(
                     execution_id, result,
                     retention=tool_registry.retention_of(call.name),
