@@ -93,7 +93,7 @@ from quickquip.llm.reply_chain import (
     MAX_QUOTED_MESSAGE_CHARS as MAX_QUOTED_MESSAGE_CHARS,  # noqa: F401 — re-exported via plugins/llm_runtime
     TurnRequestAssembler,
     build_raw_turn_text,
-    finalize_reply_text,
+    finalize_reply,
     image_caption_blob,
     normalize_turn_input,
     reply_result,
@@ -1019,6 +1019,7 @@ class LLMService(
         image_descriptions: list[ImageDescription] | None = None,
         tool_context: ToolExecutionContext,
         recorder_rows_written: bool = False,
+        presentation: dict | None = None,
     ) -> dict[str, object]:
         current_identity = self._resolve_identities(str(chat_id)).resolve_user(user_id, sender_name)
         user_message = None
@@ -1041,6 +1042,9 @@ class LLMService(
         self.store.append_session_reply(
             scope_key, session, session_generation, user_message=user_message,
             assistant_text=None if recorder_rows_written else text,
+            assistant_presentation=(
+                None if recorder_rows_written or tool_context.ephemeral_touched else presentation
+            ),
             floor_id=self._epochs.oldest_anchor(scope_key),
             keep_last=MAX_STORED_CONVERSATION_MESSAGES,
         )
@@ -1559,7 +1563,7 @@ class LLMService(
                 images=outbound_images_payload(tool_context),
             )
 
-        text = finalize_reply_text(
+        prepared_reply = finalize_reply(
             response,
             provider_id=provider.id,
             model=llm_request.model,
@@ -1583,7 +1587,7 @@ class LLMService(
                 settings=settings,
                 provider=provider,
                 model=llm_request.model,
-                text=text,
+                text=prepared_reply.text,
                 stored_prompt=turn.stored_prompt,
                 store_user_message=request.store_user_message,
                 trigger_auto_memory=request.trigger_auto_memory,
@@ -1601,11 +1605,13 @@ class LLMService(
                 ] or None,
                 tool_context=tool_context,
                 recorder_rows_written=recorder is not None,
+                presentation=prepared_reply.presentation,
             )
         except (SessionInvalidated, SessionStoreError):
             if recorder is not None:
                 recorder.close(LoopStatus.INTERRUPTED, "session_invalidated")
             raise
+        result_payload["reply"] = prepared_reply.display.text
         if recorder is not None:
             terminal_status = (
                 LoopStatus.INTERRUPTED if recorder.terminal_reason else LoopStatus.COMPLETED

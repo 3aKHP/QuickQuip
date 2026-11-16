@@ -121,6 +121,7 @@
 - `docs/dev/adr/0027-history-investigation-executor.md` → `references/docs-dev-adr-0027-history-investigation-executor.md` — ADR-0027：群历史查询与专用调查执行器 ｜ 状态：Accepted ｜ 关键词：chat/history_query.py、get_group_msg_history、search_group_history、read_group_history、hr1.<归档UUID>.<行ID>、investigate_group_history、search_recent_messages、[group_history]、count_group_history、COUNT(*)
 - `docs/dev/adr/0028-write-only-environment-management.md` → `references/docs-dev-adr-0028-write-only-environment-management.md` — ADR-0028：环境变量只写管理与运行时凭据快照 ｜ 状态：Superseded ｜ 替代记录：[0029-opt-in-environment-compatibility.md](docs-dev-adr-0029-opt-in-environment-compatibility.md) ｜ 关键词：.env
 - `docs/dev/adr/0029-opt-in-environment-compatibility.md` → `references/docs-dev-adr-0029-opt-in-environment-compatibility.md` — ADR-0029：显式启用环境管理并保留部署兼容性 ｜ 状态：Accepted ｜ 关键词：QUICKQUIP_ENV_MANAGEMENT_ENABLED、.env、# quickquip:literal、# quickquip:deleted NAME
+- `docs/dev/adr/0030-citation-display-projection.md` → `references/docs-dev-adr-0030-citation-display-projection.md` — ADR-0030：独立生成来源引用的显示投影 ｜ 状态：Accepted
 - `docs/dev/adr/README.md` → `references/docs-dev-adr-readme.md` — 架构决策记录 ｜ 关键词：NNNN-short-title.md、Proposed、Accepted、Rejected、Superseded、status、superseded_by
 - `docs/dev/adr/template.md` → `references/docs-dev-adr-template.md` — ADR 模板 ｜ 关键词：NNNN-short-title.md
 

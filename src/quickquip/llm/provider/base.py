@@ -241,6 +241,7 @@ class LLMWebSearchReport:
     queries: list[str] = field(default_factory=list)
     sources: list[LLMWebSearchSource] = field(default_factory=list)
     link_urls: bool = False
+    raw_metadata: dict[str, Any] | None = None
 
 
 @dataclass(slots=True)
@@ -309,6 +310,8 @@ class LLMResponse:
     thinking_tokens: int | None = None
     thinking_blocks: list[dict[str, Any]] = field(default_factory=list)
     web_search: LLMWebSearchReport | None = None
+    # Ranges in normalized text carrying provider-confirmed source citations.
+    citation_spans: list[tuple[int, int]] = field(default_factory=list)
     # 模型产出的图片附件（见 LLMGeneratedImage）：与 web_search 同级的
     # 响应侧归一能力，由各协议适配器按自身能力提取。
     generated_images: list[LLMGeneratedImage] = field(default_factory=list)

@@ -59,7 +59,7 @@ from quickquip.llm.store_parts._base import _utc_now
 
 logger = logging.getLogger(__name__)
 
-_AGENT_SCHEMA_VERSION = 4
+_AGENT_SCHEMA_VERSION = 5
 
 _SESSION_MODEL_DDL = """
     CREATE TABLE IF NOT EXISTS session_client_models (
@@ -388,6 +388,7 @@ class LoadedDelivery:
     status: str
     recall_status: str
     qq_message_ids: tuple[str, ...] = ()
+    display_text: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -406,6 +407,7 @@ class LoadedTurn:
     delivery_policy: str
     tools: tuple[LoadedToolExecution, ...]
     deliveries: tuple[LoadedDelivery, ...]
+    presentation: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -495,6 +497,17 @@ class AgentRecordsStoreMixin:
                 conn.execute(
                     "INSERT INTO agent_schema_migrations (version, applied_at) VALUES (?, ?)",
                     (4, _utc_now()),
+                )
+            if 5 not in applied_versions:
+                for table, column in (("agent_turns", "presentation_json"),
+                                      ("agent_deliveries", "display_text"),
+                                      ("conversation_messages", "presentation_json")):
+                    columns = {row["name"] for row in conn.execute(f"PRAGMA table_info({table})")}
+                    if column not in columns:
+                        conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} TEXT")
+                conn.execute(
+                    "INSERT INTO agent_schema_migrations (version, applied_at) VALUES (?, ?)",
+                    (5, _utc_now()),
                 )
             if not {1, 2, 3, _AGENT_SCHEMA_VERSION}.issubset(applied_versions):
                 self._verify_agent_schema(conn)
@@ -902,6 +915,12 @@ class AgentRecordsStoreMixin:
                 response.native_omission_reason,
             )
             native_json = self._bounded_native_json(response)
+            presentation_json = None
+            if response.presentation is not None:
+                from quickquip.llm.reply_presentation import validate_presentation
+
+                validate_presentation(response.presentation, text)
+                presentation_json = _dumps(response.presentation)
 
             index_row = conn.execute(
                 "SELECT COALESCE(MAX(turn_index), -1) + 1 AS next "
@@ -924,8 +943,9 @@ class AgentRecordsStoreMixin:
                 INSERT INTO agent_turns (turn_id, loop_id, turn_index, message_row_id,
                                          parts_json, native_state_json, native_omission_reason,
                                          owner_json, finish_reason, committed_at,
-                                         delivery_policy, text_policy, output_status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                                         delivery_policy, text_policy, output_status,
+                                         presentation_json)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     turn_id, handle.loop_id, turn_index, message_row_id,
@@ -936,6 +956,7 @@ class AgentRecordsStoreMixin:
                     _dumps(response.owner) if response.owner is not None else None,
                     response.finish_reason, _utc_now(),
                     delivery_policy, response.text_policy, response.output_status,
+                    presentation_json,
                 ),
             )
             for declaration in tool_declarations:
@@ -947,11 +968,13 @@ class AgentRecordsStoreMixin:
 
             added_bytes = (
                 _utf8_bytes(text) + _utf8_bytes(parts_payload) + _utf8_bytes(native_json)
+                + _utf8_bytes(presentation_json)
                 + sum(
                     _utf8_bytes(d.arguments_json) + _utf8_bytes(d.tool_name)
                     for d in tool_declarations
                 )
                 + sum(_utf8_bytes(p.notice_text or "") for p in delivery_plan)
+                + sum(_utf8_bytes(p.display_text) for p in delivery_plan)
             )
             loop_row = conn.execute(
                 "SELECT record_bytes FROM agent_loops WHERE loop_id = ?", (handle.loop_id,)
@@ -1085,6 +1108,8 @@ class AgentRecordsStoreMixin:
         delivery_ids: list[str] = []
         for item in delivery_plan:
             if item.kind == DeliveryKind.TEXT_CHUNK:
+                if item.display_text is not None and not isinstance(item.display_text, str):
+                    raise AgentStoreError("文字 delivery 的显示正文必须为字符串")
                 if item.turn_id is not None and item.turn_id != turn_id:
                     raise AgentStoreError("文字 delivery 的 turn 归属与提交 Turn 不一致")
                 if item.source_start is None or item.source_end is None:
@@ -1107,8 +1132,9 @@ class AgentRecordsStoreMixin:
                 INSERT INTO agent_deliveries (delivery_id, loop_id, turn_id, tool_execution_id,
                                               kind, delivery_index, chunk_index, source_start,
                                               source_end, wrappers_json, attachment_refs_json,
-                                              notice_text, status, recall_status, planned_at)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?)
+                                              notice_text, status, recall_status, planned_at,
+                                              display_text)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active', ?, ?)
                 """,
                 (
                     delivery_id, handle.loop_id,
@@ -1128,7 +1154,7 @@ class AgentRecordsStoreMixin:
                             "refs": [list(ref) for ref in item.attachment_refs],
                         }
                     ),
-                    item.notice_text, DeliveryStatus.PLANNED, _utc_now(),
+                    item.notice_text, DeliveryStatus.PLANNED, _utc_now(), item.display_text,
                 ),
             )
             delivery_ids.append(delivery_id)
@@ -1651,6 +1677,8 @@ class AgentRecordsStoreMixin:
                     delivery_policy=turn["delivery_policy"],
                     tools=loaded_tools,
                     deliveries=loaded_deliveries,
+                    presentation=(json.loads(turn["presentation_json"])
+                                  if turn["presentation_json"] else None),
                 )
             )
         return LoadedLoop(
@@ -1691,6 +1719,7 @@ class AgentRecordsStoreMixin:
             status=row["status"],
             recall_status=row["recall_status"],
             qq_message_ids=tuple(qq_ids),
+            display_text=row["display_text"],
         )
 
     def lookup_delivery(self, scope_key: str, qq_message_id: str) -> dict[str, Any] | None:
@@ -2035,7 +2064,8 @@ class AgentRecordsStoreMixin:
                 """
                 UPDATE agent_turns
                 SET native_state_json = NULL, native_omission_reason = 'recall_cleanup',
-                    owner_json = NULL, parts_json = ?, text_policy = 'redacted'
+                    owner_json = NULL, parts_json = ?, text_policy = 'redacted',
+                    presentation_json = NULL
                 WHERE turn_id = ?
                 """,
                 (
@@ -2101,7 +2131,8 @@ class AgentRecordsStoreMixin:
                             (masked, turn["message_row_id"]),
                         )
             conn.execute(
-                "UPDATE agent_deliveries SET recall_status = 'recalled' WHERE delivery_id = ?",
+                "UPDATE agent_deliveries SET recall_status = 'recalled', display_text = NULL "
+                "WHERE delivery_id = ?",
                 (delivery_id,),
             )
             # 该 Loop 的工具证据与原生状态整体清理（§9.2.3）。
@@ -2119,7 +2150,7 @@ class AgentRecordsStoreMixin:
                 """
                 UPDATE agent_turns
                 SET native_state_json = NULL, native_omission_reason = 'recall_cleanup',
-                    owner_json = NULL
+                    owner_json = NULL, presentation_json = NULL
                 WHERE loop_id = ?
                 """,
                 (delivery["loop_id"],),

@@ -78,11 +78,12 @@ LLM 维护入口按职责列在下表：
 | `src/quickquip/common/recent_message_buffer.py` | 负责“触发前最近群消息”内存缓冲 |
 | `src/quickquip/llm/inputs.py` | 负责从消息段中提取文本触发、艾特触发和图片 URL |
 | `src/quickquip/search/web_search.py` | 负责项目内 SearXNG 搜索客户端，供 `/search` 与 `search_web` 工具使用 |
-| `src/quickquip/llm/provider/gemini.py`、`rendering.py` | 声明 Gemini 内置搜索，解析 `groundingMetadata` 并渲染回复来源 |
+| `src/quickquip/llm/provider/gemini.py`、`rendering.py` | 声明 Gemini 内置搜索，解析 `groundingMetadata` 并生成保存用来源块 |
+| `src/quickquip/llm/reply_presentation.py`、`citation_display.py` | 生成独立的引用显示投影，保留原文坐标与来源元数据 |
 
 ### 请求组装与协议处理
 
-服务实现按 scope、MCP 生命周期、内置工具、SVG、定时消息、Skill、独立生成、图像预处理、健康检查、状态、记忆工具和 Agent Loop 拆分，模块清单见 `service_parts/__init__.py`。`reply_chain.py` 中的 `TurnRequestAssembler` 共用首轮与预算降级装配，输入和输出分别由 `normalize_turn_input`、`finalize_reply_text` 处理，`reply_result` 构造返回结果与触发行正文；该模块接收显式参数，与服务门面单向依赖。
+服务实现按 scope、MCP 生命周期、内置工具、SVG、定时消息、Skill、独立生成、图像预处理、健康检查、状态、记忆工具和 Agent Loop 拆分，模块清单见 `service_parts/__init__.py`。`reply_chain.py` 中的 `TurnRequestAssembler` 共用首轮与预算降级装配，输入和输出分别由 `normalize_turn_input`、`finalize_reply` 处理，`reply_result` 构造返回结果与触发行正文；该模块接收显式参数，与服务门面单向依赖。
 
 报告输入经 `chat/period_serializer.py` 压缩：按日分节、按分钟分块，同身份连续消息用斜杠合并，复读折叠为 ×N，URL 保留域名，机器人标记为 (bot)。日报和周报将整个周期交给序列化器；月报由 `build_monthly_chat_input` 按周分配 `input_char_budget`，保留平静日，高活跃日使用剩余额度并按需等距抽稀，输出包含周节标题。
 
@@ -94,7 +95,7 @@ Gemini 在原生工具回合保存并按顺序回放含 `thoughtSignature` 的 p
 
 Responses 的 `openai-public`、`codex-http-relay` 与 `codex-relay-hosted-tools` Profile 均接受新增的事件类型和附加 JSON 字段。未知事件通过序号与终态顺序校验后跳过，继续等待终态；每条流最多记录八种未知事件，每种记录一次，事件名截取前 128 个字符并转义，原始载荷由 HTTP Trace 开关控制保存。`codex-http-relay` 与 `codex-relay-hosted-tools` 将 `response.metadata`、`codex.response.metadata` 等已知中转附加事件静默忽略。此策略遵循 OpenAI 将新增流式事件类型视为兼容扩展的[约定](https://developers.openai.com/api/reference/overview#backwards-compatibility)。
 
-`codex-relay-hosted-tools` Profile 继承 `codex-http-relay` 的全部行为，并在 `allow_tool_calls` 开启时由请求侧显式声明 `image_generation` 和 `web_search` 内置工具（追加进 tools 数组，无 function 工具的请求同样声明）；需要对话内生图和服务端搜索的渠道使用该档。搜索请求同时包含 `web_search_call.action.sources`；响应保留搜索原生条目供回放，并将来源投影为可点击的正文引用。搜索由模型自主选择，可能产生额外费用；渠道不支持时可切回 `codex-http-relay`。该档的普通工具对话使用 hosted 搜索引导，并从本地工具及发现目录中移除 `search_web`。当次请求禁用工具时，搜索声明及来源 include 同时关闭，含搜索的历史 Loop 降级为通用正文与工具事实投影，不回放关联原生推理。完整原生批次按 owner 校验保留，来源尾块统一由交付层生成，最多补充三条链接；中间轮搜索按 Loop 和轮序记录。
+`codex-relay-hosted-tools` Profile 继承 `codex-http-relay` 的全部行为，并在 `allow_tool_calls` 开启时由请求侧显式声明 `image_generation` 和 `web_search` 内置工具（追加进 tools 数组，无 function 工具的请求同样声明）；需要对话内生图和服务端搜索的渠道使用该档。搜索请求同时包含 `web_search_call.action.sources`；响应保留搜索原生条目供回放，并保存完整规范化来源引用，QQ 显示使用独立投影。搜索由模型自主选择，可能产生额外费用；渠道不支持时可切回 `codex-http-relay`。该档的普通工具对话使用 hosted 搜索引导，并从本地工具及发现目录中移除 `search_web`。当次请求禁用工具时，搜索声明及来源 include 同时关闭，含搜索的历史 Loop 降级为通用正文与工具事实投影，不回放关联原生推理。完整原生批次按 owner 校验保留，保存正文中的来源尾块统一生成，最多补充三条链接，显示层隐藏来源尾块；中间轮搜索按 Loop 和轮序记录。
 
 Responses 对已消费事件的必要字段、流式正文与工具参数的一致性、终态状态及输出条目类型执行严格校验。不支持的输出条目（含工具条目）或内容类型会使调用失败。
 
@@ -212,6 +213,14 @@ HTTP 追踪在列表、详情及 SSE 事件中返回可空的 `session_id`。已
 升级前备份会话与追踪 SQLite 库；新增身份列为可空字段，旧消息与存档保留。回退旧代码运行后再次升级，须停服、备份并重置活动与存档绑定，使新版重新分配身份；维护 SQL、数据库路径与执行方式统一见[管理员回退与再次升级流程](../admin/llm-configuration.md#回退旧版本后再次升级)。该维护保留消息、存档、设置和 generation，追踪历史身份继续作为观测记录保存。数据库不可用时，持续聊天停止执行并返回存储错误，不分配临时身份继续回复。
 
 聊天消息与 Agent 执行记录各自遵循保留策略。消息裁剪或删除时，数据库在同一事务中将相关 Turn 的 `message_row_id` 置空；Turn、工具和交付记录按执行记录的保留规则维护。显式撤回继续清理正文及原生证据，清空会话删除整个 Scope 的执行记录。业务库 Agent schema 3 在首次打开时修复已有的悬空消息引用并安装删除保护，保留现存消息、执行记录和 Session 身份。
+
+### 来源引用与显示投影
+
+保存正文包含完整的规范化引用，协议原生块保持原样；QQ 显示层隐藏已确认引用的 URL、引用包装及自动来源尾块，保留正文事实和实质性链接标题。没有协议注解时，仅处理编号引用、括号中的域名引用和明确来源列表；操作入口、下载链接与代码示例保持原样。
+
+`reply_presentation.py` 在完整 Turn 上生成显示投影。切分与发送预算按显示文本计算，交付的 `source_start/end` 映回保存正文；隐藏的段间内容归前段，隐藏前缀归首段，尾部归末段。`display_text` 保存冻结的发送片段，交付、预览和成功回执缓存使用实际可见文本。来源元数据与显示字段不进入历史协议投影和纪元前缀。
+
+Agent schema 5 增加 `agent_turns.presentation_json` 与 `agent_deliveries.display_text`；没有 Loop 的合成触发回复使用 `conversation_messages.presentation_json`。来源字段保存原始 grounding 来源结构、检索操作元数据、注解、URL 与正文指纹，供按 scope、Turn 或消息记录追溯；原生密文沿原有原生状态保留规则维护。新内容与原记录在同一事务内保存并计入存储预算，旧记录的空显示字段沿用原文切片。敏感过滤替换回复时不保留来源副本；ephemeral Loop 省略来源元数据。撤回清理相应显示载荷、Loop 来源元数据与原生状态，正文继续按原文范围遮蔽。决策见 [ADR-0030](adr/0030-citation-display-projection.md)。
 
 工具历史投影在请求内按当前敏感词表检查完整 Loop。命中 block 或包含输出过滤替换态时，使用清洗后的文本档案并保留工具终态汇总，省略原生块、工具参数和结果正文；所有预算降级沿用该请求副本，持久化原文保持不变。未命中的 Loop 保留原有协议重放路径；原生回放（Claude 签名块 / Gemini parts / Responses output items）以 owner 五元组精确匹配为前提：渠道 ID、协议、实际请求模型、端点指纹和协议 Profile 指纹全部相同，失配或形状损坏按协议各自降级（档案/通用重建），Responses 侧另有跨 Loop call_id 冲突与配对完整的发送前守门。
 
@@ -536,7 +545,7 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 LLM 侧的联网搜索有两条互斥路径：
 
 - **`search_web` 工具**（默认）：客户端执行，走项目内 SearXNG，受 `auto_search` 提示词引导与每轮调用上限约束。
-- **provider 内置搜索**：gemini provider 配置 `builtin_search = true` 后启用。请求在 `tools` 中追加独立的 `{"google_search": {}}` 声明（不依赖 `tool_calling_enabled`），检索由 provider 侧 grounding 完成；响应解析 `groundingMetadata` 提取检索词与来源，回复末尾以「标题 — 域名」形式附至多 3 条来源。该 provider 的会话移除 `search_web` 工具并切换提示词引导，检索成本在 provider 侧计费，本地轮次上限不覆盖。模型约束：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型上两者并存的请求会被 API 拒绝，需关闭该 provider 的 `builtin_search` 或全局工具调用。
+- **provider 内置搜索**：gemini provider 配置 `builtin_search = true` 后启用。请求在 `tools` 中追加独立的 `{"google_search": {}}` 声明（不依赖 `tool_calling_enabled`），检索由 provider 侧 grounding 完成；响应解析 `groundingMetadata` 提取检索词与来源，保存正文以「标题 — 域名」形式附至多 3 条来源，完整 grounding 来源另存元数据，QQ 显示层隐藏来源尾块。该 provider 的会话移除 `search_web` 工具并切换提示词引导，检索成本在 provider 侧计费，本地轮次上限不覆盖。模型约束：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型上两者并存的请求会被 API 拒绝，需关闭该 provider 的 `builtin_search` 或全局工具调用。
 
 权限规则：
 

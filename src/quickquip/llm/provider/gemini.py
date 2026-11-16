@@ -385,7 +385,8 @@ class GeminiProviderClient(BaseProviderClient):
             )
         if not queries and not sources:
             return None
-        return LLMWebSearchReport(queries=queries, sources=sources)
+        return LLMWebSearchReport(queries=queries, sources=sources,
+                                  raw_metadata=deepcopy(grounding))
 
     @staticmethod
     def _normalize_part(part: dict[str, Any], index: int) -> dict[str, Any]:

@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from urllib.parse import urlsplit
+from copy import deepcopy
 
 from quickquip.llm.provider.base import LLMProviderError, LLMWebSearchReport, LLMWebSearchSource
 
@@ -68,7 +69,24 @@ def search_report(items: list[dict]) -> LLMWebSearchReport | None:
                     sources[url] = LLMWebSearchSource(
                         title=str(annotation.get("title") or ""), url=url,
                     )
-    return (LLMWebSearchReport(queries=queries, sources=list(sources.values()), link_urls=True)
+    metadata = {
+        # Native state (including opaque ciphers) has its own retention/size policy.
+        # Keep source/action metadata here without creating a second native copy.
+        "calls": [
+            {"type": "web_search_call", "action": {
+                key: deepcopy(value) for key, value in item["action"].items()
+                if key in {"type", "query", "queries", "url", "pattern", "sources"}
+            }} for item in items if item.get("type") == "web_search_call"
+        ],
+        "citations": [
+            {"item_index": index, "part_index": part_index,
+             "annotations": deepcopy(part.get("annotations", []))}
+            for index, item in enumerate(items) if item.get("type") == "message"
+            for part_index, part in enumerate(item.get("content", [])) if citations(part)
+        ],
+    }
+    return (LLMWebSearchReport(queries=queries, sources=list(sources.values()), link_urls=True,
+                              raw_metadata=metadata)
             if found else None)
 
 
@@ -81,9 +99,14 @@ def citations(part: dict) -> list[dict]:
 
 
 def cited_text(part: dict) -> str:
+    return cited_text_and_spans(part)[0]
+
+
+def cited_text_and_spans(part: dict) -> tuple[str, list[tuple[int, int]]]:
     text = str(part.get("text", ""))
     # Citation offsets refer to the original text; replace from right to left.
     replacements = []
+    spans = []
     for annotation in citations(part):
         start, end = annotation.get("start_index"), annotation.get("end_index")
         if (type(start) is int and type(end) is int and 0 <= start < end <= len(text)):
@@ -94,14 +117,30 @@ def cited_text(part: dict) -> str:
                     str(annotation.get("title") or "来源")
                     if CITATION_MARK in fragment else fragment
                 )
-                replacements.append((start, end, label + f" ({url})"))
+                replacements.append((start, end, label + f" ({url})", len(label),
+                                     CITATION_MARK in fragment))
+            else:
+                spans.append((start, end))
     boundary = len(text)
-    for start, end, replacement in sorted(replacements, reverse=True):
+    for start, end, replacement, label_length, opaque_marker in sorted(replacements, reverse=True):
         if end <= boundary:
             text = text[:start] + replacement + text[end:]
+            delta = len(replacement) - (end - start)
+            spans = [
+                (a if a <= start else (a + delta if a >= end else start),
+                 b if b <= start else (b + delta if b >= end else start + len(replacement)))
+                for a, b in spans
+            ]
+            # Ordinary annotations may cover scalar facts, code or whole sentences.
+            # Only our added URL suffix is presentation syntax in that case.
+            spans.append((start + label_length, start + len(replacement)))
+            if opaque_marker:
+                spans.append((start, start + label_length))
             boundary = start
     # Sources without offsets still need a usable link in the delivered text.
     for annotation in citations(part):
         if annotation["url"] not in text:
+            start = len(text)
             text += "\n" + annotation["url"]
-    return text
+            spans.append((start, len(text)))
+    return text, spans

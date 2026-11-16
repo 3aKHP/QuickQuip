@@ -51,7 +51,6 @@ async def run_tool_call_loop(
     # ephemeral 工具触达标记（§8.2）：单调置位，此后本 Loop 的 Turn 原生
     # 副本不再入业务持久层（工具参数与引用其内容的 reasoning 都可能携带
     # 临时载荷）；内存协议状态不受影响。
-    ephemeral_touched = False
     history_state = getattr(context, "history", None)
     discovery = ToolDiscovery(
         enabled=tool_discovery_enabled,
@@ -110,8 +109,8 @@ async def run_tool_call_loop(
             )
         # R03：触达检测先于任何记录分支——首个响应声明 ephemeral 工具但
         # 被整批拒绝/提前结束时，原生副本同样必须省略
-        if not ephemeral_touched and response.tool_calls:
-            ephemeral_touched = any(
+        if not context.ephemeral_touched and response.tool_calls:
+            context.ephemeral_touched = any(
                 tool_registry.retention_of(call.name) == "ephemeral"
                 for call in response.tool_calls
             )
@@ -135,7 +134,7 @@ async def run_tool_call_loop(
                     # 最终轮恰是引用临时内容最密集的一轮（模型据检索结果
                     # 合成答案），ephemeral 触达后原生副本同样必须省略
                     native_state_omission=(
-                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                        NativeOmissionReason.EPHEMERAL_POLICY if context.ephemeral_touched else None
                     ),
                 )
                 await turn_recorder.deliver_turn()
@@ -159,7 +158,7 @@ async def run_tool_call_loop(
                     executable_calls=[],
                     has_more_rounds=False,
                     native_state_omission=(
-                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                        NativeOmissionReason.EPHEMERAL_POLICY if context.ephemeral_touched else None
                     ),
                 )
                 turn_recorder.mark_interrupted("tool_round_limit")
@@ -206,7 +205,8 @@ async def run_tool_call_loop(
                         executable_calls=[],
                         has_more_rounds=False,
                         native_state_omission=(
-                            NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                            NativeOmissionReason.EPHEMERAL_POLICY
+                            if context.ephemeral_touched else None
                         ),
                     )
                     await turn_recorder.deliver_turn()
@@ -232,7 +232,7 @@ async def run_tool_call_loop(
                     executable_calls=[],
                     has_more_rounds=False,
                     native_state_omission=(
-                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                        NativeOmissionReason.EPHEMERAL_POLICY if context.ephemeral_touched else None
                     ),
                 )
                 await turn_recorder.deliver_turn()
@@ -253,7 +253,7 @@ async def run_tool_call_loop(
                     executable_calls=[],
                     has_more_rounds=False,
                     native_state_omission=(
-                        NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                        NativeOmissionReason.EPHEMERAL_POLICY if context.ephemeral_touched else None
                     ),
                 )
                 turn_recorder.mark_interrupted("search_failsafe_limit")
@@ -276,7 +276,7 @@ async def run_tool_call_loop(
                 executable_calls=selected_calls,
                 has_more_rounds=True,
                 native_state_omission=(
-                    NativeOmissionReason.EPHEMERAL_POLICY if ephemeral_touched else None
+                    NativeOmissionReason.EPHEMERAL_POLICY if context.ephemeral_touched else None
                 ),
             )
             await turn_recorder.deliver_turn()
