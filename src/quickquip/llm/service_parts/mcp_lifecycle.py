@@ -110,6 +110,8 @@ class McpLifecycleMixin:
         )
 
     async def startup(self, *, background: bool = False) -> None:
+        if self.config.load_error:
+            return
         if background:
             self.start_mcp_background(force=True)
             return

@@ -2,11 +2,8 @@
 
 校验语义对齐移植源（prism-vesicle items.ts/response.ts）：
 
-- 未知 item 类型 fail-closed（含 web_search_call——QuickQuip 的原生搜索
-  仅 gemini 协议声明，Responses 侧未启用该工具族）。唯一例外是
-  ``image_generation_call``：codex 类后端会在服务端注入该工具，条目
-  剥除出 native_blocks 并提取为 ``generated_images``（见
-  ``_extract_generated_images``），其余条目照旧走严格校验。
+- Hosted web_search_call 条目校验后保留供原生回放；未知类型拒绝。
+- image_generation_call 提取为图片附件，不进入原生回放。
 - ``message`` 只接受 assistant 角色 + ``output_text``/``refusal`` content。
 - ``reasoning`` 的 ``summary`` 仅供展示（thinking_blocks），密文
   ``encrypted_content`` 作为不透明字段保留在原 item 内供回放。
@@ -22,6 +19,9 @@ from quickquip.llm.provider.base import (
     LLMResponse,
 )
 from quickquip.llm.tools import LLMToolCall
+from quickquip.llm.provider.openai_responses.web_search import (
+    cited_text, search_report, validate_search_item,
+)
 
 # image_generation_call.output_format → media_type（未知格式按 image/<fmt> 透传）
 _IMAGE_OUTPUT_FORMATS = {
@@ -73,6 +73,8 @@ def validate_output_items(
         item_type = item.get("type")
         if item_type == "message":
             _validate_message_item(item, provider_id)
+        elif item_type == "web_search_call":
+            validate_search_item(item, provider_id)
         elif item_type == "reasoning":
             _validate_reasoning_item(item, provider_id)
         elif item_type == "function_call":
@@ -201,6 +203,13 @@ def parse_responses_body(
     generated_images, stripped_items = _extract_generated_images(body["output"])
     items = validate_output_items(stripped_items, provider_id=provider_id)
     text = _message_text(items)
+    web_search = search_report(items)
+    if web_search is not None and text:
+        missing = [source for source in web_search.sources if source.url not in text][:3]
+        if missing:
+            text += "\n\n来源：\n" + "\n".join(
+                f"- {source.title or '来源'} ({source.url})" for source in missing
+            )
     tool_calls = [
         LLMToolCall(
             id=str(item["call_id"]),
@@ -239,6 +248,7 @@ def parse_responses_body(
         native_blocks=list(items),
         thinking_blocks=thinking_blocks,
         generated_images=generated_images,
+        web_search=web_search,
         **usage,
     )
 
@@ -270,7 +280,7 @@ def parse_usage(usage: Any) -> dict[str, int | None]:
     }
 
 
-def _message_text(items: list[dict[str, Any]]) -> str:
+def _message_text(items: list[dict[str, Any]], *, render_citations: bool = True) -> str:
     parts: list[str] = []
     for item in items:
         if item.get("type") != "message":
@@ -279,7 +289,7 @@ def _message_text(items: list[dict[str, Any]]) -> str:
             if not isinstance(part, dict):
                 continue
             if part.get("type") == "output_text":
-                parts.append(str(part.get("text", "")))
+                parts.append(cited_text(part) if render_citations else part["text"])
             elif part.get("type") == "refusal":
                 parts.append(str(part.get("refusal") or ""))
     return "".join(parts)

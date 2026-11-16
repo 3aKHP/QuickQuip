@@ -1,7 +1,8 @@
 """OpenAI Responses 协议的 profile 能力位与 wire 常量。
 
-profile 是"有日期的兼容契约"：新能力不得改写既有 profile id 的行为，
-新后端形状以新 profile id 进入注册表。首批两个（1.16 决策 2）：
+profile 是"有日期的兼容契约"：能力扩展须明确记录既有 profile 的请求行为变化，
+新后端形状以新 profile id 进入注册表；hosted 工具集合随该档公开能力说明维护。
+首批两个（1.16 决策 2）：
 
 - ``openai-public``：官方 ``/v1/responses`` 端点。
 - ``codex-http-relay``：Codex 形态中转（HTTP+SSE）。差异点：不发
@@ -92,7 +93,7 @@ PROFILES: dict[str, ResponsesProfile] = {
         service_tier=None,
         recognize_relay_events=True,
         reconcile_relay_items=True,
-        hosted_tools=frozenset({"image_generation"}),
+        hosted_tools=frozenset({"image_generation", "web_search"}),
     ),
 }
 

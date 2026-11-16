@@ -81,19 +81,20 @@ def register_lifecycle(driver) -> None:
         start_configuration_control(svc)
         # 崩溃恢复（§5.5）：新 Bot 进程补齐未关闭 Loop 的缺失终态；
         # Web 只做迁移/查询，不代替 Bot 宣判活跃 Loop。
-        try:
-            report = svc.store.recover_unfinished_loops()
-            if report.closed_loops:
-                logger.info(
-                    "agent loop recovery closed %d loops (tools=%d/%d, deliveries=%d/%d)",
-                    len(report.closed_loops),
-                    len(report.tools_not_executed),
-                    len(report.tools_indeterminate),
-                    len(report.deliveries_skipped),
-                    len(report.deliveries_unknown),
-                )
-        except Exception:
-            logger.exception("agent loop recovery failed")
+        if svc.store is not None:
+            try:
+                report = svc.store.recover_unfinished_loops()
+                if report.closed_loops:
+                    logger.info(
+                        "agent loop recovery closed %d loops (tools=%d/%d, deliveries=%d/%d)",
+                        len(report.closed_loops),
+                        len(report.tools_not_executed),
+                        len(report.tools_indeterminate),
+                        len(report.deliveries_skipped),
+                        len(report.deliveries_unknown),
+                    )
+            except Exception:
+                logger.exception("agent loop recovery failed")
         await tieba_service.startup()
         _init_mtimes()
 

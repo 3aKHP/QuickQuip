@@ -10,7 +10,7 @@
 
 QuickQuip 的 LLM 模块为规则机器人提供对话扩展。管理员按群或私聊选择渠道、模型和人格，并控制触发、记忆与工具。默认入口为配置前缀、艾特机器人和 `/search`；群聊唤醒按第 3 节的开关与条件启用。
 
-模块支持图片理解、语音转写、项目搜索后端、Gemini 原生搜索和工具调用。MCP 服务作为外部工具来源接入同一注册表，契约见[MCP 集成说明](mcp-integration.md)。
+模块支持图片理解、语音转写、项目搜索后端、Gemini／Responses 原生搜索和工具调用。MCP 服务作为外部工具来源接入同一注册表，契约见[MCP 集成说明](mcp-integration.md)。
 
 LLM 运行时在 `LLM_TRACE_FLAG_FILE` 指向的开关文件存在时，把每次 HTTP 尝试写入 `data/llm_trace.db`。请求正文取自实际交给 HTTP 客户端的 UTF-8 JSON 序列化文本；普通响应保留 JSON 解析前的服务端文本；流式响应完整消费 SSE 后，由协议客户端重建 OpenAI Chat Completion、Claude Message、Gemini GenerateContent 或 OpenAI Responses 完整响应对象，同时保留 SSE 传输原文供管理员按需核对。索引、正文和单调递增的状态事件分开存储，Web Admin 先读取轻量调用元数据，管理员选择记录后再加载完整 Header 与正文。`run_tool_call_loop` 为一轮完整交互分配 Agent Loop ID，重试、故障切换和工具结果回送产生的 HTTP 调用按组内序号排列。
 
@@ -94,7 +94,7 @@ Gemini 在原生工具回合保存并按顺序回放含 `thoughtSignature` 的 p
 
 Responses 的 `openai-public`、`codex-http-relay` 与 `codex-relay-hosted-tools` Profile 均接受新增的事件类型和附加 JSON 字段。未知事件通过序号与终态顺序校验后跳过，继续等待终态；每条流最多记录八种未知事件，每种记录一次，事件名截取前 128 个字符并转义，原始载荷由 HTTP Trace 开关控制保存。`codex-http-relay` 与 `codex-relay-hosted-tools` 将 `response.metadata`、`codex.response.metadata` 等已知中转附加事件静默忽略。此策略遵循 OpenAI 将新增流式事件类型视为兼容扩展的[约定](https://developers.openai.com/api/reference/overview#backwards-compatibility)。
 
-`codex-relay-hosted-tools` Profile 继承 `codex-http-relay` 的全部行为，并在 `allow_tool_calls` 开启时由请求侧显式声明 `image_generation` 内置工具（追加进 tools 数组，无 function 工具的请求同样声明）；需要对话内生图而不依赖中转自动注入的渠道使用该档。
+`codex-relay-hosted-tools` Profile 继承 `codex-http-relay` 的全部行为，并在 `allow_tool_calls` 开启时由请求侧显式声明 `image_generation` 和 `web_search` 内置工具（追加进 tools 数组，无 function 工具的请求同样声明）；需要对话内生图和服务端搜索的渠道使用该档。搜索请求同时包含 `web_search_call.action.sources`；响应保留搜索原生条目供回放，并将来源投影为可点击的正文引用。搜索由模型自主选择，可能产生额外费用；渠道不支持时可切回 `codex-http-relay`。
 
 Responses 对已消费事件的必要字段、流式正文与工具参数的一致性、终态状态及输出条目类型执行严格校验。不支持的输出条目（含工具条目）或内容类型会使调用失败。
 
@@ -250,7 +250,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续。读取窗口由
 - 无聊唤醒与定时任务是合成触发源：落库结构化配对行（`【自动唤醒】<诱因>` / `【定时消息】按 <cron> 发送：<摘要>`）消除 history 的 assistant 孤行，合成触发的来源角色记为未知；合成 user_id（`boredom_timer`/`scheduled_timer`）既不进信封参与者，渲染时也直接以名字呈现
 - 格式化仅在 `build_messages()` 组装时做一次，DB 存储原始文本（`raw_content` 列）
 - 引用消息会同时保留“当前提问者”和“引用发送者”，并显式区分机器人自己，避免 A 引用 B 时被误读成 B 在发言
-- 合并转发会递归展开多层节点，并保留每层的文字和图片信息；组合文本总长封顶 4000 字符，超出在最外层出口硬切并追加「…（合并转发内容过长，已截断）」
+- 合并转发会递归展开多层节点，并保留每层的文字和图片信息；组合文本总长封顶 4000 字符，包含说明和截断标记。逐层优先保留本层正文，再分配子转发预算；子块使用成对边界和局部截断标记，外层自身超限时标明整份转发截断。占位发送者标为账号未知，显示名不用于确认身份
 - 非视觉模型的图注以文本身份落库：落库 `raw_content` 追加 `[图片 N 张：…]`（转发图注并入转发文本），落库字节即下一轮 history 的前缀字节，转述内容不随轮丢失、前缀稳定
 
 统一格式使模型可以按发言者理解历史、现场和当前提问；`【当前提问】` 指定需要回答的最后一轮。格式化发生在请求组装阶段，数据库保存原始正文，避免重复包装。
@@ -260,7 +260,7 @@ LLM 自身的问答往返会写入 SQLite，用于多轮延续。读取窗口由
 图片理解遵循显式触发和受限被动唤醒规则：
 
 - 群聊当前图片通过配置前缀或艾特机器人触发；被动唤醒按下述规则补充近期图片
-- 单次最多处理 5 张当前、引用图片与近期上下文图片；转发图片以文字或图注形式进入请求
+- 每条输入消息最多附带 5 张图片，按当前、引用、转发、近期上下文顺序去重选取；转发图片保留正文占位，数量超限时本轮上下文注明未附带数量
 - `awakening_extend`、`awakening_interest`、`awakening_relevance`、`awakening_qa` 和 `awakening_boredom` 携带群内近期历史图片
 - 近期历史图片使用当前请求剩余的图片名额，并优先保留最新图片
 - 单张图片（解码后）上限 5 MiB；发送前统一过内联媒体收口（`provider/media_guard.py`）：GIF 按魔数嗅探自动取首帧转 PNG、同请求内相同内容去重、MIME 按实际字节归一，并对全部图片施加解码字节总量预算（默认 5 MiB，provider 级 `max_inline_media_bytes` 覆盖，0 = 不限）。超出单图上限或剩余额度的图片先降采样重编码（EXIF 方向校正、透明平铺白底、原始尺寸优先 + 长边 2560→768 阶梯 × JPEG q85/q70 两档，命中即停；结果按「原始字节哈希 + 目标额度」缓存），额度低于 96 KiB 不再压缩。压缩后仍装不下的按候选优先级前缀止停：第一张连同其后全部跳过并记日志，避免丢弃当前大图却保留后续无关小图

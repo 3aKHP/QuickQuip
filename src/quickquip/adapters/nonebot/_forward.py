@@ -9,15 +9,20 @@ from quickquip.llm.message_segments import (
     render_segment_leaf,
     segment_type_and_data,
 )
+from quickquip.llm.forward_rendering import ForwardBlock, render_forward_block
 from quickquip.llm.identity import IdentityIndex
 from quickquip.llm.prompting import format_participant_label
 
 logger = logging.getLogger(__name__)
 
 MAX_FORWARD_DEPTH = 8
-# 转发组合文本总量封顶（字符）：超长转发是 trace 里 23k 级尖峰与 provider
-# 413 的来源；只在最外层出口硬切，递归内部不逐层裁剪。
+# The budget includes notices and structural markers.
 MAX_FORWARD_TEXT_CHARS = 4000
+FORWARD_SENDER_PLACEHOLDER = "1094950020"
+FORWARD_IDENTITY_NOTICE = (
+    "该转发记录部分发言者的真实账号不可得；"
+    "显示名不构成确认同一人或不同人的依据。"
+)
 
 
 def _get_field(obj, key: str, default: str = "") -> str:
@@ -56,7 +61,10 @@ def _format_forward_sender(
     bot_keys: set[str],
     identities: IdentityIndex,
 ) -> str:
-    normalized_user_id = user_id.strip()
+    normalized_user_id = str(user_id).strip()
+    if normalized_user_id == FORWARD_SENDER_PLACEHOLDER:
+        return (f"{sender_name}（转发显示名，账号未知）" if sender_name
+                else "未知发言者（转发账号未知）")
     if normalized_user_id and normalized_user_id in bot_keys:
         return f"机器人（QQ {normalized_user_id}）"
     match = identities.resolve_user(normalized_user_id, sender_name)
@@ -78,17 +86,20 @@ async def _render_forward_nodes(
     depth: int,
     visited_forward_ids: set[str],
     mention_names: Mapping[str, str] | None = None,
-) -> tuple[str, list[str]]:
+    anonymous_senders: list[bool],
+) -> tuple[ForwardBlock, list[str]]:
     if depth >= MAX_FORWARD_DEPTH:
-        return "[合并转发内容过深，已截断]", []
+        return ForwardBlock(["[合并转发内容过深，已截断]"]), []
 
-    lines: list[str] = []
+    lines: list[str | ForwardBlock] = []
     image_urls: list[str] = []
 
     for idx, item in enumerate(nodes, 1):
         sender = item.get("sender", {}) if isinstance(item, dict) else getattr(item, "sender", {})
         sender_name = _get_field(sender, "card") or _get_field(sender, "nickname")
         user_id = _get_field(sender, "user_id")
+        if user_id.strip() == FORWARD_SENDER_PLACEHOLDER:
+            anonymous_senders.append(True)
 
         if isinstance(item, dict):
             content = item.get("content", item.get("message", []))
@@ -104,6 +115,7 @@ async def _render_forward_nodes(
             depth=depth + 1,
             visited_forward_ids=visited_forward_ids,
             mention_names=mention_names,
+            anonymous_senders=anonymous_senders,
         )
 
         speaker_label = _format_forward_sender(
@@ -113,13 +125,13 @@ async def _render_forward_nodes(
             identities=identity_index,
         )
 
-        if rendered_text:
-            lines.append(f"{idx}. {speaker_label}：{rendered_text}")
-        else:
-            lines.append(f"{idx}. {speaker_label}")
+        if idx > 1:
+            lines.append("\n")
+        lines.append(f"{idx}. {speaker_label}：")
+        lines.extend(rendered_text.parts)
         image_urls.extend(rendered_images)
 
-    return "\n".join(lines), image_urls
+    return ForwardBlock(lines), image_urls
 
 
 async def _render_forward_content(
@@ -132,15 +144,16 @@ async def _render_forward_content(
     depth: int,
     visited_forward_ids: set[str],
     mention_names: Mapping[str, str] | None = None,
-) -> tuple[str, list[str]]:
+    anonymous_senders: list[bool],
+) -> tuple[ForwardBlock, list[str]]:
     if isinstance(content, str):
-        return content.strip(), []
+        return ForwardBlock([content.strip()]), []
 
     segments = _message_segments(content)
     if not segments:
-        return str(content).strip(), []
+        return ForwardBlock([str(content).strip()]), []
 
-    plain_parts: list[str] = []
+    plain_parts: list[str | ForwardBlock] = []
     image_urls: list[str] = []
 
     for segment in segments:
@@ -150,7 +163,7 @@ async def _render_forward_content(
             nested_id = str(_get_field(data, "id")).strip()
             nested_nodes = data.get("content") or []
 
-            nested_text = ""
+            nested_text = None
             nested_images: list[str] = []
             if nested_nodes and isinstance(nested_nodes, list):
                 next_visited = visited_forward_ids | ({nested_id} if nested_id else set())
@@ -163,12 +176,13 @@ async def _render_forward_content(
                     depth=depth + 1,
                     visited_forward_ids=next_visited,
                     mention_names=mention_names,
+                    anonymous_senders=anonymous_senders,
                 )
             elif nested_id:
                 if nested_id in visited_forward_ids:
-                    nested_text = "[循环转发已跳过]"
+                    nested_text = ForwardBlock(["[循环转发已跳过]"])
                 elif depth >= MAX_FORWARD_DEPTH:
-                    nested_text = "[合并转发内容过深，已截断]"
+                    nested_text = ForwardBlock(["[合并转发内容过深，已截断]"])
                 else:
                     try:
                         result = await bot.call_api("get_forward_msg", message_id=nested_id)
@@ -178,7 +192,7 @@ async def _render_forward_content(
                             nested_id,
                             exc_info=True,
                         )
-                        nested_text = ""
+                        nested_text = None
                     else:
                         nested_nodes = []
                         if isinstance(result, dict):
@@ -195,11 +209,10 @@ async def _render_forward_content(
                                 depth=depth + 1,
                                 visited_forward_ids=visited_forward_ids | {nested_id},
                                 mention_names=mention_names,
+                                anonymous_senders=anonymous_senders,
                             )
 
-            if nested_text:
-                if plain_parts and not plain_parts[-1].endswith("\n"):
-                    plain_parts.append("\n")
+            if nested_text is not None:
                 plain_parts.append(nested_text)
             elif include_image_placeholder:
                 plain_parts.append("[合并转发消息]")
@@ -220,7 +233,7 @@ async def _render_forward_content(
         if segment_images:
             image_urls.extend(segment_images)
 
-    return "".join(plain_parts).strip(), image_urls
+    return ForwardBlock(plain_parts), image_urls
 
 
 async def extract_forward_content(
@@ -262,19 +275,20 @@ async def extract_forward_content(
     if not raw_nodes:
         return "", []
 
-    rendered_text, image_urls = await _render_forward_nodes(
+    anonymous_senders: list[bool] = []
+    block, image_urls = await _render_forward_nodes(
         bot,
         list(raw_nodes),
         bot_keys=bot_keys,
         identity_index=identities,
         include_image_placeholder=True,
         mention_names=mention_names,
+        anonymous_senders=anonymous_senders,
         depth=0,
         visited_forward_ids={forward_id} if forward_id else set(),
     )
-    if len(rendered_text) > MAX_FORWARD_TEXT_CHARS:
-        rendered_text = (
-            rendered_text[:MAX_FORWARD_TEXT_CHARS].rstrip()
-            + "…（合并转发内容过长，已截断）"
-        )
+    notice = FORWARD_IDENTITY_NOTICE + "\n" if anonymous_senders else ""
+    rendered_text = notice + render_forward_block(
+        block, max(0, MAX_FORWARD_TEXT_CHARS - len(notice)), outer=True,
+    )
     return rendered_text, image_urls

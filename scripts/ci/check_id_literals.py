@@ -20,6 +20,10 @@ PATTERN = re.compile(r"\b[1-9]\d{8,10}\b(?!\.)")
 # Synthetic placeholders used across fixtures, docs, and example configs.
 ALLOWLIST = {"1000000000", "1000000001", "123456789", "987654321"}
 
+# Public QQ forward sender sentinel, required verbatim by protocol regression tests.
+# https://github.com/SaltifyDev/milky/issues/46
+PROTOCOL_LITERALS = {"tests/unit/adapters/test_forward.py": {"1094950020"}}
+
 SCAN_PATHS = (
     "tests",
     "docs",
@@ -68,7 +72,9 @@ def main() -> int:
             continue
         for lineno, line in enumerate(text.splitlines(), start=1):
             for m in PATTERN.finditer(line):
-                if m.group(0) in ALLOWLIST:
+                if m.group(0) in ALLOWLIST or m.group(0) in PROTOCOL_LITERALS.get(
+                    f.as_posix(), set()
+                ):
                     continue
                 print(
                     f"FAIL {f}:{lineno}: 9-11 digit literal not in synthetic "

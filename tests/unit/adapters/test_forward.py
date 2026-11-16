@@ -201,3 +201,57 @@ async def test_nested_forward_expands_recursively_with_images_and_bot_marker():
     assert "里层" in text
     assert images == ["https://example.test/inner.png", "https://example.test/outer.png"]
     assert [call[1]["message_id"] for call in bot.calls] == ["fid_outer", "fid_mid", "fid_inner"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("account", [1094950020, "1094950020"])
+async def test_placeholder_sender_never_resolves_identity(account):
+    from unittest.mock import Mock
+    from quickquip.llm.identity import IdentityIndex
+    from quickquip.adapters.nonebot._forward import FORWARD_IDENTITY_NOTICE
+    identities = Mock(spec=IdentityIndex)
+    nodes = [{"sender": {"nickname": name, "user_id": account},
+              "content": [text_seg("话")]} for name in ("甲", "乙", "")]
+    text, _ = await extract_forward_content(
+        _StubBot(), [{"type": "forward", "data": {"content": nodes}}], str(account), identities,
+    )
+    assert "QQ 1094950020" not in text
+    assert "甲（转发显示名，账号未知）" in text
+    assert "乙（转发显示名，账号未知）" in text
+    assert "未知发言者（转发账号未知）" in text
+    assert text.count(FORWARD_IDENTITY_NOTICE) == 1
+    identities.resolve_user.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_nested_budget_keeps_outer_tail_and_all_images():
+    from quickquip.adapters.nonebot._forward import MAX_FORWARD_TEXT_CHARS
+    from quickquip.llm.forward_rendering import CHILD_START, CHILD_END, INNER_TRUNCATED
+    child = [{"sender": {"nickname": "甲", "user_id": 1094950020},
+              "content": [text_seg("内" * 10000), image_seg("https://example.test/end.png")]}]
+    nodes = [{"sender": {"user_id": 10001}, "content": [text_seg("短句 A")]},
+             {"sender": {"user_id": 10002},
+              "content": [{"type": "forward", "data": {"content": child}}]},
+             {"sender": {"user_id": 10003}, "content": [text_seg("短句 B")]}]
+    text, images = await extract_forward_content(
+        _StubBot(), [{"type": "forward", "data": {"content": nodes}}], "99",
+    )
+    assert "短句 A" in text and "短句 B" in text
+    assert text.index(CHILD_START) < text.index(INNER_TRUNCATED) < text.index(CHILD_END)
+    assert len(text) <= MAX_FORWARD_TEXT_CHARS
+    assert images == ["https://example.test/end.png"]
+
+
+def test_tree_budget_siblings_deep_blocks_and_small_limits():
+    from quickquip.llm.forward_rendering import (
+        ForwardBlock, render_forward_block, CHILD_START, CHILD_END, INNER_TRUNCATED,
+    )
+    tree = ForwardBlock(["A", ForwardBlock(["first" * 200]), "B",
+                         ForwardBlock(["second", ForwardBlock(["deep" * 200])]), "C"])
+    for limit in range(200):
+        text = render_forward_block(tree, limit, outer=True)
+        assert len(text) <= limit
+        assert text.count(CHILD_START) == text.count(CHILD_END)
+    text = render_forward_block(tree, 350, outer=True)
+    assert all(word in text for word in ("A", "B", "C", "second"))
+    assert INNER_TRUNCATED in text

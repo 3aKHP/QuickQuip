@@ -1720,6 +1720,26 @@ class LLMService(
             ))
 
 
+def _degraded_llm_service(error: Exception) -> LLMService:
+    service = LLMService.__new__(LLMService)
+    service._init_error = str(error)
+    service.config = LLMConfig(load_error=str(error))
+    service.config_service = None
+    service.mcp_manager = MCPClientManager()
+    service.tool_registry = ToolRegistry()
+    service.image_preprocessor = None
+    service._init_mcp_lifecycle()
+    service.vocab = VocabIndex()
+    service._identity_repository = IdentityRepository()
+    service.identities = IdentityIndex()
+    service.identity_path = LLM_IDENTITIES_YAML_PATH
+    service.vocab_path = LLM_VOCAB_YAML_PATH
+    service._group_vocabs = OrderedDict()
+    service.store = None
+    service._scope_gate = ScopeGate()
+    return service
+
+
 _llm_service: LLMService | None = None
 _init_attempted: bool = False
 
@@ -1740,17 +1760,5 @@ def get_llm_service() -> LLMService:
             _llm_service = LLMService()
         except Exception as exc:
             logger.critical("LLMService 初始化失败，创建降级实例：%s", exc)
-            _llm_service = LLMService.__new__(LLMService)
-            _llm_service._init_error = str(exc)
-            _llm_service.config = LLMConfig(load_error=str(exc))  # type: ignore[attr-defined]
-            _llm_service.vocab = VocabIndex()  # type: ignore[attr-defined]
-            _llm_service._identity_repository = IdentityRepository()
-            _llm_service.identities = IdentityIndex()  # type: ignore[attr-defined]
-            _llm_service.identity_path = LLM_IDENTITIES_YAML_PATH  # type: ignore[attr-defined]
-            _llm_service.vocab_path = LLM_VOCAB_YAML_PATH  # type: ignore[attr-defined]
-            _llm_service._group_vocabs = OrderedDict()  # type: ignore[attr-defined]
-            _llm_service.store = None  # type: ignore[attr-defined]
-            # 闸门在 generate_reply 链路上先于 load_error 优雅返回被访问，
-            # 降级实例缺这个属性会把优雅降级变成 AttributeError。
-            _llm_service._scope_gate = ScopeGate()  # type: ignore[attr-defined]
+            _llm_service = _degraded_llm_service(exc)
     return _llm_service  # type: ignore[return-value]

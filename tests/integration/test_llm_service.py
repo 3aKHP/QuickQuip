@@ -719,8 +719,7 @@ async def test_forward_message_content_rendered(wired_service, patch_provider_bu
     last_user = stub.last_request.messages[-1]
     assert "转发" in last_user.content
     assert "1. Alice（QQ 10001）：这是合并转发" in last_user.content
-    # 转发图片不再作为媒体本体附带（VLM 路径同）；[附图 N 张] 文本后缀仍在
-    assert last_user.image_urls == []
+    assert last_user.image_urls == ["https://example.test/forward.png"]
     assert "[附图 1 张]" in last_user.content
 
 

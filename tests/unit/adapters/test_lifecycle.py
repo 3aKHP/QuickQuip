@@ -222,3 +222,30 @@ async def test_lifecycle_jobs_record_results(monkeypatch):
         assert "boom-500" in results[job]["last_error"]
     assert results["web_admin_action_queue"]["last_status"] == "error"
     assert "async-boom" in results["web_admin_action_queue"]["last_error"]
+
+
+@pytest.mark.asyncio
+async def test_degraded_service_runs_real_lifecycle_callbacks(monkeypatch, caplog):
+    from unittest.mock import AsyncMock
+    import quickquip.llm.service as service_module
+    monkeypatch.setattr(service_module, "_llm_service", None)
+    monkeypatch.setattr(service_module, "_init_attempted", False)
+
+    def fail_init(self):
+        raise RuntimeError("synthetic configuration failure")
+
+    monkeypatch.setattr(service_module.LLMService, "__init__", fail_init)
+    monkeypatch.setattr(lifecycle, "get_llm_service", service_module.get_llm_service)
+    monkeypatch.setattr(lifecycle, "tieba_service", types.SimpleNamespace(
+        startup=AsyncMock(), shutdown=AsyncMock()))
+    monkeypatch.setattr(lifecycle, "_init_mtimes", lambda: None)
+    monkeypatch.setattr(lifecycle, "save_all", lambda: None)
+    monkeypatch.setattr(lifecycle, "close_persistent_stores", AsyncMock())
+    scheduler_module = types.ModuleType("nonebot_plugin_apscheduler")
+    scheduler_module.scheduler = types.SimpleNamespace(add_job=lambda *a, **kw: None)
+    monkeypatch.setitem(sys.modules, "nonebot_plugin_apscheduler", scheduler_module)
+    driver = _FakeDriver()
+    lifecycle.register_lifecycle(driver)
+    await driver.startup()
+    await driver.shutdown()
+    assert "agent loop recovery failed" not in caplog.text

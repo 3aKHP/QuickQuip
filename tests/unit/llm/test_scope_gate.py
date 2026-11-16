@@ -157,8 +157,19 @@ async def test_degraded_service_generate_reply_returns_graceful_error(monkeypatc
 
     svc = service_module.get_llm_service()
     assert svc._init_error == "boom"
+    await svc.startup(background=True)
+    from quickquip.adapters.nonebot.config_control import start_configuration_control
+    start_configuration_control(svc)
+    assert not svc.is_mcp_initializing()
+    await svc.shutdown()
+    await svc.shutdown()
 
     result = await svc.generate_reply(
         group_id=1001, user_id=2002, sender_name="甲", prompt="测试"
     )
     assert "LLM 配置不可用" in result["reply"]
+
+    private_result = await svc.generate_private_reply(
+        user_id=2002, sender_name="甲", prompt="测试"
+    )
+    assert "LLM 配置不可用" in private_result["reply"]

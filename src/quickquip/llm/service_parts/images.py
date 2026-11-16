@@ -69,8 +69,9 @@ class ImagesMixin:
         # ── image preprocessing & non-VLM stripping ──────────────────
         current_model = settings.model or provider.default_model
         is_non_vision = current_model in provider.non_vision_models
-        # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅以文本/图注形式出现
-        effective_image_urls = merge_image_urls(request_image_urls, request_quoted_image_urls)
+        effective_image_urls = merge_image_urls(
+            request_image_urls, request_quoted_image_urls, request_forward_image_urls,
+        )
 
         image_plan = None
         if is_non_vision:
@@ -86,13 +87,13 @@ class ImagesMixin:
                 return reply_result(image_plan.error_reply, llm_used=False)
 
         if effective_image_urls:
-            # images= 是实际附带数（转发图不附带，不计入）；sources 各分项同理
-            # 只列附带来源，避免 total 与分项和对不上误导排查
             sources: list[str] = []
             if normalized_image_urls:
                 sources.append(f"直接={len(normalized_image_urls)}")
             if normalized_quoted_image_urls:
                 sources.append(f"引用={len(normalized_quoted_image_urls)}")
+            if normalized_forward_image_urls:
+                sources.append(f"转发={len(normalized_forward_image_urls)}")
             logger.info(
                 "group=%s model=%s non_vision=%s images=%d (%s)",
                 chat_id, current_model, is_non_vision,
