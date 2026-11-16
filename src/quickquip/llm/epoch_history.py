@@ -75,6 +75,7 @@ def select_history(
     archive_loop_ids: frozenset[str],
     effort: str,
     rebuild_budget: int | None = None,
+    responses_search_enabled: bool = True,
 ) -> HistorySelection:
     """Append new expressions, or choose a new suffix at an explicit reset."""
     units = history_units(rows)
@@ -110,9 +111,17 @@ def select_history(
         previous = None
     segments = deepcopy(previous.segments) if previous else {}
     new_loops = [loop for loop in loops if loop.loop_id not in segments
-                 and any(turn.tools for turn in loop.turns)]
+                 and (any(turn.tools for turn in loop.turns) or (
+                     protocol == "openai_responses" and any(
+                         block.get("type") == "web_search_call"
+                         for turn in loop.turns
+                         for block in ((turn.native_state or {}).get("blocks") or [])
+                         if isinstance(block, dict)
+                     )
+                 ))]
     projected = project_loops(
         new_loops, target=target, protocol=protocol, archive_loop_ids=archive_loop_ids,
+        responses_search_enabled=responses_search_enabled,
     )
     segments.update(projected.segments)
     if protocol == "openai_responses":
@@ -153,6 +162,7 @@ def select_history(
             segments = project_loops_with_budget(
                 retained_loops, target=target, protocol=protocol, budget_tokens=limit,
                 archive_loop_ids=archive_loop_ids, effort=effort,
+                responses_search_enabled=responses_search_enabled,
             ).segments
             segments = {loop.loop_id: segments.get(loop.loop_id, []) for loop in retained_loops}
         else:

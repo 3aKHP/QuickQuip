@@ -204,12 +204,6 @@ def parse_responses_body(
     items = validate_output_items(stripped_items, provider_id=provider_id)
     text = _message_text(items)
     web_search = search_report(items)
-    if web_search is not None and text:
-        missing = [source for source in web_search.sources if source.url not in text][:3]
-        if missing:
-            text += "\n\n来源：\n" + "\n".join(
-                f"- {source.title or '来源'} ({source.url})" for source in missing
-            )
     tool_calls = [
         LLMToolCall(
             id=str(item["call_id"]),

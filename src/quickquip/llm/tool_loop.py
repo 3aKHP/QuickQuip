@@ -76,6 +76,7 @@ async def run_tool_call_loop(
             current_request, tools=discovery.loaded_specs(current_request.tools),
         )
 
+    hosted_search_count = 0
     for round_index in range(search_failsafe_max_rounds + 1):
         if request_guard is not None:
             # §8.3：每次 provider HTTP 尝试前对最终 payload 复检预算；
@@ -94,6 +95,19 @@ async def run_tool_call_loop(
         # 模型产出图片（Responses 内置生图 / Gemini inlineData）收进外发
         # 通道：与工具路径同上限同语义，后续调用失败不丢弃已产出图片。
         collect_generated_images(response, context)
+        search_items = [item for item in (response.native_blocks or [])
+                        if item.get("type") == "web_search_call"]
+        hosted_search_count += len(search_items)
+        for item in search_items:
+            action = item.get("action", {})
+            logger.info(
+                "LLM hosted search: loop=%s round=%s call=%s action=%s status=%s "
+                "sources=%s encrypted=%s",
+                getattr(getattr(turn_recorder, "handle", None), "loop_id", None),
+                round_index, item.get("id"),
+                action.get("type"), item.get("status"), len(action.get("sources", [])),
+                bool(item.get("encrypted_content")),
+            )
         # R03：触达检测先于任何记录分支——首个响应声明 ephemeral 工具但
         # 被整批拒绝/提前结束时，原生副本同样必须省略
         if not ephemeral_touched and response.tool_calls:
@@ -102,12 +116,14 @@ async def run_tool_call_loop(
                 for call in response.tool_calls
             )
         logger.info(
-            "LLM completion: provider=%s model=%s finish_reason=%s tool_calls=%s round=%s",
+            "LLM completion: provider=%s model=%s finish_reason=%s tool_calls=%s round=%s "
+            "hosted_search_calls=%s",
             provider.id,
             response.model,
             response.finish_reason,
             len(response.tool_calls),
             round_index,
+            hosted_search_count,
         )
         if not response.tool_calls or not current_request.allow_tool_calls:
             if turn_recorder is not None:

@@ -306,6 +306,14 @@ def build_system_prompt(
         lines.append("本次会话的附加设定：")
         lines.append(session_preset.strip())
 
+    if search_mode == "responses_hosted":
+        lines.append(
+            "联网检索说明：\n"
+            "- 本次对话已提供服务端托管的 web_search 能力。\n"
+            f"- {_CURRENT_INFO_TRIGGER_HINT}的问题时，直接使用该能力检索后作答并引用来源。\n"
+            "- 该能力已在请求中声明，无需通过 tool_search 或 tool_list 加载。"
+        )
+
     if search_mode == "builtin":
         lines.append(
             "\n".join(

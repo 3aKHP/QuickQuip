@@ -269,6 +269,8 @@ class TurnRequestAssembler:
     builtin_search_active: bool
     system_prompt: str
 
+    tools_allowed: bool = False
+
     # 装配产物（assemble() 每次重建）
     history: list[dict[str, object]] = field(default_factory=list)
     participants: list[dict[str, str]] = field(default_factory=list)
@@ -363,7 +365,7 @@ class TurnRequestAssembler:
             temperature=self.provider.temperature,
             max_output_tokens=self.provider.max_output_tokens,
             tools=self.tool_specs,
-            allow_tool_calls=bool(self.tool_specs),
+            allow_tool_calls=self.tools_allowed,
             tool_choice="auto",
             builtin_search=self.builtin_search_active,
             reasoning_effort=self.settings.reasoning_effort or None,

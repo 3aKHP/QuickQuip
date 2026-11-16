@@ -224,7 +224,13 @@ class TurnRecorder:
         ``native_state_omission`` 由调用方强制省略原生副本（ephemeral
         工具触达后的 Loop：原生块可能携带临时载荷，§8.2）。
         """
-        text, text_policy = self._scrubbed_text(response.text)
+        from quickquip.llm.rendering import append_web_search_source_block
+
+        rendered = response.text
+        report = getattr(response, "web_search", None)
+        if rendered and report is not None:
+            rendered = append_web_search_source_block(rendered, report)
+        text, text_policy = self._scrubbed_text(rendered)
         is_final = not executable_calls or not has_more_rounds
         turn_id = new_agent_id("turn")
         output_status = (

@@ -168,7 +168,7 @@ def test_payload_hosted_tools_declaration_appends_image_and_search_tools():
         _request(
             [LLMConversationMessage(role="user", content="画一只猫")],
             tools=[_tool_spec()],
-            allow_tool_calls=True,
+            allow_tool_calls=True, builtin_search=True,
         ),
         _config(responses_profile="codex-relay-hosted-tools"),
     )
@@ -195,7 +195,7 @@ def test_payload_hosted_tools_declares_on_bare_request():
         _request(
             [LLMConversationMessage(role="user", content="画一只猫")],
             tools=[],
-            allow_tool_calls=True,
+            allow_tool_calls=True, builtin_search=True,
         ),
         _config(responses_profile="codex-relay-hosted-tools"),
     )
@@ -1782,7 +1782,8 @@ def test_search_response_preserves_native_items_and_replays(action):
     assert response.native_blocks == [item, message]
     replay = LLMConversationMessage(role="assistant", content=response.text,
                                    native_content=response.native_blocks)
-    payload = _payload(_request([replay]))
+    payload = _payload(_request([replay], allow_tool_calls=True, builtin_search=True),
+                       _config(responses_profile="codex-relay-hosted-tools"))
     assert payload["input"] == [item, message]
     events = [
         {"type": "response.output_text.delta", "delta": "天气晴朗。"},
@@ -1796,7 +1797,7 @@ def test_search_response_preserves_native_items_and_replays(action):
 def test_hosted_search_include_follows_tool_gate():
     for enabled in (False, True):
         payload = _payload(_request([LLMConversationMessage(role="user", content="搜索")],
-                                   allow_tool_calls=enabled),
+                                   allow_tool_calls=enabled, builtin_search=True),
                            _config(responses_profile="codex-relay-hosted-tools"))
         assert ("web_search_call.action.sources" in payload["include"]) == enabled
         assert "reasoning.encrypted_content" in payload["include"]
@@ -1823,7 +1824,8 @@ def test_relay_search_and_function_call_reconcile_and_pair_replay():
     messages = [LLMConversationMessage(role="assistant", content="",
                                       native_content=response.native_blocks),
                 LLMConversationMessage(role="tool", content="结果", tool_call_id="call_1")]
-    assert _payload(_request(messages))["input"][:2] == items
+    assert _payload(_request(messages, allow_tool_calls=True, builtin_search=True),
+                    _config(responses_profile="codex-relay-hosted-tools"))["input"][:2] == items
     corrupted = deepcopy(events)
     corrupted[-1]["response"] = deepcopy(body)
     corrupted[-1]["response"]["output"][0]["id"] = "other"
@@ -1837,7 +1839,10 @@ def test_search_action_sources_provide_links_without_annotations():
         _search_item(), {"type": "message", "role": "assistant", "content": [
             {"type": "output_text", "text": "晴朗"}]}]),
         provider_id="fake", fallback_model="test")
-    assert "https://example.test/weather" in response.text
+    from quickquip.llm.rendering import append_web_search_source_block
+    delivered = append_web_search_source_block(response.text, response.web_search)
+    assert "https://example.test/weather" in delivered
+    assert delivered.count("来源：") == 1
 
 
 @pytest.mark.parametrize("field", ["status", "action_type"])
@@ -1885,3 +1890,56 @@ def test_citation_marker_uses_title_and_plain_text_is_preserved(fragment, title,
     }]}
     assert cited_text(part) == prefix + label + " (https://example.test/weather)" + suffix
     assert part["text"] == text
+
+
+@pytest.mark.parametrize("allowed,search", [(False, False), (False, True), (True, False)])
+def test_disabled_search_cannot_replay_native_batch(allowed, search):
+    messages = [LLMConversationMessage(role="assistant", content="回答",
+                                      native_content=[_search_item()])]
+    with pytest.raises(LLMProviderError, match="搜索未启用"):
+        _payload(_request(messages, allow_tool_calls=allowed, builtin_search=search),
+                 _config(responses_profile="codex-relay-hosted-tools"))
+
+
+def test_search_sources_render_once_with_total_supplement_budget():
+    from quickquip.llm.rendering import append_web_search_source_block
+    item = _search_item({"type": "search", "query": "single query", "sources": [
+        {"type": "url", "url": f"https://example.test/{n}"} for n in range(6)]})
+    item["encrypted_content"] = "opaque-search-token"
+    original = deepcopy(item)
+    response = parse_responses_body(_completed_body([item, {
+        "type": "message", "role": "assistant", "content": [
+            {"type": "output_text", "text": "回答 https://example.test/0"}]}]),
+        provider_id="fake", fallback_model="test")
+    assert response.web_search.queries == ["single query"]
+    assert "来源：" not in response.text
+    delivered = append_web_search_source_block(response.text, response.web_search)
+    assert delivered.count("来源：") == 1
+    assert delivered.count("https://") == 4
+    payload = _payload(_request([LLMConversationMessage(
+        role="assistant", content=delivered, native_content=response.native_blocks)],
+        allow_tool_calls=True, builtin_search=True),
+        _config(responses_profile="codex-relay-hosted-tools"))
+    assert payload["input"][0] == original
+
+
+@pytest.mark.parametrize("extra", [
+    {"input": [_search_item()]}, {"tools": [{"type": "web_search"}]},
+    {"tools": [None]}, {"tools": [{"type": []}]}, {"input": "bad"},
+    {"include": ["web_search_call.action.sources"]},
+])
+async def test_final_body_overrides_cannot_enable_search(extra, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    client = OpenAIResponsesProviderClient(_config(extra_body=extra))
+    with pytest.raises(LLMProviderError):
+        await client._build_request_parts(_request([
+            LLMConversationMessage(role="user", content="hello")]))
+
+
+@pytest.mark.parametrize("alias", ["web_search_preview", "web_search_preview_2025_03_11"])
+async def test_final_body_cannot_enable_search_through_preview_alias(alias, monkeypatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
+    client = OpenAIResponsesProviderClient(_config(extra_body={"tools": [{"type": alias}]}))
+    with pytest.raises(LLMProviderError):
+        await client._build_request_parts(_request([
+            LLMConversationMessage(role="user", content="hello")], allow_tool_calls=True))

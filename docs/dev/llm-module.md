@@ -92,7 +92,7 @@ Gemini 在原生工具回合保存并按顺序回放含 `thoughtSignature` 的 p
 
 Responses 的 `openai-public`、`codex-http-relay` 与 `codex-relay-hosted-tools` Profile 均接受新增的事件类型和附加 JSON 字段。未知事件通过序号与终态顺序校验后跳过，继续等待终态；每条流最多记录八种未知事件，每种记录一次，事件名截取前 128 个字符并转义，原始载荷由 HTTP Trace 开关控制保存。`codex-http-relay` 与 `codex-relay-hosted-tools` 将 `response.metadata`、`codex.response.metadata` 等已知中转附加事件静默忽略。此策略遵循 OpenAI 将新增流式事件类型视为兼容扩展的[约定](https://developers.openai.com/api/reference/overview#backwards-compatibility)。
 
-`codex-relay-hosted-tools` Profile 继承 `codex-http-relay` 的全部行为，并在 `allow_tool_calls` 开启时由请求侧显式声明 `image_generation` 和 `web_search` 内置工具（追加进 tools 数组，无 function 工具的请求同样声明）；需要对话内生图和服务端搜索的渠道使用该档。搜索请求同时包含 `web_search_call.action.sources`；响应保留搜索原生条目供回放，并将来源投影为可点击的正文引用。搜索由模型自主选择，可能产生额外费用；渠道不支持时可切回 `codex-http-relay`。
+`codex-relay-hosted-tools` Profile 继承 `codex-http-relay` 的全部行为，并在 `allow_tool_calls` 开启时由请求侧显式声明 `image_generation` 和 `web_search` 内置工具（追加进 tools 数组，无 function 工具的请求同样声明）；需要对话内生图和服务端搜索的渠道使用该档。搜索请求同时包含 `web_search_call.action.sources`；响应保留搜索原生条目供回放，并将来源投影为可点击的正文引用。搜索由模型自主选择，可能产生额外费用；渠道不支持时可切回 `codex-http-relay`。该档的普通工具对话使用 hosted 搜索引导，并从本地工具及发现目录中移除 `search_web`。当次请求禁用工具时，搜索声明及来源 include 同时关闭，含搜索的历史 Loop 降级为通用正文与工具事实投影，不回放关联原生推理。完整原生批次按 owner 校验保留，来源尾块统一由交付层生成，最多补充三条链接；中间轮搜索按 Loop 和轮序记录。
 
 Responses 对已消费事件的必要字段、流式正文与工具参数的一致性、终态状态及输出条目类型执行严格校验。不支持的输出条目（含工具条目）或内容类型会使调用失败。
 

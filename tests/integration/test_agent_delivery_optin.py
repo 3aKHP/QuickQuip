@@ -131,3 +131,25 @@ async def test_delivery_invalid_domain_rejected(tmp_path: Path, patch_provider_b
     service = await _service(tmp_path)
     with pytest.raises(ValueError):
         service.set_chat_agent_delivery_enabled(1001, True, chat_type="group", domain="interim")
+
+
+async def test_hosted_sources_reach_both_final_delivery_paths(tmp_path, patch_provider_builder):
+    from quickquip.llm.provider.base import LLMResponse, LLMWebSearchReport, LLMWebSearchSource
+    service = await _service(tmp_path)
+
+    class SearchClient:
+        async def complete(self, request):
+            return LLMResponse(text="检索结论", model=request.model, web_search=LLMWebSearchReport(
+                queries=["example"], sources=[LLMWebSearchSource(
+                    title="Example", url="https://example.test/source")], link_urls=True))
+
+    patch_provider_builder(lambda provider: SearchClient())
+    for group_id, split in [(1001, False), (1002, True)]:
+        service.set_chat_agent_delivery_enabled(group_id, split, domain="final")
+        sink = CollectingSink()
+        service.bind_delivery_sink(sink)
+        result = await service.generate_reply(group_id=group_id, user_id="2002",
+                                             sender_name="测试", prompt="查询")
+        text = "\n".join(_sink_texts(sink)) if split else result["reply"]
+        assert text.count("来源：") == 1
+        assert "https://example.test/source" in text

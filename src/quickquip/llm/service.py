@@ -27,6 +27,8 @@ from quickquip.common.sensitive_filter import (
     log_hits as _log_sensitive_hits,
     reload_filter as _reload_sensitive_filter,
 )
+from quickquip.llm.search_policy import resolve_search_mode
+
 from quickquip.llm.config import (
     DISABLED_PROVIDER_REPLY,
     LLMConfig,
@@ -404,6 +406,7 @@ class LLMService(
         session_preset: str = "",
         provider_id: str | None = None,
         builtin_search_active: bool = False,
+        search_mode: str | None = None,
         skills_catalog_block: str = "",
     ) -> str:
         return build_system_prompt(
@@ -412,9 +415,11 @@ class LLMService(
             tool_specs=tool_specs,
             search_tool_name=SEARCH_TOOL_NAME,
             search_mode=(
-                "builtin"
-                if builtin_search_active
-                else ("searxng" if self.config.auto_search.enabled else "none")
+                search_mode if search_mode is not None else (
+                    "builtin" if builtin_search_active else
+                    ("searxng" if self.config.auto_search.enabled
+                     and self.config.runtime.tool_calling_enabled else "none")
+                )
             ),
             tool_discovery_enabled=self._is_tool_discovery_enabled(
                 chat_type, provider_id=provider_id
@@ -959,7 +964,8 @@ class LLMService(
         )
         budget = derive_replay_budget(self.config, provider, model)
         profile = json.dumps((asdict(target) if target else None, provider.protocol,
-                              budget, effort or provider.reasoning_effort), sort_keys=True)
+                              budget, effort or provider.reasoning_effort,
+                              self.config.runtime.tool_calling_enabled), sort_keys=True)
         previous = self._epochs.frozen_history(key)
         try:
             selection = select_history(
@@ -968,6 +974,8 @@ class LLMService(
                 target_ratio=params.hot_target_tokens / params.cap_tokens,
                 archive_loop_ids=archive_loop_ids, effort=effort or provider.reasoning_effort,
                 rebuild_budget=replay_budget,
+                responses_search_enabled=(self.config.runtime.tool_calling_enabled
+                                          and provider_builtin_search_active(provider)),
             )
         except HistoryProjectionError:
             logger.exception("history projection failed scope=%s; using stored text", scope_key)
@@ -1270,7 +1278,11 @@ class LLMService(
         skills_catalog_block = self.prepare_skill_catalog_for_turn(
             provider=provider, model=settings.model
         )
-        builtin_search_active = provider_builtin_search_active(provider)
+        search_mode = resolve_search_mode(
+            provider, tools_allowed=self.config.runtime.tool_calling_enabled,
+            local_search_enabled=self.config.auto_search.enabled,
+        )
+        builtin_search_active = search_mode in {"gemini_grounding", "responses_hosted"}
         history_enabled = self._effective_history_enabled(
             request.chat_id, request.chat_type
         )
@@ -1295,6 +1307,8 @@ class LLMService(
             session_preset=session_preset,
             provider_id=provider.id,
             builtin_search_active=builtin_search_active,
+            search_mode={"gemini_grounding": "builtin", "local": "searxng"}.get(
+                search_mode, search_mode),
             skills_catalog_block=skills_catalog_block,
         )
         # 装配对象持有当轮上下文；账本 meter 消费 assemble() 后的最终值。
@@ -1336,6 +1350,7 @@ class LLMService(
             include_recent_images=request.include_recent_images,
             is_non_vision=is_non_vision,
             tool_specs=tool_specs,
+            tools_allowed=self.config.runtime.tool_calling_enabled,
             builtin_search_active=builtin_search_active,
             system_prompt=system_prompt,
         )

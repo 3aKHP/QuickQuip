@@ -240,6 +240,7 @@ class LLMWebSearchReport:
 
     queries: list[str] = field(default_factory=list)
     sources: list[LLMWebSearchSource] = field(default_factory=list)
+    link_urls: bool = False
 
 
 @dataclass(slots=True)

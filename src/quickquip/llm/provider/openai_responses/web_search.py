@@ -15,7 +15,7 @@ def validate_search_item(item: dict, provider_id: str) -> None:
     valid = (
         isinstance(item.get("id"), str) and bool(item["id"])
         and isinstance(item.get("status"), str)
-        and item["status"] in {"in_progress", "searching", "completed", "failed"}
+        and item["status"] in {"in_progress", "searching", "completed", "failed", "incomplete"}
         and isinstance(action, dict)
         and isinstance(action.get("type"), str)
         and action["type"] in {"search", "open_page", "find_in_page"}
@@ -53,7 +53,9 @@ def search_report(items: list[dict]) -> LLMWebSearchReport | None:
             found = True
             action = item["action"]
             if action["type"] == "search":
-                queries.extend(q for q in action.get("queries", []) if q not in queries)
+                candidates = ([action["query"]] if isinstance(action.get("query"), str) else [])
+                candidates.extend(action.get("queries", []))
+                queries.extend(q for q in candidates if q and q not in queries)
             source_items = action.get("sources", []) if action["type"] == "search" else []
             for source in source_items:
                 if isinstance(source, dict) and (url := _url(source.get("url"))):
@@ -66,7 +68,8 @@ def search_report(items: list[dict]) -> LLMWebSearchReport | None:
                     sources[url] = LLMWebSearchSource(
                         title=str(annotation.get("title") or ""), url=url,
                     )
-    return LLMWebSearchReport(queries=queries, sources=list(sources.values())) if found else None
+    return (LLMWebSearchReport(queries=queries, sources=list(sources.values()), link_urls=True)
+            if found else None)
 
 
 def citations(part: dict) -> list[dict]:

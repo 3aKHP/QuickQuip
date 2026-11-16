@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from quickquip.llm.responses_capabilities import RESPONSES_HOSTED_TOOLS
+
 from quickquip.llm.client_fingerprints.catalog import FingerprintRuntime
 
 from dataclasses import dataclass, field
@@ -233,9 +235,7 @@ DISABLED_PROVIDER_REPLY = (
 # openai_responses 配置词表（单一事实来源）：profile 注册表与六档映射
 # （provider/openai_responses/）从本模块取词表——config 不能 import
 # provider 包（base.py 依赖 config，反向才不构成环），守护测试断言两侧相等。
-RESPONSES_PROFILE_IDS = frozenset(
-    {"openai-public", "codex-http-relay", "codex-relay-hosted-tools"}
-)
+RESPONSES_PROFILE_IDS = frozenset(RESPONSES_HOSTED_TOOLS)
 REASONING_EFFORT_CHOICES = ("low", "medium", "high", "xhigh", "max", "ultra")
 DEFAULT_RESPONSES_PROFILE_ID = "openai-public"
 
@@ -311,12 +311,15 @@ class ProviderConfig:
 
 
 def provider_builtin_search_active(provider: ProviderConfig) -> bool:
-    """builtin_search 的生效谓词：仅在 gemini 协议下有请求级效果。
+    """Provider 原生搜索能力：Gemini 配置开关或 Responses profile。
 
-    请求声明、search_web 工具互斥与健康检查都以本函数为单一判定来源，
-    避免各消费点自行重复协议判断。
+    本函数描述 provider 能力；应用层 search_policy 结合当次工具许可，
+    统一解析提示词、工具曝光和健康检查使用的有效搜索模式。
     """
-    return provider.builtin_search and provider.protocol == "gemini"
+    return (provider.builtin_search and provider.protocol == "gemini") or (
+        provider.protocol == "openai_responses"
+        and "web_search" in RESPONSES_HOSTED_TOOLS.get(provider.responses_profile, ())
+    )
 
 
 @dataclass(slots=True)

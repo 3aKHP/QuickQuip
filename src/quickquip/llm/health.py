@@ -10,7 +10,8 @@ from typing import Any
 from quickquip.common.paths import CONFIG_GENERATION_TOML, CONFIG_SENSITIVE_WORDS_TOML
 from quickquip.common.sensitive_filter import SensitiveFilter
 from quickquip.generation.config import load_generation_config
-from quickquip.llm.config import LLMConfig, ProviderConfig, provider_builtin_search_active
+from quickquip.llm.config import LLMConfig, ProviderConfig
+from quickquip.llm.search_policy import resolve_search_mode
 from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.settings import ResolvedGroupSettings
 
@@ -248,10 +249,11 @@ async def build_health_report(
     search_env = os.getenv("SEARXNG_BASE_URL", "").strip()
     # 与同一报告区分 enabled/disabled 的口径一致：被禁用的 provider 不能
     # 提供内置搜索覆盖，否则 SearXNG 缺失时误判 ok。
-    builtin_covered = any(
-        provider.enabled and provider_builtin_search_active(provider)
-        for provider in config.providers.values()
-    )
+    search_mode = (resolve_search_mode(
+        provider, tools_allowed=config.runtime.tool_calling_enabled,
+        local_search_enabled=config.auto_search.enabled,
+    ) if provider is not None and provider.enabled else "none")
+    builtin_covered = search_mode in {"gemini_grounding", "responses_hosted"}
     search_needed = config.auto_search.enabled or "search_web" in tool_names
     if search_env:
         search_status = "ok"
@@ -260,7 +262,7 @@ async def build_health_report(
         # 存在开启内置搜索的 provider 时，联网检索由其服务端 grounding 覆盖，
         # SearXNG 缺失不再是该路径的阻断项。
         search_status = "ok"
-        search_summary = "SearXNG 未配置，联网检索由开启 builtin_search 的 provider 内置搜索覆盖"
+        search_summary = "SearXNG 未配置，联网检索由当前 provider 原生搜索覆盖"
     elif search_needed:
         search_status = "warn"
         search_summary = "搜索后端未配置"
@@ -273,6 +275,7 @@ async def build_health_report(
             search_status,
             search_summary,
             {
+                "mode": search_mode,
                 "needed": search_needed,
                 "base_url_configured": bool(search_env),
                 "builtin_search_covered": builtin_covered,

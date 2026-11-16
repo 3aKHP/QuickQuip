@@ -5,7 +5,8 @@ import logging
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
-from quickquip.llm.config import LLMConfig, provider_builtin_search_active
+from quickquip.llm.config import LLMConfig
+from quickquip.llm.search_policy import resolve_search_mode
 from quickquip.llm.image_preprocessor import ImagePreprocessor, VisionImagePreprocessor
 from quickquip.llm.provider import build_provider_client
 from quickquip.llm.service_parts.constants import (
@@ -300,7 +301,10 @@ class ToolMixin(McpLifecycleMixin):
             if hasattr(self, "effective_request_provider")
             else self.config.providers.get(provider_id)
         )
-        return provider is not None and provider_builtin_search_active(provider)
+        return provider is not None and resolve_search_mode(
+            provider, tools_allowed=self.config.runtime.tool_calling_enabled,
+            local_search_enabled=self.config.auto_search.enabled,
+        ) in {"gemini_grounding", "responses_hosted"}
 
     def _get_enabled_tool_names(
         self,

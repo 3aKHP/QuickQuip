@@ -82,7 +82,9 @@ def append_web_search_source_block(
         domain = _source_domain(source.url)
         if domain.endswith(_REDIRECT_HOST_SUFFIX):
             domain = ""
-        if title and domain and title != domain:
+        if report.link_urls:
+            entry = f"- {title or domain or '来源'} ({source.url})"
+        elif title and domain and title != domain:
             entry = f"- {title} — {domain}"
         elif title or domain:
             entry = f"- {title or domain}"

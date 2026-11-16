@@ -436,6 +436,7 @@ def project_loops(
     target: ResponseOwner | None,
     protocol: str,
     archive_loop_ids: frozenset[str] = frozenset(),
+    responses_search_enabled: bool = True,
 ) -> ProjectionResult:
     """把完整已关闭 Loop 投影为目标协议消息序列（§7.2 两条合法路径 + 档案）。"""
     messages: list[LLMConversationMessage] = []
@@ -448,6 +449,11 @@ def project_loops(
             (PATH_ARCHIVE, "sensitive_history") if loop.loop_id in archive_loop_ids
             else _decide_loop_path(loop, target=target, protocol=protocol)
         )
+        if protocol == "openai_responses" and not responses_search_enabled and any(
+            block.get("type") == "web_search_call" for turn in loop.turns
+            for block in (_turn_native_blocks(turn) or [])
+        ) and path == PATH_NATIVE:
+            path, reason = PATH_STRUCTURED, "native_search_disabled"
         if path == PATH_NATIVE:
             loop_messages = _project_loop_native(loop, protocol=protocol)
         elif path == PATH_STRUCTURED:
@@ -660,6 +666,7 @@ def project_loops_with_budget(
     budget_tokens: int,
     archive_loop_ids: frozenset[str] = frozenset(),
     effort: str | None = None,
+    responses_search_enabled: bool = True,
 ) -> ProjectionResult:
     """带 §8.2 精简阶梯的投影：超预算时按固定顺序精简最旧 Loop。
 
@@ -672,6 +679,7 @@ def project_loops_with_budget(
     """
     result = project_loops(
         loops, target=target, protocol=protocol, archive_loop_ids=archive_loop_ids,
+        responses_search_enabled=responses_search_enabled,
     )
     if _estimate_messages_tokens(result.messages, effort=effort) <= budget_tokens or not loops:
         return result
