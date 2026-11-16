@@ -52,6 +52,10 @@ def _native_text(turn: LoadedTurn) -> Iterator[str]:
             yield str(block.get("name") or "")
             if isinstance(block.get("arguments"), str):
                 yield block["arguments"]
+        if block.get("type") == "web_search_call":
+            # Search queries, page URLs, find patterns and sources remain readable
+            # even when they were not included in the delivered reply.
+            yield from _strings(block.get("action"))
         for nested_key in ("content", "summary"):
             parts = block.get(nested_key)
             if not isinstance(parts, list):

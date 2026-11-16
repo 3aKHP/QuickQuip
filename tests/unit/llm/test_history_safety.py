@@ -261,3 +261,47 @@ def test_responses_annotation_text_is_scanned(tmp_path):
     prepared, archived = prepare_safe_history([loop], sensitive)
     assert loop.loop_id in archived
     assert prepared[0].turns[0].native_state is None
+
+
+@pytest.mark.parametrize("action", [
+    {"type": "search", "queries": ["blocked"]},
+    {"type": "open_page", "url": "https://example.test/blocked"},
+    {"type": "find_in_page", "url": "https://example.test/page", "pattern": "blocked"},
+    {"type": "search", "sources": [
+        {"type": "url", "url": f"https://example.test/{path}"}
+        for path in ("first", "second", "third", "blocked")
+    ]},
+])
+def test_hosted_search_hidden_text_is_filtered_before_native_replay(tmp_path, action):
+    from quickquip.llm.provider.openai_responses.response import parse_responses_body
+    from quickquip.llm.provider.openai_responses.request import serialize_input_items
+    loop, owner = _loop("openai_responses")
+    blocks = [
+        {"type": "web_search_call", "id": "ws_1", "status": "completed", "action": action},
+        {"type": "function_call", "call_id": "call_0", "name": "lookup",
+         "arguments": '{"query":"safe"}'},
+        {"type": "message", "role": "assistant", "content": [
+            {"type": "output_text", "text": "safe answer"}]},
+    ]
+    response = parse_responses_body({"status": "completed", "output": blocks},
+                                    provider_id="p", fallback_model="m")
+    assert MARKER not in response.text
+    turn = replace(loop.turns[0], text=response.text,
+                   native_state={"blocks": response.native_blocks})
+    loop = replace(loop, turns=(turn,))
+    original = deepcopy(loop)
+    # The sentinel is genuinely present on the native wire before policy filtering.
+    projection = project_loops_with_budget([loop], target=owner,
+                                           protocol="openai_responses", budget_tokens=10000)
+    before = serialize_input_items(projection.messages, [[] for _ in projection.messages],
+                                   provider_id="p")
+    assert MARKER in json.dumps(before)
+    safe, archived = prepare_safe_history([loop], make_sensitive_filter(tmp_path, "block"))
+    assert archived == {loop.loop_id}
+    projection = project_loops_with_budget(safe, target=owner, protocol="openai_responses",
+                                           budget_tokens=10000, archive_loop_ids=archived)
+    after = serialize_input_items(projection.messages, [[] for _ in projection.messages],
+                                  provider_id="p")
+    assert MARKER not in json.dumps(after)
+    assert not any(message.native_content for message in projection.messages)
+    assert loop == original

@@ -10,9 +10,11 @@ def validate_search_item(item: dict, provider_id: str) -> None:
     action = item.get("action")
     valid = (
         isinstance(item.get("id"), str) and bool(item["id"])
-        and item.get("status") in {"in_progress", "searching", "completed", "failed"}
+        and isinstance(item.get("status"), str)
+        and item["status"] in {"in_progress", "searching", "completed", "failed"}
         and isinstance(action, dict)
-        and action.get("type") in {"search", "open_page", "find_in_page"}
+        and isinstance(action.get("type"), str)
+        and action["type"] in {"search", "open_page", "find_in_page"}
     )
     if valid and action["type"] in {"open_page", "find_in_page"}:
         valid = action.get("url") is None or isinstance(action["url"], str)

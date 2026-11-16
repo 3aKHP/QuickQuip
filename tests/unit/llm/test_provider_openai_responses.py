@@ -1838,3 +1838,33 @@ def test_search_action_sources_provide_links_without_annotations():
             {"type": "output_text", "text": "晴朗"}]}]),
         provider_id="fake", fallback_model="test")
     assert "https://example.test/weather" in response.text
+
+
+@pytest.mark.parametrize("field", ["status", "action_type"])
+@pytest.mark.parametrize("value", [[], {}, 1, None])
+async def test_malformed_search_enum_does_not_fall_back_to_second_request(field, value):
+    item = _search_item()
+    if field == "status":
+        item["status"] = value
+    else:
+        item["action"]["type"] = value
+    body = _completed_body([item])
+    with pytest.raises(LLMProviderError):
+        parse_responses_body(body, provider_id="fake", fallback_model="test")
+
+    class MalformedSearchClient(OpenAIResponsesProviderClient):
+        fallback_calls = 0
+
+        async def _complete_stream(self, request):
+            return fold_stream_events([{"type": "response.completed", "response": body}],
+                                      provider_id="fake", fallback_model="test",
+                                      profile=resolve_profile("codex-relay-hosted-tools"))
+
+        async def _complete_non_stream(self, request):
+            self.fallback_calls += 1
+            raise AssertionError("Malformed semantic output must not dispatch another request")
+
+    client = MalformedSearchClient(_config(stream_enabled=True))
+    with pytest.raises(LLMProviderError):
+        await client.complete(_request([LLMConversationMessage("user", "搜索")]))
+    assert client.fallback_calls == 0
