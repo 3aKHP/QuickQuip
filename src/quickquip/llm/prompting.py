@@ -661,7 +661,7 @@ def _build_scene_from_current_message(
             "canonical_name": "转发消息",
             "text": f"[转发] {fw_text}",
         })
-        # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅以文本/图注形式出现
+        all_images.extend(forward_image_urls or [])
 
     # Image pre-processing results as context lines
     if image_descriptions:
@@ -876,6 +876,14 @@ def build_messages(
         image_descriptions=image_descriptions,
     )
 
+    from quickquip.llm.provider.base import MAX_IMAGES_PER_REQUEST
+    candidates = merge_image_urls(current_scene.images, recent_images)
+    omitted_images = max(0, len(candidates) - MAX_IMAGES_PER_REQUEST)
+    if omitted_images:
+        current_scene.speakers.append({
+            "user_id": "", "sender_name": "图片输入", "canonical_name": "图片输入",
+            "text": f"[图片数量超限，{omitted_images} 张图片未附带]",
+        })
     envelope_prefix = f"{turn_envelope}\n" if turn_envelope.strip() else ""
     # 尾巴顺序定型：【轮次上下文】→【上文】(若有)→【现场】(若有)→【当前提问】
     tail_parts: list[str] = []
@@ -890,7 +898,7 @@ def build_messages(
     messages.append(LLMConversationMessage(
         role="user",
         content=envelope_prefix + "\n".join(tail_parts),
-        image_urls=merge_image_urls(current_scene.images, recent_images),
+        image_urls=candidates[:MAX_IMAGES_PER_REQUEST],
     ))
 
     return messages

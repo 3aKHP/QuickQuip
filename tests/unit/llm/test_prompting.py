@@ -264,8 +264,7 @@ def test_current_scene_collects_all_images():
     )
     assert "current.png" in scene.images
     assert "quoted.png" in scene.images
-    # 转发图片不作为媒体本体附带（媒体本体永不进前缀），仅保留 [附图 N 张] 文本
-    assert "forward.png" not in scene.images
+    assert scene.images == ["current.png", "quoted.png", "forward.png"]
     assert any(
         "[附图 1 张]" in s["text"] for s in scene.speakers if s["canonical_name"] == "转发消息"
     )
@@ -1060,3 +1059,15 @@ def test_build_messages_empty_envelope_unchanged():
         build_messages(**kwargs)[-1].content
         == build_messages(**kwargs, turn_envelope="")[-1].content
     )
+
+
+def test_forward_images_follow_direct_and_quoted_and_share_limit():
+    msgs = build_messages(
+        prompt="看图", image_urls=["direct", "same"],
+        quoted_image_urls=["same", "quoted"],
+        forward_image_urls=["f1", "f2", "f3"], forward_text="转发",
+        history=[], recent_messages=None, max_trigger_context_messages=5,
+        current_sender_name="A", current_user_id="1",
+    )
+    assert msgs[-1].image_urls == ["direct", "same", "quoted", "f1", "f2"]
+    assert "1 张图片未附带" in msgs[-1].content
