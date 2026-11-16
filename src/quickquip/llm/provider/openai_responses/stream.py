@@ -25,7 +25,7 @@ from typing import Any
 
 from quickquip.llm.provider.base import LLMProviderError, LLMResponse
 from quickquip.llm.provider.openai_responses.profiles import ResponsesProfile
-from quickquip.llm.provider.openai_responses.response import parse_responses_body
+from quickquip.llm.provider.openai_responses.response import _message_text, parse_responses_body
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +50,10 @@ _TOLERATED_EVENTS = frozenset(
         # 内置 image_generation 工具的进度事件族（官方语义事件）：codex 类
         # 后端会在服务端注入该工具（请求未声明也会出现）；产出条目由
         # response.py 提取为 generated_images 并从 native_blocks 剥除。
+        "response.web_search_call.in_progress",
+        "response.web_search_call.searching",
+        "response.web_search_call.completed",
+        "response.web_search_call.failed",
         "response.image_generation_call.in_progress",
         "response.image_generation_call.generating",
         "response.image_generation_call.completed",
@@ -259,7 +263,8 @@ def fold_stream_events(
     )
 
     content = "".join(streamed_content)
-    if content and content != response.text:
+    raw_text = _message_text(response.native_blocks, render_citations=False)
+    if content and content != raw_text:
         raise _malformed("流式正文与终态 items 不一致。")
     reasoning = "".join(streamed_reasoning)
     if reasoning and reasoning != _response_reasoning(response):

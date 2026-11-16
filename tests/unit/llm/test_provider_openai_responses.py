@@ -162,8 +162,8 @@ def test_payload_tools_declaration():
 _HOSTED_IMAGE_TOOL = {"type": "image_generation", "output_format": "png"}
 
 
-def test_payload_hosted_tools_declaration_appends_image_tool():
-    """codex-relay-hosted-tools：function specs 后追加 image_generation 声明。"""
+def test_payload_hosted_tools_declaration_appends_image_and_search_tools():
+    """hosted profile 在 function specs 后追加生图和搜索声明。"""
     payload = _payload(
         _request(
             [LLMConversationMessage(role="user", content="画一只猫")],
@@ -181,6 +181,7 @@ def test_payload_hosted_tools_declaration_appends_image_tool():
             "strict": False,
         },
         _HOSTED_IMAGE_TOOL,
+        {"type": "web_search"},
     ]
     assert payload["tool_choice"] == "auto"
     assert payload["parallel_tool_calls"] is True
@@ -198,7 +199,7 @@ def test_payload_hosted_tools_declares_on_bare_request():
         ),
         _config(responses_profile="codex-relay-hosted-tools"),
     )
-    assert payload["tools"] == [_HOSTED_IMAGE_TOOL]
+    assert payload["tools"] == [_HOSTED_IMAGE_TOOL, {"type": "web_search"}]
     assert "tool_choice" not in payload
     assert "parallel_tool_calls" not in payload
 
@@ -468,7 +469,7 @@ def test_parse_body_requires_completion():
 @pytest.mark.parametrize(
     "output",
     [
-        [{"type": "web_search_call", "id": "ws_1", "status": "completed"}],  # 未启用工具族
+        [{"type": "web_search_call", "id": "ws_1", "status": "completed"}],  # 缺少 action
         [{"type": "message", "role": "user", "content": []}],  # 非 assistant
         [{"type": "function_call", "call_id": "", "name": "t", "arguments": "{}"}],
         [
@@ -631,7 +632,7 @@ def test_stream_unknown_event_does_not_hide_unsupported_output(profile_id, item_
     terminal["output"].append(
         {"type": item_type, "call_id": "call_new", "name": "new_tool", "input": "hello"}
     )
-    with pytest.raises(LLMProviderError, match="不支持.*output item"):
+    with pytest.raises(LLMProviderError, match="不支持.*output item|畸形 web_search_call"):
         _fold(
             [
                 {"type": "response.future_progress"},
@@ -906,15 +907,15 @@ def test_codex_relay_hosted_tools_inherits_relay_bits():
         relay.recognize_relay_events,
         relay.reconcile_relay_items,
     )
-    assert hosted.hosted_tools == frozenset({"image_generation"})
+    assert hosted.hosted_tools == frozenset({"image_generation", "web_search"})
 
 
 def test_append_hosted_tools_dedupes_existing_type():
     """契约守卫：请求侧已含同型条目时不重复声明（防 tools 表达扩展叠加）。"""
     tools = _append_hosted_tools(
-        [dict(_HOSTED_IMAGE_TOOL)], frozenset({"image_generation"})
+        [dict(_HOSTED_IMAGE_TOOL)], frozenset({"image_generation", "web_search"})
     )
-    assert tools == [_HOSTED_IMAGE_TOOL]
+    assert tools == [_HOSTED_IMAGE_TOOL, {"type": "web_search"}]
 
 
 def _load_config(tmp_path: Path, provider_body: str):
@@ -1753,3 +1754,87 @@ def test_reasoning_effort_request_scope_overrides_provider_config():
         _config(reasoning_effort="high"),
     )
     assert payload["reasoning"] == {"effort": "low", "summary": "auto"}
+
+
+def _search_item(action=None):
+    return {"type": "web_search_call", "id": "ws_1", "status": "completed",
+            "action": action or {"type": "search", "queries": ["天气"],
+                "sources": [{"type": "url", "url": "https://example.test/weather"}]}}
+
+
+@pytest.mark.parametrize("action", [
+    None, {"type": "open_page", "url": "https://example.test/weather"},
+    {"type": "find_in_page", "url": "https://example.test/weather", "pattern": "天气"},
+])
+def test_search_response_preserves_native_items_and_replays(action):
+    item = _search_item(action)
+    message = {"type": "message", "role": "assistant", "content": [{
+        "type": "output_text", "text": "天气晴朗。", "annotations": [{
+            "type": "url_citation", "url": "https://example.test/weather",
+            "title": "天气", "start_index": 0, "end_index": 4,
+        }],
+    }]}
+    body = _completed_body([item, message])
+    response = parse_responses_body(body, provider_id="fake", fallback_model="test")
+    assert "https://example.test/weather" in response.text
+    assert [(s.title, s.url) for s in response.web_search.sources] == [
+        ("天气", "https://example.test/weather")]
+    assert response.native_blocks == [item, message]
+    replay = LLMConversationMessage(role="assistant", content=response.text,
+                                   native_content=response.native_blocks)
+    payload = _payload(_request([replay]))
+    assert payload["input"] == [item, message]
+    events = [
+        {"type": "response.output_text.delta", "delta": "天气晴朗。"},
+        {"type": "response.completed", "response": body},
+    ]
+    streamed = fold_stream_events(events, provider_id="fake", fallback_model="test",
+                                  profile=resolve_profile("openai-public"))
+    assert streamed.web_search == response.web_search
+
+
+def test_hosted_search_include_follows_tool_gate():
+    for enabled in (False, True):
+        payload = _payload(_request([LLMConversationMessage(role="user", content="搜索")],
+                                   allow_tool_calls=enabled),
+                           _config(responses_profile="codex-relay-hosted-tools"))
+        assert ("web_search_call.action.sources" in payload["include"]) == enabled
+        assert "reasoning.encrypted_content" in payload["include"]
+
+
+@pytest.mark.parametrize("action", [{"type": "unknown"}, {"type": "search", "queries": "bad"}])
+def test_search_rejects_unknown_or_malformed_actions(action):
+    with pytest.raises(LLMProviderError):
+        parse_responses_body(_completed_body([_search_item(action)]),
+                             provider_id="fake", fallback_model="test")
+
+
+def test_relay_search_and_function_call_reconcile_and_pair_replay():
+    items = [_search_item(), {"type": "function_call", "call_id": "call_1",
+                             "name": "get_identity", "arguments": "{}"}]
+    body = _completed_body(items)
+    events = [{"type": "response.output_item.done", "output_index": i, "item": item}
+              for i, item in enumerate(items)]
+    events.append({"type": "response.completed", "response": body})
+    response = fold_stream_events(events, provider_id="fake", fallback_model="test",
+                                 profile=resolve_profile("codex-relay-hosted-tools"))
+    assert [c.id for c in response.tool_calls] == ["call_1"]
+    assert response.web_search.queries == ["天气"]
+    messages = [LLMConversationMessage(role="assistant", content="",
+                                      native_content=response.native_blocks),
+                LLMConversationMessage(role="tool", content="结果", tool_call_id="call_1")]
+    assert _payload(_request(messages))["input"][:2] == items
+    corrupted = deepcopy(events)
+    corrupted[-1]["response"] = deepcopy(body)
+    corrupted[-1]["response"]["output"][0]["id"] = "other"
+    with pytest.raises(LLMProviderError):
+        fold_stream_events(corrupted, provider_id="fake", fallback_model="test",
+                           profile=resolve_profile("codex-relay-hosted-tools"))
+
+
+def test_search_action_sources_provide_links_without_annotations():
+    response = parse_responses_body(_completed_body([
+        _search_item(), {"type": "message", "role": "assistant", "content": [
+            {"type": "output_text", "text": "晴朗"}]}]),
+        provider_id="fake", fallback_model="test")
+    assert "https://example.test/weather" in response.text

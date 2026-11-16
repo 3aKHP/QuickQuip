@@ -55,6 +55,7 @@ _TOOL_IMAGE_NOTICE = TOOL_IMAGE_FLUSH_NOTICE
 # hosted_tools 必须是键集的子集（守护测试断言；失配属静态编程错误，直接
 # 索引不做运行时分支）。
 HOSTED_TOOL_WIRE: dict[str, dict[str, Any]] = {
+    "web_search": {"type": "web_search"},
     "image_generation": {"type": "image_generation", "output_format": "png"},
 }
 
@@ -138,6 +139,8 @@ def build_responses_payload(
         "temperature": request.temperature,
         "max_output_tokens": request.max_output_tokens,
     }
+    if request.allow_tool_calls and "web_search" in profile.hosted_tools:
+        payload["include"].append("web_search_call.action.sources")
     if request.system_prompt:
         payload["instructions"] = request.system_prompt
     if request.allow_tool_calls:
