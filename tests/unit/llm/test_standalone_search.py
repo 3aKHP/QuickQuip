@@ -120,6 +120,15 @@ def test_invalid_nested_operations_never_reach_transport(commands):
         validate_commands(commands)
 
 
+@pytest.mark.parametrize("operation", ["search_query", "image_query"])
+async def test_empty_domain_filter_is_a_valid_search_command(operation):
+    post = AsyncMock(return_value={"output": "search material"})
+    commands = {operation: [{"q": "synthetic", "domains": []}]}
+    result = await WebRun(post, "session", "model", []).execute(commands)
+    assert not result.is_error
+    assert post.call_args.args[0]["commands"] == commands
+
+
 async def test_real_search_material_is_not_replaced_by_ciphertext_and_errors_are_reported():
     post = AsyncMock(
         return_value={
@@ -415,6 +424,52 @@ async def test_service_supplies_remaining_budget_without_chat_history(monkeypatc
         context=ToolExecutionContext("scope", "user", "test", "test", "test-model"),
     )
     assert callable(loop.call_args.kwargs["result_space_probe"])
+
+
+async def test_service_search_material_fits_the_effective_context_window(monkeypatch):
+    from dataclasses import replace
+    from types import SimpleNamespace
+
+    from quickquip.llm.config import LLMConfig
+    from quickquip.llm.provider.base import LLMResponse
+    from quickquip.llm.request_budget import enforce_request_budget
+    from quickquip.llm.service import LLMService
+    from quickquip.llm.standalone_search import prepare_web_round
+    from quickquip.llm.tools import ToolExecutionContext
+
+    p = provider()
+    p.max_output_tokens = 1000
+    p.model_context_windows = {"test-model": 16_000}
+    r = request()
+    r.messages = [LLMConversationMessage("user", content="x" * 10_000)]
+    config = LLMConfig()
+    assert enforce_request_budget(config, p, r).ok
+    loop = AsyncMock()
+    monkeypatch.setattr("quickquip.llm.service.run_tool_call_loop", loop)
+    host = SimpleNamespace(
+        config=config,
+        tool_registry=None,
+        image_preprocessor=None,
+        _is_tool_discovery_enabled=lambda *args, **kwargs: False,
+        _get_enabled_tool_names=lambda **kwargs: ["web_run"],
+    )
+    await LLMService._run_tool_call_loop(
+        host, provider=p, request=r,
+        context=ToolExecutionContext("scope", "user", "test", "test", r.model),
+    )
+    probe = loop.call_args.kwargs["result_space_probe"]
+    call = LLMToolCall("call", "web_run", '{"open":[{"ref_id":"https://example.test"}]}')
+    response = LLMResponse(text="", model=r.model, tool_calls=[call])
+    run = WebRun(AsyncMock(return_value={"output": "x" * 30_000}), "session", r.model, [])
+    prepare_web_round(run, response, [call], probe(r))
+    result = await run.execute({"open": [{"ref_id": "https://example.test"}]})
+    assert result.search_metadata["truncated"]
+    continued = replace(r, messages=[
+        *r.messages,
+        LLMConversationMessage("assistant", tool_calls=[call]),
+        LLMConversationMessage("tool", content=result.content, tool_call_id=call.id),
+    ])
+    assert enforce_request_budget(config, p, continued).ok
 
 
 async def test_successful_description_preserves_partial_media_status():

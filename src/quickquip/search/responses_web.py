@@ -109,8 +109,6 @@ def validate_commands(commands: Any) -> None:
             for key, item in value.items():
                 check(item, properties[key], f"{path}.{key}")
         elif kind == "array":
-            if not value:
-                raise ValueError(f"{path}: 操作列表不能为空")
             for item in value:
                 check(item, schema["items"], path)
         elif kind == "string" and not value.strip() and path.rsplit(".", 1)[-1] != "market":
@@ -118,6 +116,10 @@ def validate_commands(commands: Any) -> None:
 
     if len(json.dumps(commands, ensure_ascii=False).encode()) > 32_768:
         raise ValueError("搜索参数超过大小上限")
+    if isinstance(commands, dict) and any(
+        isinstance(value, list) and not value for value in commands.values()
+    ):
+        raise ValueError("web.run: 操作列表不能为空")
     check(commands, _SCHEMA, "web.run")
     if not operation_count(commands):
         raise ValueError("搜索命令为空")

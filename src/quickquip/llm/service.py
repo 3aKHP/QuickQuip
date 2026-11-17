@@ -777,7 +777,7 @@ class LLMService(
             from quickquip.llm.request_budget import check_request_budget
 
             check = check_request_budget(self.config, provider, current_request)
-            return max(0, check.budget_limit - check.estimated_input_tokens)
+            return check.remaining_input_tokens
 
         return await run_tool_call_loop(
             provider=provider,

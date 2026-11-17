@@ -72,6 +72,27 @@ class RequestBudgetCheck:
         )
         return within_budget and within_window and self.wire_items <= MAX_WIRE_ITEMS
 
+    @property
+    def remaining_input_tokens(self) -> int:
+        """Additional input that fits both limits, including the growing margin."""
+        if not self.ok:
+            return 0
+        if self.context_window is None:
+            return self.budget_limit - self.estimated_input_tokens
+        current_margin = max(
+            _RESERVE_TOKENS, int(self.estimated_input_tokens * _ESTIMATE_MARGIN_RATIO)
+        )
+        window_before_margin = self.context_window + current_margin
+        low, high = self.estimated_input_tokens, self.budget_limit
+        while low < high:
+            candidate = (low + high + 1) // 2
+            margin = max(_RESERVE_TOKENS, int(candidate * _ESTIMATE_MARGIN_RATIO))
+            if candidate + _RESERVE_TOKENS + margin <= window_before_margin:
+                low = candidate
+            else:
+                high = candidate - 1
+        return low - self.estimated_input_tokens
+
 
 def resolve_input_budget(
     config: LLMConfig,
