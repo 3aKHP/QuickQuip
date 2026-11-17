@@ -9,6 +9,9 @@ mutable state here (remaining image budget) has this single owner.
 
 from __future__ import annotations
 
+import json
+from dataclasses import replace
+
 from quickquip.common.sensitive_filter import (
     SCRUB_PLACEHOLDER,
     get_filter as _get_sensitive_filter,
@@ -44,6 +47,7 @@ def _append_tool_notice(result: LLMToolResult, notice: str) -> LLMToolResult:
         call_id=result.call_id,
         name=result.name,
         content=content,
+        search_metadata=result.search_metadata,
         images=list(result.images),
         is_error=result.is_error,
     )
@@ -107,6 +111,11 @@ class ToolResultPipeline:
         result = self._apply_image_budget(result)
         if result.images and self._non_vision_model:
             result = await self._preprocess_images(call, result)
+        metadata = result.search_metadata
+        if (metadata and metadata.get("requires_image") and not result.images
+                and metadata.get("media_state") != "described"):
+            result = replace(result, is_error=True,
+                             search_metadata={**metadata, "status": "failed"})
         return result
 
     def _enforce_sensitive_result(self, call, result: LLMToolResult) -> LLMToolResult:
@@ -118,7 +127,10 @@ class ToolResultPipeline:
         sensitive = self._sensitive
         if sensitive is None or not sensitive.is_loaded or not result.content:
             return result
-        result_scan = sensitive.scan(result.content)
+        result_scan = sensitive.scan(
+            result.content + (json.dumps(result.search_metadata, ensure_ascii=False)
+                              if result.search_metadata else "")
+        )
         if result_scan.hits:
             _log_sensitive_hits(
                 f"tool_result:{call.name}", self._scope_key, result_scan,
@@ -162,11 +174,17 @@ class ToolResultPipeline:
                 call_id=result.call_id,
                 name=result.name,
                 content=result.content,
+                search_metadata=result.search_metadata,
                 images=accepted_images,
                 is_error=result.is_error,
             )
             self._remaining_image_budget -= len(accepted_images)
             if omitted_images:
+                if result.search_metadata:
+                    result = replace(result, search_metadata={
+                        **result.search_metadata, "status": "partial",
+                        "media_omitted": omitted_images,
+                    })
                 result = _append_tool_notice(
                     result,
                     f"MCP 工具省略了 {omitted_images} 个超出当前请求图片预算的图片项。",
@@ -181,6 +199,7 @@ class ToolResultPipeline:
                 content="\n".join(
                     part for part in (result.content, _TOOL_IMAGE_PREPROCESSING_UNAVAILABLE) if part
                 ),
+                search_metadata=result.search_metadata,
                 is_error=result.is_error,
             )
         descriptions = await self._image_preprocessor.describe_inline_images(
@@ -222,6 +241,12 @@ class ToolResultPipeline:
                 description_parts = []
                 failed_count = 0
         if description_parts or failed_count:
+            if description_parts and result.search_metadata:
+                result = replace(result, search_metadata={
+                    **result.search_metadata, "media_state": "described",
+                    "status": ("partial" if failed_count or
+                               result.search_metadata.get("media_omitted") else "completed"),
+                })
             notices = list(description_parts)
             if failed_count:
                 notices.append(f"{_TOOL_IMAGE_PREPROCESSING_FAILED}（{failed_count} 张）")
@@ -229,6 +254,7 @@ class ToolResultPipeline:
                 call_id=result.call_id,
                 name=result.name,
                 content="\n".join(part for part in [result.content, *notices] if part),
+                search_metadata=result.search_metadata,
                 is_error=result.is_error,
             )
         return result

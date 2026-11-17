@@ -47,6 +47,7 @@
 | 编号 | 决策 | 状态 | 替代记录 |
 |---|---|---|---|
 | [ADR-0004](0004-agent-execution-replay-delivery.md) | 分离执行记录、历史投影与消息交付 | Accepted | — |
+| [ADR-0031](0031-standalone-search-evidence.md) | 由客户端执行搜索并保存可回放材料 | Accepted | — |
 | [ADR-0030](0030-citation-display-projection.md) | 独立生成来源引用的显示投影 | Accepted | — |
 | [ADR-0026](0026-conversation-owned-memory.md) | 由主对话模型维护会话记忆 | Accepted | — |
 | [ADR-0027](0027-history-investigation-executor.md) | 群历史查询与专用调查执行器 | Accepted | — |

@@ -514,6 +514,9 @@ style_profile = "openai_family"
 # codex-http-relay 与 codex-relay-hosted-tools 五档恒等；ultra 一切渠道降
 # max）；留空不发送思考参数，
 # 即模型默认档。
+# codex-relay-standalone-search：保留生图，使用原生 web.run 调用 /alpha/search；
+# 搜索材料作为工具结果保存。需渠道同时支持 namespace 工具和独立搜索端点。
+# 选择该 Profile 后不声明 hosted web_search；工具许可仍约束搜索。
 # reasoning_effort = "high"
 # 注意：部分思考系模型只接受默认温度，如遇请求被拒可把 temperature 调回 1.0。
 timeout_seconds = 45

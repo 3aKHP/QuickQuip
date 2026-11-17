@@ -731,3 +731,27 @@ def test_prune_respects_active_epoch_floor(store: LLMStore, limit, tied_times):
         h.loop_id for h in handles[2:]
     }
     assert report.blocked_active_anchors == (() if limit == "age" else (anchor,))
+
+
+@pytest.mark.parametrize("retention", [ResultRetention.BOUNDED, ResultRetention.EPHEMERAL])
+def test_search_metadata_follows_tool_result_retention_in_sqlite(store, retention):
+    handle = _begin(store)
+    store.commit_turn(handle, _response("search"), _declarations(1), [])
+    execution_id = _declarations(1)[0].execution_id
+    store.mark_tool_started(handle, execution_id)
+    metadata = {"version": 1, "mode": "responses_standalone", "sources": [{"title": "SOURCE"}]}
+    store.finish_tool(
+        handle, execution_id,
+        ToolResultRecord(content="FACT", is_error=False, original_bytes=4,
+                         search_metadata=metadata), result_retention=retention,
+    )
+    with store._connect() as connection:
+        row = connection.execute(
+            "SELECT result_json FROM agent_tool_executions WHERE execution_id=?", (execution_id,),
+        ).fetchone()
+    payload = json.loads(row["result_json"])
+    if retention == ResultRetention.EPHEMERAL:
+        assert "search" not in payload and "SOURCE" not in row["result_json"]
+        assert payload["content"] == ""
+    else:
+        assert payload["search"] == metadata and payload["content"] == "FACT"

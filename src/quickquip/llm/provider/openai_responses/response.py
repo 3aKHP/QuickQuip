@@ -78,6 +78,11 @@ def validate_output_items(
         elif item_type == "reasoning":
             _validate_reasoning_item(item, provider_id)
         elif item_type == "function_call":
+            namespace = item.get("namespace")
+            if namespace not in (None, "functions") and not (
+                namespace == "web" and item.get("name") == "run"
+            ):
+                raise _malformed("Provider 返回未支持的 namespace。", provider_id)
             call_id = item.get("call_id")
             name = item.get("name")
             if not isinstance(call_id, str) or not call_id or not name:
@@ -209,7 +214,8 @@ def parse_responses_body(
     tool_calls = [
         LLMToolCall(
             id=str(item["call_id"]),
-            name=str(item["name"]),
+            name=("web_run" if item.get("namespace") == "web"
+                  and item["name"] == "run" else str(item["name"])),
             arguments_json=_arguments_json(item["arguments"]),
         )
         for item in items

@@ -59,6 +59,12 @@ class ResponsesProfile:
 
 
 PROFILES: dict[str, ResponsesProfile] = {
+    "codex-relay-standalone-search": ResponsesProfile(
+        profile_id="codex-relay-standalone-search",
+        wire_efforts=frozenset({"low", "medium", "high", "xhigh", "max"}),
+        service_tier=None, recognize_relay_events=True, reconcile_relay_items=True,
+        hosted_tools=RESPONSES_HOSTED_TOOLS["codex-relay-standalone-search"],
+    ),
     "openai-public": ResponsesProfile(
         profile_id="openai-public",
         # 官方 API 的 effort 词表按 2026-09 已核对范围收敛（low..xhigh）；

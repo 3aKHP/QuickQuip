@@ -97,6 +97,13 @@ Responses 的 `openai-public`、`codex-http-relay` 与 `codex-relay-hosted-tools
 
 `codex-relay-hosted-tools` Profile 继承 `codex-http-relay` 的全部行为，并在 `allow_tool_calls` 开启时由请求侧显式声明 `image_generation` 和 `web_search` 内置工具（追加进 tools 数组，无 function 工具的请求同样声明）；需要对话内生图和服务端搜索的渠道使用该档。搜索请求同时包含 `web_search_call.action.sources`；响应保留搜索原生条目供回放，并保存完整规范化来源引用，QQ 显示使用独立投影。搜索由模型自主选择，可能产生额外费用；渠道不支持时可切回 `codex-http-relay`。该档的普通工具对话使用 hosted 搜索引导，并从本地工具及发现目录中移除 `search_web`。当次请求禁用工具时，搜索声明及来源 include 同时关闭，含搜索的历史 Loop 降级为通用正文与工具事实投影，不回放关联原生推理。完整原生批次按 owner 校验保留，保存正文中的来源尾块统一生成，最多补充三条链接，显示层隐藏来源尾块；中间轮搜索按 Loop 和轮序记录。
 
+`codex-relay-standalone-search` Profile 保留 relay 档位、事件对账和 `image_generation`，通过原生 `web.run` 执行独立搜索。渠道须同时支持 namespace 工具及 `/alpha/search`。工具许可开启时直接提供搜索命令，移除竞争的 SearXNG 工具，不声明 hosted `web_search`。命令包括搜索、引用阅读、页内定位、链接点击、图片、PDF 截图和专业查询；实际端点需逐项验收。缺失截图图片时返回明确错误，不声称模型已看到图片。
+
+该路径保持 `store:false`。预算内明文作为函数工具结果保存并冻结，来源白名单元数据保存在结果 JSON 的 `search` 字段（自身 `version:1`）；旧结果没有该字段。原始响应与密文按 HTTP Trace 开关和保留策略处理。搜索 ID 隔离业务 session、owner 和 epoch；后端引用失效不会触发自动重新联网。每轮最多三个搜索调用，单次回复最多 64 个命令操作，结果同时受本地字节和剩余上下文预算约束。搜索图片复用工具图片预算，默认不向群发送。选择及状态契约见 [ADR-0031](adr/0031-standalone-search-evidence.md)。
+
+固定 schema 来源为 Codex 提交 `77873dd0d284aeba7ce849b995b28ee8f4498d73`，遵循 Apache-2.0，许可随包分发。维护者使用 `scripts/maintenance/generate_responses_web_schema.py` 从该提交生成候选产物，再做真实模型兼容验证。当前固定 schema 未声明实验性文献检索。
+
+
 Responses 对已消费事件的必要字段、流式正文与工具参数的一致性、终态状态及输出条目类型执行严格校验。不支持的输出条目（含工具条目）或内容类型会使调用失败。
 
 思考设置使用 low、medium、high、xhigh、max、ultra 六档。OpenAI Chat 按模型家族钳制；Claude 按代际选择 adaptive effort 或固定 budget 表；Gemini 按代际选择 thinkingLevel 或 thinkingBudget；Responses 使用自己的 profile 词表。Claude budget 至少为 1024，其余由映射规则照发，上游以 400 报告不支持的参数；钳制与照发决策记录节流日志。

@@ -1335,6 +1335,10 @@ class AgentRecordsStoreMixin:
             "retained_ranges": [list(rng) for rng in retained],
             "media_descriptions": list(result.media_descriptions),
         }
+        if result.search_metadata is not None:
+            metadata = _dumps(result.search_metadata)
+            if _utf8_bytes(metadata) <= 4096:
+                payload["search"] = json.loads(metadata)
         return _dumps(payload)
 
     @staticmethod

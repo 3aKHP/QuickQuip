@@ -46,6 +46,9 @@ async def run_tool_call_loop(
     effective_search_max_calls = max(
         1, min(search_max_calls_per_round, search_failsafe_max_calls_per_round)
     )
+    from quickquip.llm.standalone_search import prepare_web_run
+
+    context.web_search = prepare_web_run(provider, request, client)
     current_request = request
     counted_rounds = 0
     # ephemeral 工具触达标记（§8.2）：单调置位，此后本 Loop 的 Turn 原生
@@ -319,6 +322,12 @@ async def run_tool_call_loop(
             # 每轮刷新"当前请求剩余空间"（§8.1）：结果预算由当前 request
             # 实况推导，工具不自行从初始请求猜测。
             history_state.begin_round(result_space_probe(current_request))
+        from quickquip.llm.standalone_search import prepare_web_round
+
+        prepare_web_round(
+            context.web_search, response, selected_calls,
+            result_space_probe(current_request) if result_space_probe is not None else None,
+        )
         declared_names = {spec.name for spec in current_request.tools}
         for call in selected_calls:
             if request_guard is not None:

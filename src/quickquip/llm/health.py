@@ -253,9 +253,14 @@ async def build_health_report(
         provider, tools_allowed=config.runtime.tool_calling_enabled,
         local_search_enabled=config.auto_search.enabled,
     ) if provider is not None and provider.enabled else "none")
-    builtin_covered = search_mode in {"gemini_grounding", "responses_hosted"}
+    builtin_covered = search_mode in {
+            "gemini_grounding", "responses_hosted", "responses_standalone",
+        }
     search_needed = config.auto_search.enabled or "search_web" in tool_names
-    if search_env:
+    if search_mode == "responses_standalone":
+        search_status = "warn"
+        search_summary = "已选择独立搜索；推理探测不验证 alpha/search，请单独验收搜索端点"
+    elif search_env:
         search_status = "ok"
         search_summary = "搜索后端已配置"
     elif builtin_covered:
@@ -279,6 +284,8 @@ async def build_health_report(
                 "needed": search_needed,
                 "base_url_configured": bool(search_env),
                 "builtin_search_covered": builtin_covered,
+                **({"endpoint_probe": "not_run", "requires_namespace": True}
+                   if search_mode == "responses_standalone" else {}),
             },
         )
     )

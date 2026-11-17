@@ -380,6 +380,7 @@ class TurnRecorder:
                 execution_id,
                 ToolResultRecord(
                     content=result.content,
+                    search_metadata=result.search_metadata,
                     is_error=failed,
                     original_bytes=content_bytes,
                     # 重放按 status 区分 error 语义（§7.2 冻结表达）：
