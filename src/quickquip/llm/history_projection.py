@@ -450,7 +450,9 @@ def project_loops(
             else _decide_loop_path(loop, target=target, protocol=protocol)
         )
         if protocol == "openai_responses" and not responses_search_enabled and any(
-            block.get("type") == "web_search_call" for turn in loop.turns
+            (block.get("type") == "web_search_call" or
+             (block.get("type") == "function_call" and block.get("namespace") == "web"))
+            for turn in loop.turns
             for block in (_turn_native_blocks(turn) or [])
         ) and path == PATH_NATIVE:
             path, reason = PATH_STRUCTURED, "native_search_disabled"

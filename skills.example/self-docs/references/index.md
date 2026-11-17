@@ -122,6 +122,7 @@
 - `docs/dev/adr/0028-write-only-environment-management.md` → `references/docs-dev-adr-0028-write-only-environment-management.md` — ADR-0028：环境变量只写管理与运行时凭据快照 ｜ 状态：Superseded ｜ 替代记录：[0029-opt-in-environment-compatibility.md](docs-dev-adr-0029-opt-in-environment-compatibility.md) ｜ 关键词：.env
 - `docs/dev/adr/0029-opt-in-environment-compatibility.md` → `references/docs-dev-adr-0029-opt-in-environment-compatibility.md` — ADR-0029：显式启用环境管理并保留部署兼容性 ｜ 状态：Accepted ｜ 关键词：QUICKQUIP_ENV_MANAGEMENT_ENABLED、.env、# quickquip:literal、# quickquip:deleted NAME
 - `docs/dev/adr/0030-citation-display-projection.md` → `references/docs-dev-adr-0030-citation-display-projection.md` — ADR-0030：独立生成来源引用的显示投影 ｜ 状态：Accepted
+- `docs/dev/adr/0031-standalone-search-evidence.md` → `references/docs-dev-adr-0031-standalone-search-evidence.md` — ADR-0031：由客户端执行搜索并保存可回放材料 ｜ 状态：Accepted ｜ 关键词：codex-relay-standalone-search、web.run、alpha/search、web_run、store:false
 - `docs/dev/adr/README.md` → `references/docs-dev-adr-readme.md` — 架构决策记录 ｜ 关键词：NNNN-short-title.md、Proposed、Accepted、Rejected、Superseded、status、superseded_by
 - `docs/dev/adr/template.md` → `references/docs-dev-adr-template.md` — ADR 模板 ｜ 关键词：NNNN-short-title.md
 
@@ -133,7 +134,7 @@
 - `.github/pull_request_template.md` → `references/github-pull_request_template.md` — github-pull_request_template ｜ 关键词：Closes #<issue>、Refs #<issue>、.venv/bin/ruff check .、.venv/bin/python -m pytest -n auto、pnpm --dir frontend type-check、pnpm --dir frontend build
 - `prod.example/README.md` → `references/prod.example-readme.md` — 生产配置模板 ｜ 关键词：prod/、prod/docker-compose.yml、.env、sendkey.env.example、prod/sendkey.env、dockerfile: prod/Dockerfile、docker/Dockerfile.prod、prod.example/docker-compose.yml、prod.example/sendkey.env.example、scripts/deploy/
 - `scripts/deploy/README.md` → `references/scripts-deploy-readme.md` — QuickQuip Production Template ｜ 关键词：deploy-state.py、quickquip-prod、.env、QUICKQUIP_SEARXNG_BASE_URL、~/.ssh/config、%USERPROFILE%\.ssh\config、ssh quickquip-prod、exit、--host-alias quickquip-prod、-HostAlias quickquip-prod
-- `scripts/maintenance/README.md` → `references/scripts-maintenance-readme.md` — 数据与资产维护 ｜ 关键词：backfill_chat_archive.py、--dry-run、backfill_record_identities.py、sync_preset_skills.py、--apply、reset_niuniu_lengths.py、refresh_sts_lexicon.py
+- `scripts/maintenance/README.md` → `references/scripts-maintenance-readme.md` — 数据与资产维护 ｜ 关键词：backfill_chat_archive.py、--dry-run、backfill_record_identities.py、sync_preset_skills.py、--apply、reset_niuniu_lengths.py、generate_responses_web_schema.py、refresh_sts_lexicon.py
 - `scripts/ops/README.md` → `references/scripts-ops-readme.md` — 巡检与登录维护 ｜ 关键词：prod/sendkey.env、.env、check_bot_local.sh、check_bot.ps1、check_bot.sh、cron_check_bot.sh、host_metrics_collector.py、data/host_metrics.json、-Server、-RemoteDir
 - `scripts/README.md` → `references/scripts-readme.md` — 项目脚本 ｜ 关键词：prod/、bash scripts/deploy/deploy-v4.sh、scripts/deploy/deploy-v4.ps1、bash scripts/ops/check_bot_local.sh、ci/、check/、bash scripts/check/deep-cr-trigger.sh dev、git-hooks/、deploy/server/、deploy/legacy/
 

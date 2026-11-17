@@ -185,6 +185,7 @@ class ToolResultRecord:
     original_bytes: int
     retained_ranges: list[tuple[int, int]] = field(default_factory=list)
     media_descriptions: list[str] = field(default_factory=list)
+    search_metadata: dict[str, Any] | None = None
     status: ToolExecutionStatus = ToolExecutionStatus.SUCCEEDED
 
 

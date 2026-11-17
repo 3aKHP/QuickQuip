@@ -375,6 +375,7 @@ class ToolRegistry:
                 content=result.content.strip(),
                 images=list(result.images),
                 is_error=result.is_error,
+                search_metadata=result.search_metadata,
             )
 
         return LLMToolResult(

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from quickquip.llm.responses_capabilities import RESPONSES_HOSTED_TOOLS
+from quickquip.llm.responses_capabilities import (
+    RESPONSES_HOSTED_TOOLS, RESPONSES_STANDALONE_SEARCH,
+)
 
 from quickquip.llm.client_fingerprints.catalog import FingerprintRuntime
 
@@ -318,7 +320,8 @@ def provider_builtin_search_active(provider: ProviderConfig) -> bool:
     """
     return (provider.builtin_search and provider.protocol == "gemini") or (
         provider.protocol == "openai_responses"
-        and "web_search" in RESPONSES_HOSTED_TOOLS.get(provider.responses_profile, ())
+        and ("web_search" in RESPONSES_HOSTED_TOOLS.get(provider.responses_profile, ())
+             or provider.responses_profile in RESPONSES_STANDALONE_SEARCH)
     )
 
 

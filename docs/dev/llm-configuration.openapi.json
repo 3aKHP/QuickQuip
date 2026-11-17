@@ -376,6 +376,7 @@
                             "enum": [
                               "codex-http-relay",
                               "codex-relay-hosted-tools",
+                              "codex-relay-standalone-search",
                               "openai-public",
                               null
                             ],
@@ -598,6 +599,7 @@
                       "enum": [
                         "codex-http-relay",
                         "codex-relay-hosted-tools",
+                        "codex-relay-standalone-search",
                         "openai-public",
                         null
                       ],
@@ -1830,6 +1832,7 @@
                           "enum": [
                             "codex-http-relay",
                             "codex-relay-hosted-tools",
+                            "codex-relay-standalone-search",
                             "openai-public",
                             null
                           ],
@@ -2052,6 +2055,7 @@
                     "enum": [
                       "codex-http-relay",
                       "codex-relay-hosted-tools",
+                      "codex-relay-standalone-search",
                       "openai-public",
                       null
                     ],
@@ -2374,6 +2378,7 @@
                             "enum": [
                               "codex-http-relay",
                               "codex-relay-hosted-tools",
+                              "codex-relay-standalone-search",
                               "openai-public",
                               null
                             ],
@@ -2596,6 +2601,7 @@
                       "enum": [
                         "codex-http-relay",
                         "codex-relay-hosted-tools",
+                        "codex-relay-standalone-search",
                         "openai-public",
                         null
                       ],

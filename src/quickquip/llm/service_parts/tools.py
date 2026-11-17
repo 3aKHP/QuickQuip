@@ -152,6 +152,9 @@ class ToolMixin(McpLifecycleMixin):
                               and name in self._get_enabled_tool_names(
                                   context.chat_type, provider_id=context.provider_id,
                                   history_enabled=bool(getattr(context, "history", None))))
+        from quickquip.llm.standalone_search import register_web_tool
+
+        register_web_tool(self.tool_registry)
         self.tool_registry.register(
             LLMToolSpec(
                 name=SEARCH_TOOL_NAME,
@@ -304,7 +307,7 @@ class ToolMixin(McpLifecycleMixin):
         return provider is not None and resolve_search_mode(
             provider, tools_allowed=self.config.runtime.tool_calling_enabled,
             local_search_enabled=self.config.auto_search.enabled,
-        ) in {"gemini_grounding", "responses_hosted"}
+        ) in {"gemini_grounding", "responses_hosted", "responses_standalone"}
 
     def _get_enabled_tool_names(
         self,
@@ -320,7 +323,7 @@ class ToolMixin(McpLifecycleMixin):
             names = list(configured)
         else:  # append：默认白名单 + MCP 工具之上追加，opt-in 工具的启用路径
             names = [*DEFAULT_ENABLED_TOOLS, *sorted(self.mcp_tool_names), *configured]
-        names = list(dict.fromkeys(names))
+        names = [name for name in dict.fromkeys(names) if name != "web_run"]
         if not self.config.skills.enabled:
             skill_tools = {
                 ACTIVATE_SKILL_TOOL_NAME, READ_SKILL_RESOURCE_TOOL_NAME,
@@ -337,6 +340,15 @@ class ToolMixin(McpLifecycleMixin):
             # 内置搜索开启的 provider 会话移除 search_web，避免模型面前
             # 出现客户端与 provider 原生两条竞争的搜索路径。
             names = [name for name in names if name != SEARCH_TOOL_NAME]
+        if provider_id:
+            provider = (self.effective_request_provider(provider_id)
+                        if hasattr(self, "effective_request_provider")
+                        else self.config.providers.get(provider_id))
+            if provider is not None and resolve_search_mode(
+                provider, tools_allowed=self.config.runtime.tool_calling_enabled,
+                local_search_enabled=False,
+            ) == "responses_standalone":
+                names.append("web_run")
         return [name for name in names if self.tool_registry.has_tool(name)]
 
     def _get_always_loaded_tool_names(
@@ -346,7 +358,8 @@ class ToolMixin(McpLifecycleMixin):
         provider_id: str | None = None,
         history_enabled: bool = False,
     ) -> list[str]:
-        configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
+        configured = list(self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS)
+        configured.append("web_run")
         enabled = set(self._get_enabled_tool_names(
             chat_type=chat_type, provider_id=provider_id, history_enabled=history_enabled
         ))
@@ -382,7 +395,8 @@ class ToolMixin(McpLifecycleMixin):
         if TOOL_SEARCH_NAME not in enabled:
             return False
         enabled_set = set(enabled)
-        configured = self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS
+        configured = list(self.config.tools.always_loaded or DEFAULT_ALWAYS_LOADED_TOOLS)
+        configured.append("web_run")
         always_names = {
             name for name in configured
             if name in enabled_set and self.tool_registry.has_tool(name)

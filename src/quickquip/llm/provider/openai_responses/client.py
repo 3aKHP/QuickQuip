@@ -52,6 +52,35 @@ def _payload_wire_effort(payload: dict[str, Any]) -> str | None:
 
 
 class OpenAIResponsesProviderClient(BaseProviderClient):
+    async def search_web(
+        self, payload: dict[str, Any], request: LLMRequest,
+    ) -> dict[str, Any]:
+        """One bounded auxiliary HTTP attempt, with normal trace and credentials."""
+        import asyncio
+        from quickquip.search.responses_web import PROFILE_ID
+
+        if (self.config.responses_profile != PROFILE_ID or not request.allow_tool_calls
+                or not request.builtin_search
+                or not any(t.name == "web_run" for t in request.tools)):
+            raise LLMProviderError("当前 Profile 未提供独立搜索。")
+        headers = {k: v for k, v in self.config.headers.items()
+                   if k.lower() not in {"authorization", "content-type"}}
+        headers = self._assemble_headers(request, headers)
+        headers = {k: v for k, v in headers.items()
+                   if k.lower() not in {"authorization", "content-type"}}
+        headers.update({"authorization": f"Bearer {self._get_api_key()}",
+                        "content-type": "application/json"})
+        from quickquip.llm.provider.trace import trace_request_session
+        from quickquip.llm.client_fingerprints.trace_context import request_context
+        from quickquip.llm.client_fingerprints.assembly import uses_attempt_bindings
+
+        with (trace_request_session(request.session),
+              request_context(request, tracing=uses_attempt_bindings(self.config))):
+            async with asyncio.timeout(120):
+                return await self._post_json(
+                    self.config.base_url.rstrip("/") + "/alpha/search", headers, payload,
+                )
+
     def _profile(self):
         return resolve_profile(self.config.responses_profile or DEFAULT_PROFILE_ID)
 
@@ -106,6 +135,16 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
             raise LLMProviderError("请求覆盖参数与原生搜索许可不一致。")
         if not request.allow_tool_calls and payload.get("tools"):
             raise LLMProviderError("本次工具已禁用，请求覆盖参数不能声明工具。")
+        from quickquip.search.responses_web import PROFILE_ID, TOOL_NAME, namespace_spec
+
+        namespaces = [t for t in tools if t.get("type") == "namespace"]
+        expects_web = (self.config.responses_profile == PROFILE_ID and request.allow_tool_calls
+                       and request.builtin_search
+                       and any(t.name == TOOL_NAME for t in request.tools))
+        if not expects_web and any(i.get("namespace") == "web" for i in items):
+            raise LLMProviderError("独立搜索未启用，不能回放原生 namespace 状态。")
+        if namespaces != ([namespace_spec()] if expects_web else []):
+            raise LLMProviderError("请求覆盖参数与 namespace 工具许可不一致。")
         return url, headers, payload
 
     def _parse_response(self, data: dict[str, Any], fallback_model: str) -> LLMResponse:

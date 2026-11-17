@@ -21,6 +21,7 @@ dependencies = { file = ["requirements.txt"] }
 
 [tool.setuptools.package-data]
 "quickquip.sts" = ["*.json"]
+"quickquip.search" = ["responses_web_schema.json", "responses_web_description.txt", "responses_web_LICENSE.txt", "responses_web_NOTICE.txt"]
 "quickquip.llm.client_fingerprints" = ["defaults/*.toml"]
 
 [tool.ruff]

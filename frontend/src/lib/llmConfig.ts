@@ -73,7 +73,7 @@ export const PARAM_LABELS: Record<string, FieldLabel> = {
   builtin_search: { label: '内置搜索', hint: '仅 Gemini 协议在请求级生效。' },
   gemini_empty_response_recovery: { label: 'Gemini 空回复补正', hint: '达到输出上限且无正文、工具调用或图片时，凭续接 token 最多补正一次；输出额度最多翻倍。默认关闭。' },
   gemini_empty_response_recovery_max_output_tokens: { label: 'Gemini 补正输出额度上限', unit: 'token', hint: '补正请求中推理与回答的合计额度上限；仅开启空回复补正时生效。' },
-  responses_profile: { label: 'Responses 端点形态', hint: '仅 OpenAI Responses 协议使用。' },
+  responses_profile: { label: 'Responses 端点形态', hint: '仅 OpenAI Responses 协议使用；standalone-search 提供客户端执行的 web.run，要求渠道支持 alpha/search。' },
   retry_max_attempts: { label: '最大重试次数', hint: '失败后的额外尝试次数，0 表示不重试。' },
   retry_base_delay: { label: '重试基础延迟', unit: '秒' },
   retry_jitter: { label: '重试抖动', hint: '0–1，延迟随机化比例。' },

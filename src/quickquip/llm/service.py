@@ -777,7 +777,7 @@ class LLMService(
             from quickquip.llm.request_budget import check_request_budget
 
             check = check_request_budget(self.config, provider, current_request)
-            return max(0, check.budget_limit - check.estimated_input_tokens)
+            return check.remaining_input_tokens
 
         return await run_tool_call_loop(
             provider=provider,
@@ -792,7 +792,8 @@ class LLMService(
             tool_registry=self.tool_registry,
             runtime_config=self.config.runtime,
             logger=logger,
-            search_tool_name=SEARCH_TOOL_NAME,
+            search_tool_name=("web_run" if provider.responses_profile ==
+                              "codex-relay-standalone-search" else SEARCH_TOOL_NAME),
             search_failsafe_max_rounds=SEARCH_TOOL_FAILSAFE_MAX_ROUNDS,
             search_failsafe_max_calls_per_round=SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND,
             search_max_calls_per_round=self.config.auto_search.search_max_calls_per_round,
@@ -813,7 +814,8 @@ class LLMService(
             tool_discovery_max_loaded_tools=self.config.tools.discovery_max_loaded_tools,
             image_preprocessor=self.image_preprocessor,
             result_space_probe=(
-                _result_space_probe if getattr(context, "history", None) else None
+                _result_space_probe if (history_enabled or provider.responses_profile
+                                        == "codex-relay-standalone-search") else None
             ),
         )
 
@@ -1286,7 +1288,9 @@ class LLMService(
             provider, tools_allowed=self.config.runtime.tool_calling_enabled,
             local_search_enabled=self.config.auto_search.enabled,
         )
-        builtin_search_active = search_mode in {"gemini_grounding", "responses_hosted"}
+        builtin_search_active = search_mode in {
+            "gemini_grounding", "responses_hosted", "responses_standalone",
+        }
         history_enabled = self._effective_history_enabled(
             request.chat_id, request.chat_type
         )

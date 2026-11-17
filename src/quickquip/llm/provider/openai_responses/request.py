@@ -120,6 +120,11 @@ def _serialize_tools(
     hosted = profile.hosted_tools
     if not request.builtin_search:
         hosted = hosted - {"web_search"}
+    from quickquip.search.responses_web import PROFILE_ID, TOOL_NAME, namespace_spec
+
+    if profile.profile_id == PROFILE_ID:
+        tools = [namespace_spec() if spec.name == TOOL_NAME else tool
+                 for spec, tool in zip(request.tools, tools, strict=True)]
     return _append_hosted_tools(tools, hosted)
 
 
@@ -141,7 +146,9 @@ def build_responses_payload(
     payload: dict[str, Any] = {
         "model": request.model,
         "input": serialize_input_items(
-            request.messages, prepared_images, provider_id=config.id
+            request.messages, prepared_images, provider_id=config.id,
+            profile_id=(profile.profile_id if request.allow_tool_calls
+                        and request.builtin_search else "")
         ),
         "store": STORE,
         "stream": stream,
@@ -177,6 +184,7 @@ def serialize_input_items(
     prepared_images: list[list[LLMImageInput]],
     *,
     provider_id: str,
+    profile_id: str = "",
 ) -> list[dict[str, Any]]:
     declared: set[str] = set()
     answered: set[str] = set()
@@ -248,7 +256,9 @@ def serialize_input_items(
                     {
                         "type": "function_call",
                         "call_id": _declare(call.id),
-                        "name": call.name,
+                        **({"name": "run", "namespace": "web"}
+                           if call.name == "web_run" and profile_id ==
+                           "codex-relay-standalone-search" else {"name": call.name}),
                         "arguments": call.arguments_json or "{}",
                     }
                 )
