@@ -27,12 +27,11 @@ _P_TRACE = 'src/quickquip/llm/provider/trace.py'
 _P_MEDIA = 'src/quickquip/llm/provider/media_truncator.py'
 _P_SEARCH = 'src/quickquip/search/web_search.py'
 _P_DEPLOY = 'src/quickquip/configuration/deployment.py'
-_P_DEPLOY_STATE = 'scripts/deploy/server/deploy-state.py'
 _P_HOST_FILES = 'src/quickquip/config_sync/host_files.py'
 _P_SUPERVISOR = 'src/quickquip/configuration/process_supervisor.py'
 
 SERVICE_IDS = {'quickquip': 'bot', 'web-admin': 'web', 'env-agent': 'env-agent',
-               'llbot': 'llbot', 'searxng': 'searxng', 'config-init': 'config-init'}
+               'searxng': 'searxng', 'config-init': 'config-init'}
 TEMPLATE_FILES = ('prod.example/docker-compose.yml', 'docker-compose.example.yml')
 _INTERPOLATION = re.compile(r'\$\{([A-Za-z_][A-Za-z0-9_]*)(?::[-?][^}]*)?\}')
 BUILD_TEMPLATES = {
@@ -111,13 +110,10 @@ CATALOG = {
     'PORT': _entry('Bot 服务监听端口；进程启动时读取', 'int', ['runtime.bot'],
                    [_code('framework.nonebot', path=_P_NONEBOT,
                           target_kind='config_field')]),
-    'ONEBOT_ACCESS_TOKEN': _entry('OneBot 连接访问令牌；Bot 启动与 LLBot 部署配置写入使用',
+    'ONEBOT_ACCESS_TOKEN': _entry('OneBot 连接访问令牌；Bot 启动时读取，两端配置同值',
                                   'secret', ['runtime.bot'],
                                   [_code('framework.onebot', path=_P_ONEBOT,
-                                         target_kind='config_field'),
-                                   _code('configuration.deploy', path=_P_DEPLOY_STATE,
-                                         action='redeploy', target_service='llbot',
-                                         delivery='config_write')],
+                                         target_kind='config_field')],
                                   default_present=True, default_origin='compose_template'),
     'ONEBOT_WS_URLS': _entry('OneBot 正向 WebSocket 地址列表；Bot 启动时读取', 'list',
                              ['runtime.bot'],
@@ -130,13 +126,10 @@ CATALOG = {
     'ONEBOT_API_ROOTS': _entry('OneBot API 根地址列表；Bot 启动时读取', 'list', ['runtime.bot'],
                                [_code('framework.onebot', path=_P_ONEBOT,
                                       target_kind='config_field')]),
-    'QQ_ACCOUNT': _entry('Bot QQ 账号；Bot 自身账号识别与 LLBot 登录映射使用', 'string',
+    'QQ_ACCOUNT': _entry('可选的 Bot QQ 账号；用于报告识别 Bot 自身发言与巡检核对账号', 'string',
                          ['runtime.bot'],
                          [_code('chat.period_serializer', path=_P_PERIOD),
-                          _code('compose.llbot', path='prod.example/docker-compose.yml',
-                                action='restart_or_recreate', target_service='llbot',
-                                target_kind='environment_name', target_name='QUICK_LOGIN_QQ',
-                                delivery='container_env', required=True)],
+                          _code('operations.onebot', path='scripts/ops/check_bot.sh')],
                          suggest=True),
     # 运行与内置功能 — 管理与会话
     'WEB_ADMIN_HOST': _entry('Web 管理后台监听地址；Web 进程启动时读取', 'string',
@@ -362,12 +355,6 @@ CATALOG = {
                                     suggest=True, default_present=True,
                                     default_origin='compose_template'),
     # 内部项（编排/进程内部，不提供根 .env 新增建议）
-    'QUICK_LOGIN_QQ': _entry('LLBot 登录账号；由 QQ_ACCOUNT 经编排映射注入', 'string',
-                             ['runtime.bot'],
-                             [_code('compose.llbot', path='prod.example/docker-compose.yml',
-                                    action='restart_or_recreate', target_service='llbot',
-                                    delivery='container_env')],
-                             internal=True),
     'PYTHONPATH': _entry('容器内 Python 路径；编排固定', 'string', ['runtime.framework'],
                          [_code('compose', path='prod.example/docker-compose.yml',
                                 action='edit_compose_then_recreate',

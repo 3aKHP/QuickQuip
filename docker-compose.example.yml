@@ -1,5 +1,5 @@
 # ── QuickQuip Docker Compose ─────────────────────────────────────────────
-# 在项目根按 .env.example 创建 .env，填写账号、凭据和功能配置后运行：
+# 在项目根按 .env.example 创建 .env，填写自备 OneBot 的连接配置后运行：
 #   docker compose -f docker-compose.example.yml up -d
 #
 # 启动 Bot、Web Admin 及其依赖：
@@ -30,28 +30,6 @@ services:
       - environment-control:/run/quickquip-environment
     restart: unless-stopped
 
-  # ── QQ 协议适配器（LLBot）───────────────────────────────────────────────
-  # 参考：https://github.com/LLOneBot/LuckyLilliaBot
-  # 登录态保存在 llbot-qq/，切勿丢失否则 QQ 视作新设备。
-  llbot:
-    image: initialencounter/llonebot:v7.12.14-7.3.2-45758  # pin 说明见 docs/admin/onebot-adapters.md 的 LLBot profile
-    container_name: llbot
-    entrypoint:
-      - /bin/sh
-      - -c
-      - "(sleep 5 && echo 'nameserver 127.0.0.11' > /etc/resolv.conf && echo 'options ndots:0' >> /etc/resolv.conf) & exec /bin/llonebot-service"
-    environment:
-      - QUICK_LOGIN_QQ=${QQ_ACCOUNT:?请设置 QQ 号}
-      - TZ=Asia/Shanghai
-    ports:
-      - "127.0.0.1:3001:3001"       # OneBot WebSocket（正向，备用）
-      - "127.0.0.1:3080:3080"       # WebUI（扫码登录 / 配置管理）
-    volumes:
-      - ./llbot-qq:/root/.config/QQ        # 登录态持久化（关键）
-      - ./llbot-data:/root/llonebot         # 配置文件 + 运行时数据
-    restart: unless-stopped
-
-  # ── 联网搜索（SearXNG）──────────────────────────────────────────────────
   # 联网搜索使用此服务，自动搜索由 LLM 配置的 settings.auto_search.enabled 控制。
   searxng:
     image: ghcr.io/searxng/searxng:latest
@@ -88,8 +66,6 @@ services:
     depends_on:
       env-agent:
         condition: service_healthy
-      llbot:
-        condition: service_started
       searxng:
         condition: service_started
       config-init:
@@ -103,7 +79,8 @@ services:
       DRIVER: "${DRIVER:-~fastapi+~websockets}"
       HOST: "0.0.0.0"
       PORT: "8080"
-      ONEBOT_WS_URLS: '${ONEBOT_WS_URLS:-["ws://llbot:3001/"]}'
+      # 正向 WebSocket 填写容器可达的协议端地址。反向 WebSocket 使用空列表。
+      ONEBOT_WS_URLS: '${ONEBOT_WS_URLS:-[]}'
       ONEBOT_ACCESS_TOKEN: "${ONEBOT_ACCESS_TOKEN:-}"
       SEARXNG_BASE_URL: "${QUICKQUIP_SEARXNG_BASE_URL:-http://searxng:8080}"
     shm_size: "1gb"
