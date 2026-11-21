@@ -340,10 +340,20 @@ configuration_health() {
             "$started" >/dev/null 2>&1
 }
 connection_health() {
-    local release="$1" status=UNCONFIGURED
-    if [ -f "$Root/scripts/ops/check_bot.sh" ]; then
-        status="$(REMOTE_DIR="$Root" QUICKQUIP_OPS_RELEASE="$release" \
-            bash "$Root/scripts/ops/check_bot.sh" status)" || return 1
+    local release="$1" status=UNCONFIGURED check_script="" api_url=""
+    if [ -f "$Root/prod/sendkey.env" ]; then
+        api_url="$(bash -c 'source "$1" >/dev/null 2>&1; printf "%s" "${ONEBOT_STATUS_API_URL:-}"' _ "$Root/prod/sendkey.env")" || api_url=""
+    fi
+    if [ -n "$api_url" ]; then
+        if [ -n "${Incoming:-}" ] && [ -f "$Incoming/shared/scripts/ops/check_bot.sh" ]; then
+            check_script="$Incoming/shared/scripts/ops/check_bot.sh"
+        elif [ -f "$Root/scripts/ops/check_bot.sh" ] && grep -q 'ONEBOT_STATUS_API_URL' "$Root/scripts/ops/check_bot.sh"; then
+            check_script="$Root/scripts/ops/check_bot.sh"
+        fi
+        if [ -n "$check_script" ]; then
+            status="$(REMOTE_DIR="$Root" QUICKQUIP_OPS_RELEASE="$release" \
+                bash "$check_script" status)" || return 1
+        fi
     fi
     case "$status" in
         ONLINE) return 0 ;;

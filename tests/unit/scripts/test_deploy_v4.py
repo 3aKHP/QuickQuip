@@ -1198,3 +1198,68 @@ def test_confirmation_failure_retains_commit_and_recovery_material(deployment):
     assert (inbox / 'remote-deploy-v4.sh').exists()
     calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
     assert not any('recover' in call for call in calls)
+
+
+@pytest.mark.parametrize("legacy_status", ["IDLE", "OFFLINE"])
+def test_rollback_recovery_ignores_restored_legacy_check_bot(deployment, legacy_status):
+    root, inbox, _ = deployment
+    legacy_ops = root / "scripts/ops"
+    legacy_ops.mkdir(parents=True)
+    legacy_script = legacy_ops / "check_bot.sh"
+    legacy_script.write_text(f"#!/bin/bash\necho {legacy_status}\n")
+    legacy_script.chmod(0o700)
+    incoming_ops = inbox / "shared/scripts/ops"
+    incoming_ops.mkdir(parents=True)
+    incoming_script = incoming_ops / "check_bot.sh"
+    incoming_script.write_text("#!/bin/bash\n# ONEBOT_STATUS_API_URL\necho ONLINE\n")
+    incoming_script.chmod(0o700)
+
+    result = run_deploy(deployment, FAIL_UP="new", DEPLOY_HEALTH_TIMEOUT="3")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "RECOVERY SUCCEEDED" in result.stdout
+    assert "RECOVERY FAILED" not in result.stdout
+    assert (root / "current").readlink() == Path("releases") / OLD
+    assert legacy_script.read_text() == f"#!/bin/bash\necho {legacy_status}\n"
+
+
+def test_connection_health_uses_incoming_check_bot_when_configured(deployment):
+    root, inbox, _ = deployment
+    (root / "prod/sendkey.env").write_text("ONEBOT_STATUS_API_URL=http://onebot.test:3000\n")
+    legacy_ops = root / "scripts/ops"
+    legacy_ops.mkdir(parents=True)
+    (legacy_ops / "check_bot.sh").write_text("#!/bin/bash\necho OFFLINE\n")
+    incoming_ops = inbox / "shared/scripts/ops"
+    incoming_ops.mkdir(parents=True)
+    trace = root / "check-trace"
+    incoming_script = incoming_ops / "check_bot.sh"
+    incoming_script.write_text(
+        "#!/bin/bash\n"
+        "# ONEBOT_STATUS_API_URL\n"
+        f'echo "$QUICKQUIP_OPS_RELEASE:$1" >> "{trace}"\n'
+        'echo "${TEST_CHECK_STATUS:-ONLINE}"\n'
+    )
+    incoming_script.chmod(0o700)
+
+    ok = run_deploy(deployment, TEST_CHECK_STATUS="ONLINE", DEPLOY_HEALTH_TIMEOUT="3")
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    assert f"{NEW}:status" in trace.read_text().splitlines()
+
+
+def test_connection_health_fails_deploy_when_configured_check_bot_reports_offline(deployment):
+    root, inbox, _ = deployment
+    (root / "prod/sendkey.env").write_text("ONEBOT_STATUS_API_URL=http://onebot.test:3000\n")
+    incoming_ops = inbox / "shared/scripts/ops"
+    incoming_ops.mkdir(parents=True)
+    incoming_script = incoming_ops / "check_bot.sh"
+    incoming_script.write_text(
+        "#!/bin/bash\n"
+        "# ONEBOT_STATUS_API_URL\n"
+        'if [ "$QUICKQUIP_OPS_RELEASE" = "' + NEW + '" ]; then echo OFFLINE; else echo ONLINE; fi\n'
+    )
+    incoming_script.chmod(0o700)
+
+    failed = run_deploy(deployment, DEPLOY_HEALTH_TIMEOUT="1")
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+    assert "health FAILED" in failed.stdout
+    assert "RECOVERY SUCCEEDED" in failed.stdout
+    assert (root / "current").readlink() == Path("releases") / OLD

@@ -108,7 +108,7 @@ def status(base, token):
 
 
 try:
-    token = sys.stdin.read() or os.getenv("ONEBOT_ACCESS_TOKEN", "")
+    token = sys.stdin.read() or os.getenv("ONEBOT_V11_ACCESS_TOKEN") or os.getenv("ONEBOT_ACCESS_TOKEN", "")
     print(status(sys.argv[1], token))
 except (OSError, ValueError, KeyError, TypeError):
     print("UNKNOWN")

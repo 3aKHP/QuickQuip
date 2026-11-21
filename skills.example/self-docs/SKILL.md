@@ -49,7 +49,7 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 | 请求身份、客户端 Profile 与模板覆盖 | `references/docs-admin-client-fingerprints.md` |
 | 全局管理员配置与权限 | `references/docs-admin-global-admins.md` |
 | 游戏系统管理与配置 | `references/docs-admin-game-config.md` |
-| OneBot 适配器状态与选择 | `references/docs-admin-onebot-adapters.md` |
+| OneBot V11 接入、功能要求、旧部署迁移与兼容记录 | `references/docs-admin-onebot-adapters.md` |
 | NapCat → LLBot 迁移 | `references/docs-admin-migration-napcat-to-llbot.md` |
 | 记录身份迁移与验收 | `references/docs-admin-record-identities.md` |
 | 敏感词过滤器 | `references/docs-admin-sensitive-filter.md` |
@@ -80,6 +80,6 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 | 发布 PR 模板（dev → main） | `references/github-pull_request_template-release.md` |
 | 生产配置模板 | `references/prod.example-readme.md` |
 | 生产运维脚本、部署事务细节 | `references/scripts-deploy-readme.md` |
-| 巡检、登录与指标采集 | `references/scripts-ops-readme.md` |
+| Bot 在线状态巡检与宿主机指标采集 | `references/scripts-ops-readme.md` |
 | 数据与资产维护 | `references/scripts-maintenance-readme.md` |
 | 全部页面索引（标题 + 关键词） | `references/index.md` |
