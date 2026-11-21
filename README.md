@@ -47,7 +47,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 - **Python** ≥ 3.11
 - **NoneBot2** + **OneBot V11 适配器**
-- OneBot V11 协议实现端（当前部署模板默认 [LLBot](https://github.com/LLOneBot/LuckyLilliaBot) 7.3.2；各适配器状态与选择见 [docs/admin/onebot-adapters.md](docs/admin/onebot-adapters.md)）
+- 自备已登录 QQ 的 OneBot V11 协议端。连接方法和功能要求见[接入 OneBot V11 协议端](docs/admin/onebot-adapters.md)。
 
 ### 安装步骤
 
@@ -81,12 +81,14 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 3. **配置环境变量**
 
-   参考 [`.env.example`](.env.example) 在项目根目录创建 `.env`，按[部署指南](docs/admin/deployment.md)配置 OneBot 连接。以下是本机运行的基础配置片段：
+   参考 [`.env.example`](.env.example) 在项目根目录创建 `.env`，按[OneBot 接入说明](docs/admin/onebot-adapters.md#连接-quickquip)填写连接地址和令牌。以下示例使用同机的正向 WebSocket，端口按协议端配置填写：
 
    ```env
    DRIVER=~fastapi+~websockets
    HOST=0.0.0.0
    PORT=8080
+   ONEBOT_WS_URLS=["ws://127.0.0.1:3001/"]
+   ONEBOT_ACCESS_TOKEN=replace_with_your_token
    SEARXNG_BASE_URL=http://127.0.0.1:8888
    ```
 
@@ -97,8 +99,6 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
    ```bash
    docker compose -f docker-compose.example.yml up -d searxng
    ```
-
-   注意：compose 解析时 `QQ_ACCOUNT` 为必填插值（llbot 服务 `${QQ_ACCOUNT:?}`）；若 `.env` 未设置（仅本机源码跑 bot 的场景），需临时设置或注释掉 llbot 服务。
 
    默认暴露到 `http://127.0.0.1:8888`，开启 JSON 搜索接口。
 
@@ -175,7 +175,7 @@ QuickQuip（双 Q 谐音 = QQ + Quip/妙语）是一个**轻量级、规则驱�
 
 **从 1.16.3 升级到 1.16.4**：本版需要停服迁移配置与运行存储。先停止旧 Bot/Web 并备份，将配置和数据放入新版包后，在包目录执行 `python\python.exe -m quickquip.llm.config_cli migrate-storage --services-stopped`，再运行 `start.bat`。各部署方式的完整步骤与回退见[存储迁移](docs/admin/storage-migration.md)。
 
-Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 前端和 Playwright Chromium。解压后运行 `start.bat`，首次运行会从示例文件生成 `.env`、常用 `config/*.toml`、`config/personas/` 与资料文件并暂停，LLM 数据库由初始化／迁移流程创建；请至少在 `.env` 中填写 `WEB_ADMIN_PASSWORD`、OneBot 连接配置和需要的 API key，再次运行 `start.bat` 启动。
+Release 中的 `QuickQuip-*-windows-x64.zip` 内置 Python、依赖、Web Admin 前端和 Playwright Chromium。解压后运行 `start.bat`，首次运行会从示例文件生成 `.env`、常用 `config/*.toml`、`config/personas/` 与资料文件并暂停，LLM 数据库由初始化／迁移流程创建；请至少在 `.env` 中填写 `WEB_ADMIN_PASSWORD`、[自备协议端的连接配置](docs/admin/onebot-adapters.md#连接-quickquip)和需要的 API key，再次运行 `start.bat` 启动。
 
 保持启动窗口运行，浏览器打开 `http://127.0.0.1:5104/ops/`，输入刚设置的管理口令。启用 AI 对话时接着按[首次启用 LLM](docs/admin/llm-configuration.md#首次启用-llm)操作。懒人包中的 Python 命令使用解压目录内的 `python\python.exe`。
 
@@ -238,7 +238,7 @@ src/
 | [docs/user/private-commands.md](docs/user/private-commands.md) | 私聊指令速查 |
 | [docs/admin/installation.md](docs/admin/installation.md) | 部署分类与四种组合的安装入口 |
 | [docs/admin/deployment.md](docs/admin/deployment.md) | 云端 Docker 部署指南 |
-| [docs/admin/onebot-adapters.md](docs/admin/onebot-adapters.md) | OneBot 适配器状态与选择 |
+| [docs/admin/onebot-adapters.md](docs/admin/onebot-adapters.md) | OneBot 接入、功能要求与旧部署迁移 |
 | [docs/admin/configuration.md](docs/admin/configuration.md) | 完整配置参考 |
 | [docs/admin/web-admin.md](docs/admin/web-admin.md) | Web 管理后台 |
 | [docs/admin/skills.md](docs/admin/skills.md) | Skill 系统部署与安全模型 |

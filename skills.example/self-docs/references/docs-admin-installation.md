@@ -18,7 +18,7 @@
 - **源码**：直接使用主机上的 Python 环境运行应用。Windows 懒人包使用随包 Python，归入同一类主机进程运行方式。
 - **Docker**：在容器内运行应用，项目模板使用 Docker Compose 管理服务。从源码构建镜像、挂载 Python 源码的 hybrid 部署也归入此类。
 
-LLBot、SearXNG 和 MCP 服务可以分别选择自己的运行方式。例如，主机上的 Python Bot 连接容器中的 LLBot，QuickQuip 仍属于源码运行。
+部署者自行安装和管理 OneBot V11 协议端。OneBot、SearXNG 和 MCP 服务可以分别选择运行方式。例如，主机上的 Python Bot 可以连接容器中的协议端。
 
 | 组合 | 应用运行位置与方式 | 安装入口 |
 |---|---|---|
@@ -38,7 +38,7 @@ DRIVER=~fastapi+~websockets
 ONEBOT_WS_URLS=["ws://127.0.0.1:3001/"]
 ```
 
-在协议端填写与 `.env` 相同的 `ONEBOT_ACCESS_TOKEN`。反向 WebSocket 与其他连接方式见 [OneBot 连接拓扑](onebot-adapters.md#quickquip-的-onebot-v11-边界)。
+在协议端填写与 `.env` 相同的 `ONEBOT_ACCESS_TOKEN`。反向 WebSocket 与其他连接方式见 [OneBot 接入说明](onebot-adapters.md#连接-quickquip)。
 
 ## 云端源码安装
 
@@ -69,7 +69,7 @@ cp .env.example .env
 cp -r config/personas.example config/personas
 ```
 
-编辑根 `.env`，填写 `QQ_ACCOUNT`、`ONEBOT_ACCESS_TOKEN`、`WEB_ADMIN_PASSWORD` 和自己的 `SEARXNG_SECRET`，启用模型时再填写相应 API key。根 Compose 模板提供容器间的 OneBot 和搜索地址；从源码配置迁入时，核对 `ONEBOT_WS_URLS` 与 `QUICKQUIP_SEARXNG_BASE_URL`，容器中的 `127.0.0.1` 指向容器自身。
+编辑根 `.env`，设置 `QUICKQUIP_DEPLOY_RUNTIME=docker`、`WEB_ADMIN_PASSWORD` 和自己的 `SEARXNG_SECRET`。启动并登录自备协议端，按[OneBot 接入说明](onebot-adapters.md#连接-quickquip)配置正向或反向 WebSocket。正向地址须从 Bot 容器可达。若复用源码配置，也请核对搜索地址，根 Compose 模板内置 SearXNG，通常可沿用默认值。
 
 在同一项目根目录启动：
 
@@ -81,15 +81,17 @@ docker compose -f docker-compose.example.yml logs --tail 80 quickquip web-admin
 
 模板先通过 `config-init` 初始化配置，再启动 Bot 和 Web；该初始化服务成功后显示退出码 `0`，其他服务保持运行。已有数据库升级按[存储迁移](storage-migration.md)执行。
 
-打开 `http://127.0.0.1:3080`，在 LLBot 中扫码登录并启用正向 WebSocket，端口使用 `3001`，token 与根 `.env` 的 `ONEBOT_ACCESS_TOKEN` 相同。连接方式和适配器版本见 [OneBot 说明](onebot-adapters.md)。在测试群发送“早安”，收到规则回复后，打开 `http://127.0.0.1:5104/ops/` 登录后台，按[首次启用 LLM](llm-configuration.md#首次启用-llm)继续配置。
+在 QuickQuip 日志中确认账号连上，再在测试群发送“早安”。收到规则回复后，打开 `http://127.0.0.1:5104/ops/` 登录后台，按[首次启用 LLM](llm-configuration.md#首次启用-llm)继续配置。
 
-根模板将 `config/`、`data/`、`llbot-qq/` 和 `llbot-data/` 保存在当前项目。按模板注释启用可选的资料和 Skill 挂载。修改根 `.env` 后，在项目根目录重新创建应用容器：
+根模板将应用的 `config/` 和 `data/` 保存在当前项目。按模板注释启用可选的资料和 Skill 挂载。修改根 `.env` 后，在项目根目录重新创建应用容器：
 
 ```bash
 docker compose -f docker-compose.example.yml up -d quickquip web-admin
 ```
 
 停止服务使用 `docker compose -f docker-compose.example.yml down`，配置和主机目录中的数据继续保留。
+
+已有部署如果随应用启动 LLBot，按[协议端迁移步骤](onebot-adapters.md#从随-quickquip-启动的-llbot-迁移)拆分服务。
 
 ## 安装后编辑与同步配置
 

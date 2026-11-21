@@ -25,6 +25,7 @@
 | [ADR-0025](0025-tracked-operations-programs.md) | 统一分发运维程序并分离生产配置 | Accepted | — |
 | [ADR-0028](0028-write-only-environment-management.md) | 环境变量只写管理与运行时凭据快照 | Superseded | [ADR-0029](0029-opt-in-environment-compatibility.md) |
 | [ADR-0029](0029-opt-in-environment-compatibility.md) | 显式启用环境管理并保留部署兼容性 | Accepted | — |
+| [ADR-0032](0032-swappable-onebot-backend.md) | 协议端作为可替换的部署变量 | Accepted | — |
 
 ### 配置、会话与模型请求
 

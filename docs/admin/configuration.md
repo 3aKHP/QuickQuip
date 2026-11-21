@@ -34,8 +34,8 @@
 | `DRIVER` | NoneBot2 驱动器；使用正向 WebSocket 连接 OneBot 协议端时必须包含 `~websockets` | `~fastapi+~websockets` |
 | `HOST` | QuickQuip 监听地址 | `0.0.0.0` |
 | `PORT` | QuickQuip 监听端口 | `8080` |
-| `QQ_ACCOUNT` | 机器人 QQ 号（使用项目 Compose 模板启动 LLBot 时必填） | — |
-| `ONEBOT_WS_URLS` | OneBot V11 正向 WebSocket 服务端地址列表 | — |
+| `QQ_ACCOUNT` | 可选的机器人 QQ 号，用于报告识别 Bot 自身发言及运维巡检核对账号 | — |
+| `ONEBOT_WS_URLS` | OneBot V11 正向 WebSocket 地址列表，使用 JSON 数组。反向 WebSocket 使用空数组 | `[]` |
 | `ONEBOT_ACCESS_TOKEN` | OneBot 接入鉴权令牌 | — |
 | `TZ` | 容器与进程时区（影响日志时间戳、定时任务展示时间等） | `Asia/Shanghai` |
 

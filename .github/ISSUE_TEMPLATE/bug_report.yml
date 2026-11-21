@@ -46,7 +46,7 @@ body:
     id: env
     attributes:
       label: 系统与协议端 / OS & protocol client
-      placeholder: e.g. Ubuntu 24.04 + LLBot（Docker Compose）；Windows 11 + LLBot
+      placeholder: e.g. Ubuntu 24.04 (Docker Compose) + OneBot backend name and version
   - type: input
     id: provider-model
     attributes:
