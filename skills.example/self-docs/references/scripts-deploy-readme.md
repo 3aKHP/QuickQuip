@@ -65,7 +65,8 @@ Both local drivers use the transaction worker and state program in `server/`. Pr
 | Previous release | `bash scripts/deploy/deploy-v4.sh --rollback` | `scripts/deploy/deploy-v4.ps1 -Rollback` |
 | Explicit rollback | `bash scripts/deploy/deploy-v4.sh --rollback <id>` | `scripts/deploy/deploy-v4.ps1 -Rollback -ReleaseId <id>` |
 | Flat-layout migration and deploy | `bash scripts/deploy/deploy-v4.sh --migrate --config-sync off` | `scripts/deploy/deploy-v4.ps1 -Migrate -ConfigSync off` |
-| First deployment awaiting QQ login | `bash scripts/deploy/deploy-v4.sh --config-sync off --env local --skip-health` | `scripts/deploy/deploy-v4.ps1 -ConfigSync off -EnvSource local -SkipHealth` |
+| First deployment with OneBot ready | `bash scripts/deploy/deploy-v4.sh --config-sync off --env local` | `scripts/deploy/deploy-v4.ps1 -ConfigSync off -EnvSource local` |
+| First deployment awaiting OneBot | `bash scripts/deploy/deploy-v4.sh --config-sync off --env local --skip-health` | `scripts/deploy/deploy-v4.ps1 -ConfigSync off -EnvSource local -SkipHealth` |
 
 Shared parameters: `--host-alias`, `--remote-dir` (default `/opt/QuickQuip`), `--keep-releases` (2..100, default 4); the PowerShell driver takes the matching single-dash forms (`-HostAlias`, `-RemoteDir`, `-KeepReleases`). Remote paths use letters, digits, dot, slash, underscore or hyphen. Run `bash scripts/deploy/deploy-v4.sh --help` for the full interface.
 
@@ -73,7 +74,7 @@ Shared parameters: `--host-alias`, `--remote-dir` (default `/opt/QuickQuip`), `-
 
 Every release carries a version identity built from the deployed `pyproject.toml` version plus a timestamp captured on the server when the image build finishes (for example `1.15.3-dev.2+build.20260909.065235`); it is echoed in the `image built` and `release complete` transaction log lines. If you maintain your own private ops-trail tooling, `remote-deploy-v4.sh` marks the spot where `$VersionId` is available for you to record it.
 
-For first login, use `bash scripts/ops/check_bot_local.sh` or `scripts/ops/check_bot.ps1` after an explicit `--skip-health` deployment. Pass their `-Server` and `-RemoteDir` parameters for a custom target. The server worker is `scripts/ops/check_bot.sh`; `scripts/ops/cron_check_bot.sh` remains the cron entry.
+Complete the first QQ login through the OneBot service. Follow the [Bot monitoring guide](../ops/README.md) to configure the connection probe and check status from Bash, PowerShell or cron.
 
 `scripts/ops/host_metrics_collector.py` optionally supplies host process counts, full disk usage and temperatures for the host-healthcheck Skill. Install its cron entry from the file header. Each run atomically writes `<root>/data/host_metrics.json`, which the container reads through the existing read-only `data/` bind mount.
 
@@ -93,7 +94,7 @@ The catalog belongs to the deployment user. Web-installed files can be root-owne
   config/managed/            shared configuration database and recurring schedules
   data/                      execution/business databases, logs, font and optional Tieba state
   skills/                    shared skill catalog (bot read-only, Web Admin read-write)
-  prod/                      LLBot state, Compose configuration, sendkey.env
+  prod/                      Compose configuration, sendkey.env and private hooks
   scripts/ops/               managed server inspection and metrics programs
   releases/<id>/             application, config, frontend and compose
   current -> releases/<id>
@@ -101,11 +102,11 @@ The catalog belongs to the deployment user. Web-installed files can be root-owne
   .deploy/                   private staging, operation logs and exit status
 ```
 
-`deploy-manifest.txt` lists application paths. Listed directories are recursive: review their contents before deployment. The selected root `.env`, maintenance scripts and optional `prod/sendkey.env`, font and `data/tieba/storage_state.json` are uploaded separately to private staging. LLBot login directories are never uploaded. For a test server, prepare an isolated checkout without real credentials or Tieba session files.
+`deploy-manifest.txt` lists application paths. Listed directories are recursive: review their contents before deployment. The selected root `.env`, maintenance scripts and optional `prod/sendkey.env`, font and `data/tieba/storage_state.json` are uploaded separately to private staging. Manage OneBot login assets with the external OneBot service. For a test server, prepare an isolated checkout without real credentials or Tieba session files.
 
 Each operation has a UTC timestamp plus random suffix. Uploads enter an exclusive private directory; live files are modified only under the server deployment lock. The candidate compose is validated against the staged environment and its image built before shared files are applied. Unchanged application files use rsync hardlinks; release roots and transaction directories restrict access to the deployment user. Web Admin configuration writes use atomic file replacement, preserving older hardlinked content.
 
-Before activation, the server snapshots shared files that it will replace, including existing LLBot WebSocket configuration. It applies the candidate environment, switches `current`, and recreates application containers once. The health gate checks all three services, the bot connection log, Web Admin HTTP, configuration schema and the bot heartbeat/load acknowledgement inside its container. The bot core must be ready with an available conversation store. Remote models and MCP servers can remain unavailable independently. SSH disconnects do not stop the detached transaction; drivers reconnect to its log.
+Before activation, the server snapshots shared files that it will replace. Deployments whose Compose still includes LLBot also snapshot its WebSocket configuration. The server applies the candidate environment, switches `current`, and recreates the application containers. The health gate checks Bot and Web Admin, the OneBot connection, Web Admin HTTP, configuration schema, and the Bot's heartbeat and load acknowledgement. When the OneBot probe is configured, the gate checks the current session and account status. Other deployments use the Bot connection log. The Bot core must be ready with an available conversation store. Remote models and MCP servers can remain unavailable independently. The detached transaction continues after an SSH disconnect. Drivers reconnect to follow its log.
 
 Successful operations remove private staging and rollback copies, retaining `.deploy/<id>.log`, `.exit`, and the synchronization deployment `.transaction.json` recovery record. Interrupted uploads can leave staging directories; inspect operation status before manually removing these. Failed recovery retains its private backup and returns exit code 2. The requested action still returns nonzero when automatic recovery succeeds.
 
@@ -113,7 +114,7 @@ Successful operations remove private staging and rollback copies, retaining `.de
 
 Production builds use the tracked `docker/Dockerfile.prod`. Existing Compose files may retain `build.dockerfile: prod/Dockerfile`: deployment creates that compatibility build file inside each candidate release from the tracked source, including when configuration is pulled from the server. The private deployment-root `prod/` keeps its configuration. New Compose configurations use `docker/Dockerfile.prod` directly.
 
-`--migrate` snapshots the server's existing application files and pins actual running images of `llbot`, `quickquip` and `web-admin` as a baseline, then deploys the local candidate. Flat files remain in place so existing bind mounts stay valid during preparation. Custom services or unsupported external bind mounts require an explicit migration design; the script stops before activation. Baselines are not automatically collected.
+`--migrate` snapshots the flat installation and pins the container images of `quickquip`, `web-admin`, and `env-agent` if present. A flat installation with a bundled LLBot also captures that legacy service in the baseline. Flat files remain in place during preparation so their bind mounts stay valid. Extra services and unsupported external bind mounts stop activation and require a manual migration. Baselines are not automatically collected.
 
 Automatic recovery restores pre-operation shared files, links and containers, then verifies health. Manual rollback selects an existing release and its local images, retains the current root `.env`, runtime data and the shared `skills/` catalog (applying the same non-destructive merge from the rollback target's `skills/` when its compose consumes the shared catalog), and verifies health. Historical releases whose compose mounts a release-local `skills/` keep using that frozen copy when rolled back. Missing rollback images are never pulled or rebuilt. Do not prune retained release tags manually.
 

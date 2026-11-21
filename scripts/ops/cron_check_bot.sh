@@ -1,10 +1,8 @@
 #!/bin/bash
-# QuickQuip bot health check, intended for cron.
+# QuickQuip Bot health check for cron.
 set -e
 
 REMOTE_DIR="${REMOTE_DIR:-/opt/QuickQuip}"
-cd "$REMOTE_DIR/prod"
-
 if [ -f "$REMOTE_DIR/prod/sendkey.env" ]; then
     source "$REMOTE_DIR/prod/sendkey.env"
 fi
@@ -30,7 +28,7 @@ log() {
     echo "[$(date '+%Y-%m-%d %H:%M:%S')] $*" >> "$LOG_FILE"
 }
 
-STATUS=$(bash "$REMOTE_DIR/scripts/ops/check_bot.sh" status 2>&1 || echo "ERROR")
+STATUS=$(REMOTE_DIR="$REMOTE_DIR" bash "$REMOTE_DIR/scripts/ops/check_bot.sh" status 2>/dev/null || echo UNKNOWN)
 log "status=$STATUS"
 
 case "$STATUS" in
@@ -42,23 +40,12 @@ case "$STATUS" in
         ;;
     OFFLINE)
         if [ ! -f "$FLAG_FILE" ]; then
+            _notify "QuickQuip Bot offline" "The Bot container or its OneBot connection is offline. Check QuickQuip and the configured OneBot service. $(date '+%Y-%m-%d %H:%M:%S')"
             touch "$FLAG_FILE"
-            log "Bot offline, sending notification"
-            _notify "Bot offline - QR login required" "QuickQuip Bot status: $STATUS. $(date '+%Y-%m-%d %H:%M:%S')%0a%0aRun (Windows): .\scripts\ops\check_bot.ps1%0aRun (Linux):   bash scripts/ops/check_bot_local.sh"
-        else
-            log "Bot still offline, notification already sent"
+            log "Bot offline, notification sent"
         fi
         ;;
-    IDLE)
-        if [ ! -f "$FLAG_FILE" ]; then
-            touch "$FLAG_FILE"
-            log "Bot idle, sending notification"
-            _notify "Bot may be silently disconnected" "QuickQuip Bot status: $STATUS. $(date '+%Y-%m-%d %H:%M:%S')%0a%0aRun (Windows): .\scripts\ops\check_bot.ps1%0aRun (Linux):   bash scripts/ops/check_bot_local.sh"
-        else
-            log "Bot still idle, notification already sent"
-        fi
-        ;;
-    UNKNOWN|ERROR)
+    *)
         log "Status check inconclusive: $STATUS"
         ;;
 esac

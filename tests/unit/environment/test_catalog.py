@@ -118,7 +118,7 @@ def test_undefined_fixed_items_stay_out_of_legacy_variables(tmp_path):
     assert by_name['PIP_INDEX_URL']['allowed_actions'] == ['create']
     assert by_name['PYTHONPATH']['evidence_flags'].get('internal') is True
     assert by_name['PYTHONPATH']['allowed_actions'] == []
-    assert by_name['QUICK_LOGIN_QQ']['allowed_actions'] == []
+    assert 'QUICK_LOGIN_QQ' not in by_name
 
 
 def test_defined_internal_variables_keep_the_edit_contract(tmp_path):
@@ -190,9 +190,10 @@ def test_template_evidence_and_secrets(tmp_path):
 
     rows = directory(Store(tmp_path))
     qq = row(rows, 'QQ_ACCOUNT')
-    mapping = [relation for relation in qq['relations']
-               if relation['target_name'] == 'QUICK_LOGIN_QQ']
-    assert mapping and mapping[0]['required'] is True
+    assert any(relation['component'] == 'chat.period_serializer' for relation in qq['relations'])
+    assert not any(relation['required'] for relation in qq['relations'])
+    onebot_token = row(rows, 'ONEBOT_ACCESS_TOKEN')
+    assert all(relation['target_service'] == 'bot' for relation in onebot_token['relations'])
     searxng_map = row(rows, 'QUICKQUIP_SEARXNG_BASE_URL')
     assert any(relation['required'] for relation in searxng_map['relations'])
     host = row(rows, 'HOST')

@@ -16,6 +16,11 @@
 
 QuickQuip Bot 和 Web Admin 使用主机 Python 进程或 Docker 容器运行，文档分别称为源码与 Docker。Windows 懒人包归入主机 Python 进程；源码构建镜像和挂载源码的 hybrid 部署归入 Docker。见[部署分类与安装入口](admin/installation.md#确定部署方式)。
 
+<a id="onebot-backend"></a>
+### 协议端（OneBot backend）
+
+由部署者独立提供的 QQ 服务，为 QuickQuip 提供 OneBot V11 连接、消息与调用。接入方式见[协议端说明](admin/onebot-adapters.md)，分发边界见 [ADR-0032](dev/adr/0032-swappable-onebot-backend.md)。
+
 ## 配置与生效
 
 <a id="provider"></a>

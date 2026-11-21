@@ -1,6 +1,6 @@
 # QuickQuip 云端 Docker 部署指南
 
-本文面向 Linux 服务器上的 Docker Compose 部署，介绍**手动安装、自动发布脚本（`deploy-v4`）、首次登录协议端与后台，以及日常维护**。
+本文面向 Linux 服务器上的 Docker Compose 部署，介绍**手动安装、自动发布脚本（`deploy-v4`）、接入协议端、登录后台，以及日常维护**。
 
 > **相关文档导航**：
 > - 部署位置（`local`/`cloud`）与运行方式（`source`/`docker`）的定义，以及本地/源码安装入口：见[安装与部署方式](installation.md)
@@ -15,7 +15,7 @@
 - **Linux 服务器**：建议从 **2 核 / 2G 内存 + 2G swap** 起步（v1.12.2 全栈验收在此规格下稳态内存占用约 0.7G RSS；后续可根据并发量与启用功能观察内存水位）。
 - **容器环境**：已安装 Docker 和 Docker Compose。
 - **Node.js + pnpm**：用于构建 Web Admin 前端（如果走手动部署，需安装在服务器上；如果使用 `deploy-v4` 自动部署脚本，只需安装在你执行脚本的本地电脑上）。
-- **QQ 账号**：用于登录 OneBot 协议端（当前部署模板默认适配器为 **LLBot**，各适配器支持状态见 [onebot-adapters.md](onebot-adapters.md)）。
+- **OneBot V11 协议端**：部署者自行安装并管理 QQ 登录。按[接入说明](onebot-adapters.md#连接-quickquip)准备容器可达的连接。
 
 ### 2. 网络与服务器连通性
 请按所需的 CPU 架构、资源容量及网络条件选择服务器（费用按服务商当前报价核对）。在正式开始完整部署前，请先确认服务器能够正常访问以下目标：
@@ -33,7 +33,7 @@
 > - **使用 `deploy-v4` 自动部署脚本**：
 >   1. 先在**本地项目**准备好下方 **第 3 步** 所列的模板、配置与资产；
 >   2. 按[部署工具的 SSH 设置](../../scripts/deploy/README.md#ssh-connection)配置好本地到服务器的 SSH 连接；
->   3. **搜索服务（SearXNG）需先在服务器上单独准备就绪**；
+>   3. 在服务器上准备独立的 OneBot 协议端和 SearXNG 服务；
 >   4. 准备完成后，直接跳到后文的[自动部署与版本回滚](#自动部署与版本回滚)章节，首次部署按场景表选择参数；日常部署使用其后的操作示例。
 
 ---
@@ -53,7 +53,7 @@ sudo usermod -aG docker $USER
 
 在项目结构中：
 - `prod.example/`：存放生产环境 Compose 编排与通知配置的公开示例。
-- `prod/`（私有目录）：存放服务器真实生效的 Compose 编排、运维通知密钥与协议端登录状态。
+- `prod/`（私有目录）：存放服务器真实生效的 Compose 编排、巡检配置和运维通知密钥。
 - `scripts/deploy/` 与 `scripts/ops/`：分别存放通用部署程序与巡检程序，随代码仓库版本更新。
 
 如果采用手动安装，推荐从本地准备好的私有工作目录将完整项目上传至服务器：
@@ -82,8 +82,8 @@ cp prod.example/docker-compose.yml prod/docker-compose.yml
 
 | 环境变量 | 填写说明 |
 |---|---|
-| `QQ_ACCOUNT` | 用于机器人登录的 QQ 号 |
-| `ONEBOT_ACCESS_TOKEN` | 自定义的 OneBot 连接口令（在第 5 步配置 LLBot 时需填入同一个值） |
+| `ONEBOT_WS_URLS` | 正向 WebSocket 填入容器可达的地址列表。反向 WebSocket 使用 `[]` |
+| `ONEBOT_ACCESS_TOKEN` | 与自备协议端配置相同的访问令牌 |
 | `DRIVER` | 使用正向 WebSocket 连接时，保持示例值 `~fastapi+~websockets` |
 | `WEB_ADMIN_PASSWORD` | 自定义的 Web Admin 后台登录密码（请替换掉示例占位值） |
 | `QUICKQUIP_SEARXNG_BASE_URL` | 从 Bot 容器内部可访问的 SearXNG 搜索服务地址（生产模板启动时**必填**，需取消注释） |
@@ -112,6 +112,10 @@ cp prod.example/docker-compose.yml prod/docker-compose.yml
 
 其他功能可以在基本部署完成后按[可选配置](#可选功能配置)添加。
 
+#### 3.4 准备协议端
+
+按服务自身的说明启动 OneBot V11 协议端并登录 QQ。将网络和鉴权配置写入双方部署文件。两套 Compose 共用外部网络时，可按[共享网络步骤](onebot-adapters.md#两个独立-compose-使用共享网络)配置。已有部署仍随 QuickQuip 启动 LLBot 时，先按[旧部署迁移步骤](onebot-adapters.md#从随-quickquip-启动的-llbot-迁移)拆分。
+
 ### 4. 启动服务
 
 #### 构建前端并启动容器
@@ -135,36 +139,15 @@ docker compose --env-file ../.env up -d
 > **关于中间那条 `init` 初始化命令**：
 > 该命令借用了 `web-admin` 容器的可写配置挂载，用于创建初始的空配置库（或将旧版 `llm.toml` 迁移入库），执行完成后容器即自动退出。全新安装完成后 LLM 功能默认保持关闭状态，稍后在第 7 步通过 Web 后台启用；如果是已有配置库的老版本升级，请务必按[初始化与升级](llm-configuration.md#初始化与升级)或[存储迁移步骤](storage-migration.md)的停服和备份要求执行。
 
-### 5. 首次登录 OneBot 协议端（LLBot）
+### 5. 确认 OneBot 已连接
 
-协议端容器首次启动后需要用手机 QQ 扫码登录。以下以当前默认适配器 **LLBot 7.3.2** 为例（完整 Profile、固定版本号 `initialencounter/llonebot:v7.12.14-7.3.2-45758` 的 pin 原因及其他适配器状态见 [onebot-adapters.md](onebot-adapters.md)）：
-
-#### 方式一：直接看容器日志扫码
+在服务器的 `prod/` 目录执行：
 
 ```bash
-cd /path/to/QuickQuip/prod
-docker compose --env-file ../.env logs -f llbot
-```
-日志中会打印出二维码或登录链接，使用手机 QQ 扫码确认即可。
-
-#### 方式二：通过 SSH 隧道访问 LLBot WebUI 扫码并配置对接（推荐）
-
-模板中 LLBot 的 WebUI 端口（`3080`）仅绑定在服务器本机 `127.0.0.1`。请在**你自己的本地电脑终端**建立一条 SSH 隧道（将 `user@server` 替换为你的服务器账号与 IP）：
-
-```bash
-ssh -N -L 3080:127.0.0.1:3080 user@server
+docker compose --env-file ../.env logs --tail 80 quickquip
 ```
 
-保持该终端窗口不关闭，在本地浏览器打开 `http://127.0.0.1:3080` 扫码登录（登录态持久化保存在 `prod/llbot-qq/`，LLBot 配置保存在 `prod/llbot-data/`）。
-
-- **必做：在 WebUI 中启用 OneBot 网络对接**：
-  新部署的 LLBot 默认将四种网络对接方式（正向 WS / 反向 WS / HTTP / HTTP 上报）**全部关闭**。请在 WebUI 中开启你需要的对接方式——若使用默认的正向 WebSocket（服务端），**Token 为必填项，且必须与根目录 `.env` 中的 `ONEBOT_ACCESS_TOKEN` 完全一致**，否则 QuickQuip 无法连上协议端。
-- **容器重启后的快速登录与异常处理**：
-  只要 `prod/llbot-qq/` 登录态目录完好，重启容器后 LLBot 通常会触发快速登录（`QUICK_LOGIN_QQ` 生效，免扫码），但快速登录有时效性，过期后仍需重新扫码。
-  - 若遇到登录异常，请先执行 `docker compose --env-file ../.env restart llbot` 重启容器（切勿随意删除 `llbot-qq/`）。
-  - 如果刚扫码成功后发现发消息无响应，且日志里出现 `getSelfNick` 等 `TypeError` 报错，只需执行一次 `restart llbot` 触发快速登录即可恢复正常。
-
----
+日志出现预期账号的 `Bot … connected` 后继续验证收发。若迟迟未连接，检查两端正在使用的 WebSocket 方向、地址及令牌。反向 WebSocket 需确认协议端能访问 Bot 的监听端口；正向 WebSocket 需确认协议端已登录且其端口从 Bot 容器可达。
 
 ### 6. 验证基础运行
 
@@ -288,8 +271,9 @@ python -m quickquip.tieba.login
 |---|---|---|---|
 | **平铺部署老服务器，且仍在使用 `data/llm_config.db`** | `--migrate --migrate-storage` | `-Migrate -MigrateStorage` | 将平铺目录迁为 release 结构，同时保存基线、停止服务并完成存储拆分迁移（保留服务器现有配置，自动关闭本次配置同步） |
 | **平铺部署老服务器，但已完成存储迁移** | `--migrate --config-sync off` | `-Migrate -ConfigSync off` | 仅做目录结构迁移，关闭本次配置同步以保留服务器配置 |
-| **全新服务器首次部署（尚未扫码登录协议端）** | `--config-sync off --env local --skip-health` | `-ConfigSync off -EnvSource local -SkipHealth` | 使用本地 `.env` 初始化服务器，并跳过首次健康检查；部署完后按第 5、7 步扫码登录，再按[生产模板首次健康检查](../../scripts/deploy/README.md#commands)核验 |
-| **回滚到上一版本 / 指定历史版本** | `--rollback`（可加 `--release-id <id>`） | `-Rollback`（可加 `-ReleaseId <id>`） | 回滚代码版本（完整接口见 `bash scripts/deploy/deploy-v4.sh --help`） |
+| **全新服务器首次部署，OneBot 已就绪** | `--config-sync off --env local` | `-ConfigSync off -EnvSource local` | 使用本地 `.env` 初始化服务器，并验证应用服务和 OneBot 连接 |
+| **全新服务器首次部署，OneBot 将稍后连接** | `--config-sync off --env local --skip-health` | `-ConfigSync off -EnvSource local -SkipHealth` | 使用本地 `.env` 初始化服务器，并跳过首次健康检查；按协议端自己的说明完成 QQ 登录，然后按第 5、6 步核验连接和收发 |
+| **回滚到上一版本 / 指定历史版本** | `--rollback` 或 `--rollback <id>` | `-Rollback`（可加 `-ReleaseId <id>`） | 回滚代码版本（完整接口见 `bash scripts/deploy/deploy-v4.sh --help`） |
 
 > **注**：`--env local`（PowerShell：`-EnvSource local`）仅在关闭配置同步（`--config-sync off` 或 `--migrate-storage`）时用于显式指定上传本地 `.env`；普通日常部署已包含 `.env`。首次升级建议先保留线上配置，随后再明确初始同步方向。
 
@@ -344,10 +328,7 @@ bash scripts/deploy/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 ### OneBot 连接与配置重载
 
-- **`DRIVER` 环境变量与 OneBot 正/反向连接拓扑**：
-  - Compose 文件中的 `environment:` 插值与 `env_file:` 都会读取同一份 `.env`，因此在 `.env` 中设置 `DRIVER` 会同时穿透两层并作为**最终生效值**。
-  - **正向 WebSocket（默认模板）**：QuickQuip 作为 WS 客户端主动连接协议端（`ONEBOT_WS_URLS` 指向适配器的 WS 服务端，默认模板为 `ws://llbot:3001/`）。此时 `.env` 中的 `DRIVER` **必须填写 `~fastapi+~websockets`**（如果只写 `~fastapi` 则没有 WS 客户端能力，`ONEBOT_WS_URLS` 会被忽略并打出告警）。
-  - **反向 WebSocket（替代拓扑）**：在适配器管理界面启用反向 WS，让适配器主动连接 QuickQuip 的 `ws://<bot地址>:8080/onebot/v11/ws`（此时 QuickQuip 侧无需 WS client，详见 [onebot-adapters.md](onebot-adapters.md)）。当 `prod/llbot-data` 存在时，`deploy-v4` 脚本会自动把 `.env` 中的 `ONEBOT_ACCESS_TOKEN` 同步进 LLBot 的反向 WS 配置中，正、反向拓扑可以并存。
+- **OneBot 连接**：按照[接入说明](onebot-adapters.md#连接-quickquip)在根 `.env` 和协议端配置 WebSocket 及令牌。修改地址、驱动或令牌后，使用新环境重建 Bot 容器，并重新核对连接。
 - **配置库共享与在线热重载机制**：
   - Bot 和 Web 共享本机的 `config/managed/config.db`。自动部署脚本会保留生产环境数据库（本地配置库和旧 TOML 由各自的配置运维流程管理），并在切换发行版目录（release）后强制重建一次应用容器，确保源码和配置挂载指向最新发行目录。
   - **LLM 配置生效方式**：Bot 启动或重启时只读取**已发布快照（Published）**；在 Web Admin“LLM 配置”页修改配置后，需点击“保存草稿”并“应用”，等待配置任务完成及 Bot 确认实际加载版本。修改模型价格等无关字段时不会断开现有的 MCP 连接；若修改了 MCP 配置，其连接状态会独立回报。
@@ -452,13 +433,9 @@ QuickQuip 直接通过模型 API 提供对话能力，并通过 MCP 协议接入
 - 内置网页搜索（`search_web`）由 SearXNG 提供；
 - Tavily 等外部扩展工具通过 MCP 接入（只需在后台将 MCP 服务配置到 `settings.mcp.servers` 后保存并应用；相关 API 凭据写入根 `.env`，宿主机路径与 sidecar 容器编排在私有 `prod/` 中维护即可，详见 [MCP 集成约定](../../docs/dev/mcp-integration.md)）。
 
-### 2. LLBot 登录态过期了怎么办？
-服务器更换 IP 或账号长时间未活动后，LLBot 可能会掉线并要求重新扫码：
+### 2. 协议端掉线后怎么办？
 
-```bash
-docker compose --env-file ../.env restart llbot
-docker compose --env-file ../.env logs -f llbot  # 在日志中查看新的登录二维码
-```
+到协议端自己的运维入口确认 QQ 在线状态，按其说明恢复登录。回到 QuickQuip 的日志确认连接恢复。若账号在线但 Bot 未连接，核对所用 WebSocket 方向、地址与令牌。
 
 ### 3. 如何降低 QQ 账号被风控/冻结的概率？
 - 避免使用刚注册的新号，建议使用有一定正常使用历史的 QQ 号。
@@ -466,13 +443,13 @@ docker compose --env-file ../.env logs -f llbot  # 在日志中查看新的登�
 - 避免在短时间内高频、大量地群发消息。
 
 ### 4. 宿主机端口冲突怎么办？
-- 如果服务器上的协议端端口（LLBot 默认使用 `3001` / `3080`）或 Web Admin 端口（`5104`）已被其他程序占用，直接修改 `prod/docker-compose.yml` 中对应端口映射的**宿主机侧端口号**即可（`8888` 端口仅在同机自建 SearXNG 时才会用到）。
-- QuickQuip 主容器的 `8080` 端口仅用于 Docker 容器内部网络通信，不需要向宿主机外暴露。
+- Web Admin 端口冲突时修改 `prod/docker-compose.yml` 的宿主机侧端口。协议端端口在其自身编排中调整，之后更新连接它的地址。
+- Bot 容器内监听 `8080`。仅在协议端需要从容器网络外反向连接时，为 Bot 添加所需的端口映射。
 
 ### 5. 为什么配好了 LLM 却不生效 / 群里没反应？
 请按以下清单逐一排查：
 1. **检查配置发布状态与心跳**：进入 Web Admin“LLM 配置”页，确认配置库 schema 受支持、修改后的**草稿已点击“应用到 Bot”**（注意：单纯重启容器不会应用未发布的草稿！），且顶部显示的 `published_revision`（已发布版本）与 Bot 的 `loaded_revision`（实际加载版本）一致、Bot 心跳处于新鲜状态。若应用任务卡住或报错，点开该任务查看具体报错阶段。
-2. **检查 `.env` 必填项**：确认 `.env` 中已正确填写当前渠道所需的 API Key 环境变量、`QQ_ACCOUNT`，以及已启用 MCP 服务所需的 API Key。
+2. **检查 `.env` 必填项**：确认 `.env` 中已正确填写当前渠道所需的 API Key 环境变量，以及已启用 MCP 服务所需的 API Key。
 3. **检查 SearXNG 连通性**：确认搜索服务正在运行，且从 `quickquip` 容器内部能够正常访问 `.env` 中配置的 `QUICKQUIP_SEARXNG_BASE_URL`。
 4. **检查群身份索引文件（`identities.yaml`）**：确认 `llm_about/identities.yaml`（或群级覆盖 `llm_about/{群号}/identities.yaml`）存在且 YAML 格式正确。你可以在 Bot 启动日志中搜索对应提示来确认加载状态：文件缺失会记录 `INFO`、文件存在但仍是空模板会记录 `WARNING`、正常加载会打印 `已加载 N 条身份`。
 5. **查看容器报错日志**：运行 `docker compose --env-file ../.env logs -f quickquip`，检查是否有配置文件缺失或 API Key 缺失的明确报错。

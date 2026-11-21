@@ -280,7 +280,7 @@ docs/
 ### `prod.example/` 与 `prod/`
 
 - `prod.example/`：生产 Compose 和运维通知配置模板。
-- `prod/`：Git 忽略的真实 Compose、OneBot 协议端登录目录和运维通知配置。
+- `prod/`：Git 忽略的实际 Compose 和运维配置。OneBot 协议端由部署者独立管理，见 [ADR-0032](adr/0032-swappable-onebot-backend.md)。
 - `scripts/deploy/`、`scripts/ops/`：由 Git 维护的部署和巡检程序；[脚本导航](../../scripts/README.md)说明各子目录。
 - `docker/Dockerfile.prod`：生产构建程序，构建参数通过 Compose 和根 `.env` 配置。
 - 本地私有工作区保存草稿、测试沙箱、探针脚本和工作文档。

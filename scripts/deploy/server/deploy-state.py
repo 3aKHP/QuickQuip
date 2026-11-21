@@ -23,17 +23,12 @@ SHARED_FILES = {
     "data/fonts/NotoSansSC-Regular.ttf": 0o644,
     "data/tieba/storage_state.json": 0o600,
 }
-SERVICES = ("llbot", "quickquip", "web-admin")
+APP_SERVICES = {"quickquip", "web-admin"}
+BASELINE_SERVICES = APP_SERVICES | {"env-agent", "llbot"}
 # Deployment-root subdirectories whose bind-mounted content is shared state;
 # migration keeps their live source path. Prefix match: a mount of a data/ or
 # skills/ subdirectory is still shared state, not release-private content.
 ROOT_SHARED_SUBDIRS = ("data", "skills", "config/managed")
-DEFAULTED_VARIABLE = re.compile(r"\$\{[A-Za-z_][A-Za-z0-9_]*:-([^}]*)\}")
-
-
-def resolve_defaulted_variables(source: str) -> str:
-    """Substitute ${VAR:-default} placeholders in a compose path with defaults."""
-    return DEFAULTED_VARIABLE.sub(lambda match: match.group(1), source)
 
 
 def atomic_write(
@@ -122,10 +117,12 @@ def snapshot_shared(root: Path, incoming: Path, backup: Path) -> None:
     backup.mkdir(mode=0o700)
     _sync_directory(backup.parent)
     names = [name for name in SHARED_FILES if (incoming / "shared" / name).is_file()]
-    llbot = root / "prod/llbot-data"
-    names += [str(path.relative_to(root)) for path in (
-        [llbot / "default_config.json"] + sorted((llbot / "data").glob("config_*.json"))
-    ) if path.is_file()]
+    compose = json.loads((incoming / "candidate-compose.json").read_text())
+    if "llbot" in compose["services"]:
+        llbot = root / "prod/llbot-data"
+        names += [str(path.relative_to(root)) for path in (
+            [llbot / "default_config.json"] + sorted((llbot / "data").glob("config_*.json"))
+        ) if path.is_file()]
     records = []
     for name in names:
         path = checked_path(root, name)
@@ -189,11 +186,14 @@ def capture_baseline(root: Path, baseline: Path) -> None:
     # No interpolation also preserves env_file references on Compose 2.27+.
     raw = subprocess.check_output(command + ["config", "--no-interpolate", "--format", "json"])
     config = json.loads(raw)
-    if set(config["services"]) != set(SERVICES):
+    services = set(config["services"])
+    if not APP_SERVICES <= services <= BASELINE_SERVICES:
         raise ValueError(
-            "migration requires exactly llbot, quickquip and web-admin; "
+            "migration requires quickquip and web-admin, with optional env-agent and legacy llbot; "
             "review custom services first"
         )
+    # Compose can classify an uninterpolated short-syntax bind as a named volume.
+    resolved = json.loads(subprocess.check_output(command + ["config", "--format", "json"]))
     # Keep private runtime files out of the snapshot; copy only mounted app assets.
     # skills/ is shared root state beside data/; the volume rewrite below keeps
     # its deployment-root source instead of a baseline copy.
@@ -212,7 +212,12 @@ def capture_baseline(root: Path, baseline: Path) -> None:
     for service, spec in config["services"].items():
         container = spec.get("container_name")
         if not container:
-            raise ValueError(f"migration needs container_name for {service}")
+            containers = subprocess.check_output(
+                command + ["ps", "--all", "--quiet", service], text=True
+            ).splitlines()
+            if len(containers) != 1:
+                raise ValueError(f"migration requires one existing container for {service}")
+            container = containers[0]
         image = subprocess.check_output(
             ["docker", "inspect", "--format", "{{.Image}}", container], text=True
         ).strip()
@@ -222,21 +227,26 @@ def capture_baseline(root: Path, baseline: Path) -> None:
         spec.pop("build", None)
         spec.pop("pull_policy", None)
         # Normalize the root env reference without expanding its credentials.
-        if service != "llbot":
+        if service in APP_SERVICES:
             spec["env_file"] = [str(root / ".env")]
+        if "volumes" in spec:
+            spec["volumes"] = resolved["services"][service]["volumes"]
         for volume in spec.get("volumes", []):
             if volume.get("type") != "bind":
                 continue
-            source = Path(resolve_defaulted_variables(volume["source"]))
-            if not source.is_absolute():
-                source = (root / "prod" / source).resolve()
+            source = (root / "prod" / volume["source"]).resolve()
             if not source.is_relative_to(root):
                 raise ValueError(f"external bind mount requires manual migration: {source}")
             relative = source.relative_to(root)
-            if any(relative == Path(name) or Path(name) in relative.parents
-                   for name in ROOT_SHARED_SUBDIRS) or str(relative) in (
-                "prod/llbot-qq", "prod/llbot-data", ".env",
-            ):
+            shared = any(relative.is_relative_to(name) for name in ROOT_SHARED_SUBDIRS)
+            legacy_state = service == "llbot" and str(relative) in (
+                "prod/llbot-qq", "prod/llbot-data",
+            )
+            agent_root = (
+                service == "env-agent" and source == root
+                and volume.get("target") == "/host/project"
+            )
+            if shared or legacy_state or agent_root or relative == Path(".env"):
                 volume["source"] = str(source)
             elif (baseline / relative).exists():
                 volume["source"] = str(baseline / relative)

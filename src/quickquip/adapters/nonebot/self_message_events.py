@@ -1,8 +1,6 @@
-"""LLOneBot reportSelfMessage 自消息事件模型。
+"""OneBot V11 自消息回显事件模型。
 
-LLOneBot 开启 ``reportSelfMessage`` 后，bot 自身发言以
-``post_type="message_sent"`` 上报（OneBot 11 扩展；LLOneBot 源码中
-``senderUin === selfUin`` 时取 ``EventType.MESSAGE_SENT``）。
+支持自消息回显的协议端以 ``post_type="message_sent"`` 上报 bot 自身发言。
 nonebot-adapter-onebot v11 未内置该模型：事件会落到兜底 ``Event``。
 
 此处注册同构模型并保留独立的 ``message_sent`` 事件类型，再由专用
@@ -10,8 +8,7 @@ matcher 在普通消息和命令 matcher 之前处理。群自消息仅入归档
 也是群聊参与者），私聊自消息直接丢弃；两者都不进入命令、规则、
 统计或 LLM 链路。
 
-部署前提：LLOneBot ob11 连接配置 ``reportSelfMessage: true``
-（默认 false，需运维开启后重启 llbot）。
+归档 bot 自身发言需要在协议端启用此扩展。
 """
 
 from __future__ import annotations

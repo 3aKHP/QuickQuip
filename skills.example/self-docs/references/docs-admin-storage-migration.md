@@ -36,12 +36,12 @@
    - 如果还是 `schema 1` 或 `schema 2`，必须先用支持 `schema 3` 的旧版本程序，按当时的升级说明升级到 `schema 3`，然后再进行本次迁移。
 2. **完整备份现有数据与环境**：
    - **备份文件与目录**：根目录 `.env`、`config/`、`data/`、`llm_about/`、`skills/` 以及私有运维配置。
-   - **保留回退资产**：保留协议端（LLBot）登录资产、旧版程序包或旧版 Docker 镜像标识（Tag/Digest）。
+   - **保留回退资产**：保留协议端登录资产、旧版程序包或旧版 Docker 镜像标识（Tag/Digest）。
    - **数据库备份方式**：SQLite 数据库请使用一致性备份，或者在完全停止服务写入后直接完整复制备份整个数据目录。
    - **预留磁盘空间**：请确保磁盘有充足空间，迁移过程会自动生成并保存**三个旧数据库及定时消息文件的备份**。
 3. **停止 Bot 和 Web 服务（预留停服窗口）**：
    - 停止正在运行的 Bot 和 Web 服务，并**暂停会自动拉起它们的守护进程或服务管理任务**（如 systemd timer、cron、supervisor 等）。
-   - **LLBot 协议端可以继续保持运行**。请预留好停服维护窗口，待迁移和核对全部完成后再恢复服务。
+   - **独立运行的 OneBot 协议端可以继续保持运行**。请预留好停服维护窗口，待迁移和核对全部完成后再恢复服务。
 4. **更新容器挂载与 `.env` 部署变量**：
    - **Docker 环境**：合入新版 Compose 模板中的共享可写挂载 `config/managed/`，以及环境变量 `QUICKQUIP_MANAGED_CONTAINER=1`。
    - **配置工具准备**：如果准备使用 `qqconf` / `qqsync`，请在真实项目根目录的 `.env` 中设置 `QUICKQUIP_DEPLOY_LOCATION=local|cloud` 和 `QUICKQUIP_DEPLOY_RUNTIME=source|docker`（详见[部署方式设置](config-sync.md#先设置部署方式)）。

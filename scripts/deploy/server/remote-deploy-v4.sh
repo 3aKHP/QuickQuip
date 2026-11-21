@@ -185,8 +185,7 @@ verify_release() {
     done <<< "$images"
 }
 up() {
-    compose "$1" up -d --no-build --pull never --remove-orphans llbot || return 1
-    compose "$1" up -d --no-build --pull never --force-recreate --remove-orphans quickquip web-admin
+    compose "$1" up -d --no-build --pull never --force-recreate quickquip web-admin
 }
 # Copy configuration assets into fresh inodes; existing candidate assets have priority.
 copy_configuration_assets() {
@@ -340,16 +339,40 @@ configuration_health() {
         | "$Python" -c 'import json,sys; status=json.load(sys.stdin); sys.exit(0 if status["bot"]["heartbeat_at"] >= float(sys.argv[1]) else 1)' \
             "$started" >/dev/null 2>&1
 }
+connection_health() {
+    local release="$1" status=UNCONFIGURED check_script="" api_url=""
+    if [ -f "$Root/prod/sendkey.env" ]; then
+        api_url="$(bash -c 'source "$1" >/dev/null 2>&1; printf "%s" "${ONEBOT_STATUS_API_URL:-}"' _ "$Root/prod/sendkey.env")" || api_url=""
+    fi
+    if [ -n "$api_url" ]; then
+        if [ -n "${Incoming:-}" ] && [ -f "$Incoming/shared/scripts/ops/check_bot.sh" ]; then
+            check_script="$Incoming/shared/scripts/ops/check_bot.sh"
+        elif [ -f "$Root/scripts/ops/check_bot.sh" ] && grep -q 'ONEBOT_STATUS_API_URL' "$Root/scripts/ops/check_bot.sh"; then
+            check_script="$Root/scripts/ops/check_bot.sh"
+        fi
+        if [ -n "$check_script" ]; then
+            status="$(REMOTE_DIR="$Root" QUICKQUIP_OPS_RELEASE="$release" \
+                bash "$check_script" status)" || return 1
+        fi
+    fi
+    case "$status" in
+        ONLINE) return 0 ;;
+        UNCONFIGURED)
+            compose "$release" logs --tail 500 quickquip 2>&1 | grep -E 'Bot [0-9]+ connected' >/dev/null ;;
+        *) return 1 ;;
+    esac
+}
+
 health() {
     local release="$1" deadline=$((SECONDS + ${DEPLOY_HEALTH_TIMEOUT:-150})) bad container service
     while [ "$SECONDS" -lt "$deadline" ]; do
         bad=0
-        for service in llbot quickquip web-admin; do
+        for service in quickquip web-admin; do
             container="$(compose "$release" ps -q "$service")" || return 1
             [ -n "$container" ] && [ "$(docker inspect -f '{{.State.Running}}' "$container")" = true ] || bad=1
         done
         if [ "$bad" = 0 ] \
-            && compose "$release" logs --tail 500 quickquip 2>&1 | grep -E 'Bot [0-9]+ connected' >/dev/null \
+            && connection_health "$release" \
             && compose "$release" exec -T web-admin python -c \
                 'import urllib.request; urllib.request.urlopen("http://127.0.0.1:5104/ops/", timeout=5).close()' >/dev/null 2>&1; then
             if ! configuration_health "$release"; then
@@ -583,14 +606,16 @@ fi
 compose "$Id" config --quiet
 # Resolved values stay within the private transaction and never enter the release.
 compose "$Id" config --format json > "$Incoming/candidate-compose.json"
-llbot_image="$(compose "$Id" config --images llbot)"
-if ! docker image inspect "$llbot_image" >/dev/null 2>&1; then
-    pulled=0
-    for attempt in 1 2 3; do
-        if compose "$Id" pull llbot; then pulled=1; break; fi
-        sleep 10
-    done
-    [ "$pulled" = 1 ] || fail "LLBot pull failed before activation"
+if "$Python" -c 'import json,sys; sys.exit("llbot" not in json.load(sys.stdin)["services"])' < "$Incoming/candidate-compose.json"; then
+    llbot_image="$(compose "$Id" config --images llbot)"
+    if ! docker image inspect "$llbot_image" >/dev/null 2>&1; then
+        pulled=0
+        for attempt in 1 2 3; do
+            if compose "$Id" pull llbot; then pulled=1; break; fi
+            sleep 10
+        done
+        [ "$pulled" = 1 ] || fail "LLBot pull failed before activation"
+    fi
 fi
 compose "$Id" build quickquip
 # Version identity: deployed pyproject version + the server-side build

@@ -7,7 +7,7 @@
 | 目录 | 用途 | 常用入口 |
 |---|---|---|
 | [deploy/](deploy/README.md) | 云端 Docker 发布、回滚和迁移 | `bash scripts/deploy/deploy-v4.sh`、`scripts/deploy/deploy-v4.ps1` |
-| [ops/](ops/README.md) | 登录检查、定时巡检和宿主机指标 | `bash scripts/ops/check_bot_local.sh` |
+| [ops/](ops/README.md) | Bot 在线状态、定时巡检和宿主机指标 | `bash scripts/ops/check_bot_local.sh` |
 | [maintenance/](maintenance/README.md) | 数据回灌、词库更新和预置 Skill 同步 | 按对应维护任务选择脚本 |
 | `ci/` | 文档、示例、发行说明及依赖检查 | CI 与开发者检查使用 |
 | `check/` | 变更风险识别 | `bash scripts/check/deep-cr-trigger.sh dev` |

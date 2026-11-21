@@ -1,134 +1,93 @@
 <!-- Generated from docs/admin/onebot-adapters.md; do not edit -->
 
-# OneBot 适配器状态与选择
+# 接入 OneBot V11 协议端
 
-本文面向选择或更换 QQ 协议端的部署者。QuickQuip 通过 NoneBot2 与 OneBot V11 连接协议端；下文记录所需接口、各适配器的部署方案与本项目验证状态，以及迁移前检查清单。
+QuickQuip 通过 NoneBot2 使用 OneBot V11。部署者自行安装协议端，负责 QQ 登录、升级、登录态和恢复。本页说明如何建立连接，以及各项 QuickQuip 功能需要协议端提供的能力。
 
-更换适配器时，QuickQuip 业务代码无需改动——只需替换协议端部署、调整 `.env` 中的 OneBot 连接配置。历史上 NapCat → LLBot 的迁移即按此方式进行（见 [migration-napcat-to-llbot.md](migration-napcat-to-llbot.md)）。
+## 连接 QuickQuip
+
+按协议端自己的安装说明启动服务并登录机器人账号。连接鉴权启用时，在 QuickQuip 的根 `.env` 和协议端配置相同的 `ONEBOT_ACCESS_TOKEN`，WebSocket 握手使用 Bearer 令牌。根据部署位置选择下列一种连接方式。
+
+### 正向 WebSocket
+
+QuickQuip 主动连接协议端。在根 `.env` 中填写从 **Bot 进程**可达的地址。例如，Bot 和协议端同在一台主机上运行，且 Bot 使用主机 Python：
+
+```env
+DRIVER=~fastapi+~websockets
+ONEBOT_WS_URLS=["ws://127.0.0.1:3001/"]
+ONEBOT_ACCESS_TOKEN=replace_with_your_token
+```
+
+`3001` 是示例端口，请按协议端配置填写。Bot 在 Docker 内运行时，`127.0.0.1` 是 Bot 容器自身。使用从 Bot 容器可访问的协议端地址，或把两个容器加入同一个外部 Docker 网络，通过服务名或网络别名连接。
+
+### 反向 WebSocket
+
+协议端主动连接 QuickQuip。在根 `.env` 中设置 `ONEBOT_WS_URLS=[]`。在协议端填写 `ws://<Bot 可达地址>:8080/onebot/v11/ws` 和同一个访问令牌，端口用 Bot 实际监听的端口。反向连接需要支持 WebSocket 服务端的驱动，模板里的 `DRIVER` 可直接使用。
+
+Docker 模板在容器内监听 `8080`。两个容器共享网络时用 `ws://quickquip:8080/onebot/v11/ws`。协议端从 Docker 网络外接入时，在实际使用的 Compose 中将 Bot 端口映射到协议端可达的主机接口，并按需要限制可访问的来源。
+
+### 两个独立 Compose 使用共享网络
+
+在 Docker 主机上为两套服务建立一个外部网络。以下使用 `onebot-shared` 为示例网络名：
+
+```bash
+docker network create onebot-shared
+```
+
+将以下片段合入实际部署的 QuickQuip Compose。使用 `deploy-v4` 时编辑本地的 `prod/docker-compose.yml`。如果服务已有其他网络，保留原列表并添加 `onebot-shared`。
+
+```yaml
+services:
+  quickquip:
+    networks:
+      - default
+      - onebot-shared
+
+networks:
+  onebot-shared:
+    external: true
+```
+
+在协议端的独立编排中也把协议服务接入此网络。如果协议端在网络上的服务名是 `onebot`，且正向端口是 `3001`，QuickQuip 使用 `ONEBOT_WS_URLS=["ws://onebot:3001/"]`。启动或重建 Bot 后，在日志中确认目标账号已连接，再在一个测试群发送“早安”并检查回复。修改连接地址或令牌后重启源码进程，Docker 部署则用更新的 `.env` 重建 Bot 容器。
 
 ## QuickQuip 的 OneBot V11 边界
 
-部署候选须提供以下连接、事件、接口和消息段，再按文末清单检查实际收发与恢复能力。
+群聊和私聊的基础收发需要 `message.group`、`message.private`、`send_group_msg` 和 `send_private_msg`。正向 WebSocket 需要协议端上报 `meta_event.lifecycle` 的 `connect` 事件和 `self_id`，供 NoneBot 注册账号。消息与发送参数使用段数组。
 
-**连接拓扑**
-
-- QuickQuip 默认正向 WebSocket：`ONEBOT_WS_URLS` 指向适配器 WS 服务端，`DRIVER` 须包含 `~websockets`（纯 `~fastapi` 无 WS client 能力）。
-- 也支持反向 WS：适配器主动连接 QuickQuip 的 `ws://<bot 地址>:8080/onebot/v11/ws`，此时 QuickQuip 侧无需 WS client。
-- 鉴权统一走 `ONEBOT_ACCESS_TOKEN`（Bearer），两侧同值。
-
-**事件面**
-
-| 事件 | 用途 |
+| 功能 | 所需事件、调用或消息段 |
 |---|---|
-| `message.group` | 群消息入口；依赖 `sender.card` / `nickname` / `role`、`to_me`、reply 段 |
-| `message.private` | 私聊消息入口（会话管理、AI 配置、记忆管理） |
-| `message_sent`（自身消息回显） | 机器人自身发言入档（聊天归档与日/周/月报的 bot 口径）；需在适配器侧开启自身消息上报（LLBot WebUI 的 `reportSelfMessage`），未开启时归档缺 bot 自身发言 |
-| `notice.group_recall` / `notice.friend_recall` | 撤回事件，用于消息上下文清理 |
+| 命令与身份 | 群消息包括 `sender.card`、`nickname`、`role`。真实艾特使用 `at` 段。群成员名片查询使用 `get_group_member_info`，失败时显示已有名称或 QQ 号。 |
+| 引用 | 解析入站 `reply` 需要 `get_msg` 返回被引用的消息及发送者 ID。启用引用回复时使用出站 `reply`，协议端显式拒绝该段时送达正文。 |
+| 自消息归档 | 支持并启用扩展事件 `message_sent`。收到群自消息时归档一次，供日／周／月报使用。 |
+| 撤回 | `notice.group_recall` 和 `notice.friend_recall`，用于清理消息上下文。 |
+| 合并转发 | `send_group_forward_msg` 支持自定义节点 `name`、`uin`，`get_forward_msg` 支持读取嵌套节点。 |
+| 图片 | 出站 `image` 使用 `base64://` 或 HTTP(S) URL，入站图片的 `data.url` 需可从 Bot 直接下载。 |
+| 语音 | 出站 `record` 支持 base64。入站可直接提供转写文本，也可提供可读取的音频 URL 或文件。`get_record(out_format="wav")` 回退需要返回 Bot 所在环境可读的 `file` 路径。ASR 渠道须接受所得音频格式。 |
 
-**action 面**
+选择协议端时，按实际启用的功能核对该表。开启语音识别前用一条真实语音验证转写，QQ 原始 SILK／AMR 的应用侧兼容进度见 [Issue #354](https://github.com/3aKHP/QuickQuip/issues/354)。需要定时巡检时，按[巡检配置](../../scripts/ops/README.md)配置 HTTP API，使用 `get_status` 和 `get_login_info` 检查正向连接后的账号状态。
 
-| 调用 | 用途 |
+## 从随 QuickQuip 启动的 LLBot 迁移
+
+适用于旧版 Compose 声明了 `llbot` 服务的部署。可将原实现移到独立编排，也可换用其他协议端。
+
+1. 保存旧 Compose、根 `.env` 和旧端登录资产，记录现用镜像版本。为独立协议端准备网络、卷和连接配置。若计划复用原登录态，按协议端文档确认版本和挂载路径。
+2. 使用旧 Compose 停止其中的 `llbot` 服务，再启动独立协议端并登录。同一个 QQ 账号按顺序切换。保留旧容器和状态目录以便恢复。
+3. 在应用 Compose 中移除 `llbot` 服务及 Bot 的 `depends_on.llbot`，更新根 `.env` 的 OneBot 连接。已有 `deploy-v4` 版本布局时，先通过 [qqsync](config-sync.md) 把应用 Compose 和连接配置应用到当前版本，再执行下一次代码发布。手动 Compose 部署使用更新后的文件重新创建 Bot。
+4. 确认 QuickQuip 连的是预期账号，检查群聊、私聊及自己启用的功能，再更新[运维巡检](../../scripts/ops/README.md)。配置和业务数据继续使用原有 QuickQuip 目录。
+
+需要撤销协议端切换时，先停止新端与该账号的连接，再恢复旧端、网络及对应的 QuickQuip 连接配置。应用版本回滚沿用当前根 `.env`。显式选择仍声明 `llbot` 的旧应用发行目录时，Compose 会按其依赖启动旧服务，请先确认恢复方案和账号归属。
+
+## 公开兼容记录
+
+以下记录用于定位已验证的版本和场景。实际接入以部署者选用的版本及其功能检查为准。
+
+| 实现 | 已记录的验证与状态 |
 |---|---|
-| `send_group_msg` / `send_private_msg` | 普通发送（段数组格式） |
-| `send_group_forward_msg` | 合并转发；自定义节点 `name` / `uin` 必须被尊重 |
-| `get_forward_msg` | 合并转发递归读取（深度 8 + 循环检测） |
-| `get_record(file, out_format="wav")` | 语音转本地路径，供 ASR 链路使用 |
-| `get_msg` | NoneBot 对 reply 段的隐式强依赖（返回被引用消息的 message / sender / user_id） |
+| [LLBot 7.3.2](https://github.com/LLOneBot/LuckyLilliaBot) | 历史验收使用镜像 `initialencounter/llonebot:v7.12.14-7.3.2-45758`。QuickQuip v1.12.2 验证群／私聊、图片、语音 ASR、合并转发和撤回。v1.16.1 开发期验证出站 `reply` 与 `at`。 |
+| LLBot 8.x | 本项目暂无公开生产验收记录。 |
+| [NapCat](https://github.com/NapNeko/NapCatQQ) | 曾用于生产。2026 年 5 月的离线与迁移记录见 [NapCat → LLBot](migration-napcat-to-llbot.md)。选用新版本时重新按当前契约验证。 |
+| [SnowLuma](https://github.com/SnowLuma/SnowLuma) | 历史评估覆盖容器部署与主要调用。接入前按所选版本核对使用条款、QQ 客户端版本、媒体与转发兼容，以及重新登录和长期在线情况。 |
 
-**消息段**
+## 上线前核对
 
-- 出站：`text`、`at`、`image`（base64:// 或 http(s) URL）、`record`（base64）、`reply`（引用锚定；协议端显式拒绝时发送侧去段重发正文）。
-- 入站：`image` 段 `data.url` 需可直连 GET（LLM 视觉、图生图直下）；语音经 `data.url` → 本地路径 → `get_record` 三级回退。
-
-**运行时职责**（适配器无关）
-
-`.env`（应用密钥与连接配置）、`data/`（持久化数据）、`config/`（运行配置）、Web Admin（5104）、日志目录的职责划分见 [deployment.md](deployment.md)。
-
-## 适配器 profile
-
-每个适配器独立记录部署形态、已验证能力与准入状态。**状态取值**：`生产基线`（默认 Compose 路径指向它）/ `条件性候选`（满足前置验证后可进入迁移评估）/ `NO-GO`（当前不评估，复评需重新举证）/ `不在候选池`。
-
-### LLBot 7.3.2 — 生产基线
-
-| 项 | 值 |
-|---|---|
-| 上游 | [LLOneBot/LuckyLilliaBot](https://github.com/LLOneBot/LuckyLilliaBot) |
-| 镜像 | `initialencounter/llonebot:v7.12.14-7.3.2-45758`（固定 tag，不使用 `latest`） |
-| 原理 | PMHQ 外部内存 Hook 真 QQ 客户端（独立进程，QQ 进程空间无修改） |
-| 运行形态 | Docker；内置 NTQQ 3.2.25-45758 |
-| OneBot 入口 | 正向 WS `3001`（token 鉴权）；反向 WS 需在 WebUI 配置 |
-| WebUI | `3080`（扫码登录、网络方式配置） |
-| 卷 | `llbot-qq/`（登录态，切勿丢失）、`llbot-data/`（配置与运行时数据） |
-| 快速登录 | `QUICK_LOGIN_QQ` 环境变量；有时效性，失效需重新扫码 |
-| 已验证能力 | v1.12.2 Windows/Linux Docker 验收：群/私聊、图片、语音 ASR、合并转发、撤回事件全链路真实消息验证；v1.16.1-dev 验收（2026-10）：群聊 LLM 回复的出站 `reply` 段引用锚定（客户端正常渲染引用预览）与“@名字”转真实 `at` 段提醒 |
-
-**版本 pin 说明**：上游 `latest` 自 2026-08 起漂移到 pmhq 8.x——启动即要求在 auth.luckylillia.com 注册获取 `auth_token`（部分账号需人工审核），新部署会直接卡死在授权提示上。因此模板固定在 7.3.2。如需更换版本：NTQQ 强制升级导致旧构建无法登录时，到上游 Docker Hub 挑选新的 `vX.Y.Z-…` tag 更新模板；升级前先确认目标版本的授权要求。
-
-**风险**：7.x 线已停止更新（最后 tag 2026-05-24），后续维护有限；版本跑道受 NTQQ 强制升级地板限制，到期需更换基座。
-
-**运维细节**（DNS entrypoint 修正、重启与快速登录、登录态过期处理）：见 [deployment.md](deployment.md) 的 LLBot 相关小节。
-
-### LLBot 8.x — 不在候选池
-
-LLBot 8.x 未经过本项目生产验证，不在当前候选池。
-
-### NapCat — NO-GO，等待严格复评
-
-| 项 | 值 |
-|---|---|
-| 上游 | [NapNeko/NapCatQQ](https://github.com/NapNeko/NapCatQQ)（MIT，全开源） |
-| 原理 | Electron/JS 注入真 QQ 客户端 |
-| 历史地位 | QuickQuip 曾以 NapCat 为默认适配器，2026-05 因风控波迁出（[迁移记录](migration-napcat-to-llbot.md)） |
-
-**NO-GO 依据**：2026 年 5 月中下旬腾讯高强度风控打击期间，生产环境反复出现频繁 `KickedOffLine`、静默断联（无错误日志停止推送、手机端同步被踢），反检测实验分支（[PR #1768](https://github.com/NapNeko/NapCatQQ/pull/1768)）未合入且未解决问题（社区讨论见 [Issue #1728](https://github.com/NapNeko/NapCatQQ/issues/1728)）。
-
-**复评门槛**（全部满足才重新进入评估）：
-
-- 固定当前正式 Docker 发行物与目标 QQ 版本，在该组合上收集运行记录。
-- 隔离测试账号，至少 72 小时（最好 7 天）连续运行。
-- 覆盖：踢下线、静默断联、重新登录、二维码刷新、手机端并行登录、图片/语音/合并转发、撤回事件。
-
-### SnowLuma — 条件性候选
-
-| 项 | 值 |
-|---|---|
-| 上游 | [SnowLuma/SnowLuma](https://github.com/SnowLuma/SnowLuma) |
-| 原理 | native addon ptrace 注入真 NTQQ 客户端，解析其内部协议包并转换为 OneBot V11 |
-| 运行形态 | Docker（官方镜像内置 Linux QQ + noVNC，需 `SYS_PTRACE` 等 capability）/ Windows 原生 |
-| OneBot 入口 | 正向 WS `3001`（token 鉴权），与 LLBot 拓扑兼容 |
-| 登录 | 仅扫码（noVNC 或桌面 QQ 窗口）；无快速登录对应物 |
-
-**已评估优点**：OneBot action 面覆盖 QuickQuip 主要需求（含 NapCat 扩展 `send_group_forward_msg` / `get_record` 等）；hook 真客户端架构，协议签名由客户端自身完成（公开架构文档与源码可查）；当前无远程授权设施，无人值守仅需本地 EULA 环境变量确认。
-
-**前置条件**（进入生产前必须完成）：
-
-1. **部署授权澄清**：其 TS 层为源码可见非商业许可（非 OSI），[EULA 1.1 第 5.4 条](https://github.com/SnowLuma/SnowLuma/blob/main/EULA.md)要求专有组件并入第三方 Docker 镜像或通过自动化脚本部署前取得书面授权；部署前需确认所用方式的授权。条款核对日期为 2026-10-14。
-2. **运行时出流量审计**：核心 native hook 组件闭源分发，需以容器出向网络目标清单收口隐私边界。
-3. **QQ 版本跟进实测**：QQ Linux 3.2.32 存在"hook 连接成功但登录身份不上报"的公开报告（issue 已被自动关闭，未确认修复）；需 pin 一个版本观察完整的 NTQQ 升级适配周期。
-4. **兼容实测三件套**：`send_group_forward_msg` 自定义 `uin`/`name` 节点、`get_record` 返回本地路径形态、入站 `image` 段 `data.url` 直连性。
-5. **隔离账号试运行**：2-4 周风控观察（全新设备登录，登录态不可从 LLBot 迁移）。
-
-## 迁移前统一验证清单
-
-任何候选适配器进入生产前，单独固定以下证据：
-
-1. 源码、发行物、镜像 tag 与 digest。
-2. 目标 QQ 客户端版本、架构和部署形态。
-3. OneBot 连接成功与在线状态。
-4. 群消息、私聊消息和自消息回显。
-5. `text`、`at`、`image`、`record` 的收发。
-6. 合并转发节点的自定义 `name`、`uin`、递归读取与长消息回退。
-7. `get_record(out_format="wav")` 返回值及 ASR 实际链路。
-8. 图片/语音 URL 的有效期、直连性和失败行为。
-9. 撤回事件和消息上下文清理。
-10. 重启、登录态恢复、断线重连和重新登录。
-11. 运行期间的出向网络目标与隐私边界。
-12. 账号风控、设备风险、静默断联和不可恢复登录故障。
-
-**迁移记录**：按源码、发行物、运行时、真实消息和长周期稳定性分别记录检查结果，附具体版本、操作与日志。
-
-## profile 状态更新规则
-
-- 状态变更（如候选 → 生产基线、NO-GO → 复评中）须附对应检查的证据链接或验收记录。
-- 每次适配器相关 release 验收后，更新本页的已验证能力与版本 pin。
-- 历史迁移记录（[migration-napcat-to-llbot.md](migration-napcat-to-llbot.md)）只记录当时的迁移决策与环境，不承担现行运维职责；现行部署细节以本页 profile 与 [deployment.md](deployment.md) 为准。
+记录实际的协议端版本、镜像标识、QQ 客户端版本和连接方式。在独立部署中验证账号在线、群／私聊收发、已启用的引用与媒体能力、撤回、自消息归档，以及重启和断线重连。把可公开复现的版本与结果加到兼容记录中。

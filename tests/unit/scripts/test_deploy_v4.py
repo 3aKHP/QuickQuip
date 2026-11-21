@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from copy import deepcopy
 import io
 import json
 import os
@@ -60,7 +61,7 @@ if args[0] == "compose":
     if "config" in args:
         if "--images" in args:
             print("quickquip-app:" + release)
-        elif "--no-interpolate" in args:
+        elif pathlib.Path(args[args.index("-f") + 1]).parents[1] == root:
             print(json.dumps({"services": {
                 name: {"container_name": name, "environment": {"TOKEN": "${TOKEN:-}"}}
                 for name in ("llbot", "quickquip", "web-admin")
@@ -158,6 +159,8 @@ def test_success_commits_environment_and_previous(deployment):
     assert (root / ".env").read_text() == "ONEBOT_ACCESS_TOKEN=new\n"
     assert (root / ".env").stat().st_mode & 0o777 == 0o600
     assert not inbox.exists()
+    calls = [json.loads(line) for line in (root / "calls").read_text().splitlines()]
+    assert all("llbot" not in call and "--remove-orphans" not in call for call in calls)
 
 
 @pytest.mark.parametrize("exit_code", [0, 17])
@@ -363,16 +366,18 @@ def test_bash_rejects_legacy_single_dash_aliases(legacy):
     assert "Unknown argument" in result.stderr
 
 
-def test_shared_transaction_restores_token_and_missing_files(tmp_path):
+@pytest.mark.parametrize("bundled_llbot", [False, True])
+def test_shared_transaction_restores_token_and_missing_files(tmp_path, bundled_llbot):
     root = tmp_path / "root"
     root.mkdir()
     incoming = tmp_path / "incoming"
     (incoming / "shared/prod").mkdir(parents=True)
     (incoming / "shared/.env").write_text("ONEBOT_ACCESS_TOKEN=new\r\n")
     (incoming / "shared/prod/sendkey.env").write_text("SENDKEY=synthetic\n")
-    (incoming / "candidate-compose.json").write_text(
-        json.dumps({"services": {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}})
-    )
+    services = {"quickquip": {"environment": {"ONEBOT_ACCESS_TOKEN": "new"}}}
+    if bundled_llbot:
+        services["llbot"] = {}
+    (incoming / "candidate-compose.json").write_text(json.dumps({"services": services}))
     path = root / "prod/llbot-data/default_config.json"
     path.parent.mkdir(parents=True)
     original = b'{"ob11":{"connect":[{}, {"token":"old","url":"old-url"}]}}'
@@ -380,7 +385,11 @@ def test_shared_transaction_restores_token_and_missing_files(tmp_path):
     backup = incoming / "backup"
     STATE["snapshot_shared"](root, incoming, backup)
     STATE["apply_shared"](root, incoming, backup)
-    assert json.loads(path.read_text())["ob11"]["connect"][1]["token"] == "new"
+    if bundled_llbot:
+        assert json.loads(path.read_text())["ob11"]["connect"][1]["token"] == "new"
+    else:
+        assert path.read_bytes() == original
+        assert not (backup / "prod/llbot-data").exists()
     assert (root / ".env").read_bytes() == b"ONEBOT_ACCESS_TOKEN=new\n"
     STATE["restore_shared"](root, backup)
     assert path.read_bytes() == original
@@ -454,11 +463,10 @@ def test_sudo_new_shared_file_uses_invoking_user(tmp_path, monkeypatch):
 
 
 def _write_fake_docker_for_baseline(
-    bin_dir: Path, source: str = "${QUICKQUIP_ROOT:-..}/skills"
+    bin_dir: Path, source: str = "../skills", *, bundled_llbot=True,
 ) -> None:
     services = {
         "services": {
-            "llbot": {"container_name": "llbot"},
             "quickquip": {
                 "container_name": "quickquip",
                 "volumes": [{"type": "bind", "source": source, "target": "/app/skills"}],
@@ -466,14 +474,30 @@ def _write_fake_docker_for_baseline(
             "web-admin": {"container_name": "web-admin"},
         }
     }
-    payload = json.dumps(services)
+    if bundled_llbot:
+        services["services"]["llbot"] = {"container_name": "llbot"}
+    else:
+        services["services"]["env-agent"] = {
+            "volumes": [{
+                "type": "bind", "source": "..", "target": "/host/project",
+            }],
+        }
+    uninterpolated = deepcopy(services)
+    for spec in uninterpolated["services"].values():
+        for volume in spec.get("volumes", []):
+            volume["type"] = "volume"
+            volume["source"] = volume["source"].replace("..", "${QUICKQUIP_ROOT:-..}", 1)
     docker = bin_dir / "docker"
     docker.write_text(
         f"#!{sys.executable}\n"
         "import sys\n"
         "args = sys.argv[1:]\n"
         'if args[0] == "compose" and "config" in args and "--no-interpolate" in args:\n'
-        f"    print({payload!r})\n"
+        f"    print({json.dumps(uninterpolated)!r})\n"
+        'elif args[0] == "compose" and "config" in args and "--format" in args:\n'
+        f"    print({json.dumps(services)!r})\n"
+        'elif args[0] == "compose" and "ps" in args and args[-1] == "env-agent":\n'
+        '    print("env-agent-container-id")\n'
         'elif args[0] == "inspect":\n'
         '    print("sha256:fake")\n'
     )
@@ -512,14 +536,20 @@ def _write_fake_sudo(bin_dir: Path, available: bool) -> None:
     sudo.chmod(0o700)
 
 
-@pytest.mark.parametrize("shared", ["skills", "config/managed", "config/managed/child"])
-def test_capture_baseline_keeps_shared_volumes_on_root(tmp_path, monkeypatch, shared):
+@pytest.mark.parametrize(("shared", "bundled_llbot"), [
+    ("skills", True), ("config/managed", False), ("config/managed/child", True),
+])
+def test_capture_baseline_keeps_shared_volumes_on_root(
+    tmp_path, monkeypatch, shared, bundled_llbot,
+):
     root = _minimal_server_root(tmp_path)
     _write_skill(root / "skills/demo/SKILL.md", "---\nname: demo\ndescription: 演示\n---\n正文\n")
     _write_skill(root / shared / "state", "shared content")
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_fake_docker_for_baseline(bin_dir, source="${QUICKQUIP_ROOT:-..}/" + shared)
+    _write_fake_docker_for_baseline(
+        bin_dir, source="../" + shared, bundled_llbot=bundled_llbot,
+    )
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
     baseline = tmp_path / "baseline"
     STATE["capture_baseline"](root, baseline)
@@ -528,23 +558,20 @@ def test_capture_baseline_keeps_shared_volumes_on_root(tmp_path, monkeypatch, sh
     (volume,) = config["services"]["quickquip"]["volumes"]
     assert volume["source"] == str(root / shared)
     assert config["services"]["quickquip"]["image"] == f"quickquip-quickquip:{baseline.name}"
+    if not bundled_llbot:
+        agent = config["services"]["env-agent"]
+        assert agent["volumes"][0]["source"] == str(root)
+        assert "env_file" not in agent
+        assert set(config["services"]) == {"quickquip", "web-admin", "env-agent"}
 
 
-def test_resolve_defaulted_variables():
-    resolve = STATE["resolve_defaulted_variables"]
-    assert resolve("${QUICKQUIP_ROOT:-..}/skills") == "../skills"
-    assert resolve("${QUICKQUIP_ROOT:-/opt/QuickQuip}/skills") == "/opt/QuickQuip/skills"
-    assert resolve("/opt/QuickQuip/skills") == "/opt/QuickQuip/skills"
-    assert resolve("${QUICKQUIP_ROOT}/skills") == "${QUICKQUIP_ROOT}/skills"
-
-
-def test_capture_baseline_rejects_variable_without_default(tmp_path, monkeypatch):
+def test_capture_baseline_rejects_external_bind_mount(tmp_path, monkeypatch):
     root = _minimal_server_root(tmp_path)
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
-    _write_fake_docker_for_baseline(bin_dir, source="${QUICKQUIP_ROOT}/skills")
+    _write_fake_docker_for_baseline(bin_dir, source=str(tmp_path / "external"))
     monkeypatch.setenv("PATH", f"{bin_dir}:{os.environ['PATH']}")
-    with pytest.raises(ValueError, match="unsupported bind mount"):
+    with pytest.raises(ValueError, match="external bind mount requires manual migration"):
         STATE["capture_baseline"](root, tmp_path / "baseline")
 
 
@@ -1171,3 +1198,68 @@ def test_confirmation_failure_retains_commit_and_recovery_material(deployment):
     assert (inbox / 'remote-deploy-v4.sh').exists()
     calls = [json.loads(line) for line in (root / 'calls').read_text().splitlines()]
     assert not any('recover' in call for call in calls)
+
+
+@pytest.mark.parametrize("legacy_status", ["IDLE", "OFFLINE"])
+def test_rollback_recovery_ignores_restored_legacy_check_bot(deployment, legacy_status):
+    root, inbox, _ = deployment
+    legacy_ops = root / "scripts/ops"
+    legacy_ops.mkdir(parents=True)
+    legacy_script = legacy_ops / "check_bot.sh"
+    legacy_script.write_text(f"#!/bin/bash\necho {legacy_status}\n")
+    legacy_script.chmod(0o700)
+    incoming_ops = inbox / "shared/scripts/ops"
+    incoming_ops.mkdir(parents=True)
+    incoming_script = incoming_ops / "check_bot.sh"
+    incoming_script.write_text("#!/bin/bash\n# ONEBOT_STATUS_API_URL\necho ONLINE\n")
+    incoming_script.chmod(0o700)
+
+    result = run_deploy(deployment, FAIL_UP="new", DEPLOY_HEALTH_TIMEOUT="3")
+    assert result.returncode == 1, result.stdout + result.stderr
+    assert "RECOVERY SUCCEEDED" in result.stdout
+    assert "RECOVERY FAILED" not in result.stdout
+    assert (root / "current").readlink() == Path("releases") / OLD
+    assert legacy_script.read_text() == f"#!/bin/bash\necho {legacy_status}\n"
+
+
+def test_connection_health_uses_incoming_check_bot_when_configured(deployment):
+    root, inbox, _ = deployment
+    (root / "prod/sendkey.env").write_text("ONEBOT_STATUS_API_URL=http://onebot.test:3000\n")
+    legacy_ops = root / "scripts/ops"
+    legacy_ops.mkdir(parents=True)
+    (legacy_ops / "check_bot.sh").write_text("#!/bin/bash\necho OFFLINE\n")
+    incoming_ops = inbox / "shared/scripts/ops"
+    incoming_ops.mkdir(parents=True)
+    trace = root / "check-trace"
+    incoming_script = incoming_ops / "check_bot.sh"
+    incoming_script.write_text(
+        "#!/bin/bash\n"
+        "# ONEBOT_STATUS_API_URL\n"
+        f'echo "$QUICKQUIP_OPS_RELEASE:$1" >> "{trace}"\n'
+        'echo "${TEST_CHECK_STATUS:-ONLINE}"\n'
+    )
+    incoming_script.chmod(0o700)
+
+    ok = run_deploy(deployment, TEST_CHECK_STATUS="ONLINE", DEPLOY_HEALTH_TIMEOUT="3")
+    assert ok.returncode == 0, ok.stdout + ok.stderr
+    assert f"{NEW}:status" in trace.read_text().splitlines()
+
+
+def test_connection_health_fails_deploy_when_configured_check_bot_reports_offline(deployment):
+    root, inbox, _ = deployment
+    (root / "prod/sendkey.env").write_text("ONEBOT_STATUS_API_URL=http://onebot.test:3000\n")
+    incoming_ops = inbox / "shared/scripts/ops"
+    incoming_ops.mkdir(parents=True)
+    incoming_script = incoming_ops / "check_bot.sh"
+    incoming_script.write_text(
+        "#!/bin/bash\n"
+        "# ONEBOT_STATUS_API_URL\n"
+        'if [ "$QUICKQUIP_OPS_RELEASE" = "' + NEW + '" ]; then echo OFFLINE; else echo ONLINE; fi\n'
+    )
+    incoming_script.chmod(0o700)
+
+    failed = run_deploy(deployment, DEPLOY_HEALTH_TIMEOUT="1")
+    assert failed.returncode == 1, failed.stdout + failed.stderr
+    assert "health FAILED" in failed.stdout
+    assert "RECOVERY SUCCEEDED" in failed.stdout
+    assert (root / "current").readlink() == Path("releases") / OLD
