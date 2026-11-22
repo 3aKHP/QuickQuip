@@ -230,7 +230,7 @@ data/
 ├── daily_msgs/             # 旧每日消息 JSONL（已退役，仅回灌脚本读取后可清理）
 ├── wordcloud_msgs/         # 旧词云消息 JSONL（已退役，仅回灌脚本读取后可清理）
 ├── logs/                   # loguru 文件日志（保留 14 天）
-├── fonts/                  # 词云字体文件（手动放置）
+├── fonts/                  # 中文字体文件（手动放置，词云 / SVG 画图 / 长消息转图共用）
 ├── tieba/
 │   ├── pool.json           # 贴吧帖子池
 │   └── storage_state.json  # 贴吧登录态（Playwright 导出）

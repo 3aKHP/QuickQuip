@@ -148,7 +148,8 @@ def build_responses_payload(
         "input": serialize_input_items(
             request.messages, prepared_images, provider_id=config.id,
             profile_id=(profile.profile_id if request.allow_tool_calls
-                        and request.builtin_search else "")
+                        and request.builtin_search else ""),
+            allow_plaintext_reasoning=profile.allow_plaintext_reasoning,
         ),
         "store": STORE,
         "stream": stream,
@@ -185,6 +186,7 @@ def serialize_input_items(
     *,
     provider_id: str,
     profile_id: str = "",
+    allow_plaintext_reasoning: bool = False,
 ) -> list[dict[str, Any]]:
     declared: set[str] = set()
     answered: set[str] = set()
@@ -227,7 +229,9 @@ def serialize_input_items(
             # （内存直传，同 provider/model）与历史投影的跨轮原生回放
             # （history_projection 已完成 owner 五元组校验与确定性守门）。
             items = validate_output_items(
-                message.native_content, provider_id=provider_id
+                message.native_content,
+                provider_id=provider_id,
+                allow_plaintext_reasoning=allow_plaintext_reasoning,
             )
             for item in items:
                 if item.get("type") == "function_call":

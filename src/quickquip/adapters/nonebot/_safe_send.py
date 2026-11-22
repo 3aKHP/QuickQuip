@@ -7,6 +7,8 @@ matcher.send 会把 str 安全包装成文本段，但直调 ``bot.send_group_ms
 
 from __future__ import annotations
 
+import base64
+
 from nonebot.adapters.onebot.v11 import Message, MessageSegment
 
 
@@ -17,6 +19,15 @@ async def send_group_text(bot, group_id: int, text: str) -> None:
     单个对象而非段数组，不符合 OneBot V11 的 message 规范（string | array）。
     """
     await bot.send_group_msg(group_id=group_id, message=Message([MessageSegment.text(text)]))
+
+
+async def send_group_image(bot, group_id: int, image_bytes: bytes) -> None:
+    """以单 image 段发送群图片（array 段格式，base64 载荷）。"""
+    b64 = base64.b64encode(image_bytes).decode("ascii")
+    await bot.send_group_msg(
+        group_id=group_id,
+        message=Message([MessageSegment.image(f"base64://{b64}")]),
+    )
 
 
 async def send_private_text(bot, user_id: int, text: str) -> None:

@@ -25,7 +25,12 @@ from typing import Any
 
 from quickquip.llm.provider.base import LLMProviderError, LLMResponse
 from quickquip.llm.provider.openai_responses.profiles import ResponsesProfile
-from quickquip.llm.provider.openai_responses.response import _message_text, parse_responses_body
+from quickquip.llm.provider.openai_responses.response import (
+    _message_text,
+    _plaintext_reasoning_text,
+    _summary_text,
+    parse_responses_body,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +51,7 @@ _TOLERATED_EVENTS = frozenset(
         "response.reasoning_summary_part.added",
         "response.reasoning_summary_part.done",
         "response.reasoning_summary_text.done",
+        "response.reasoning_text.done",
         "response.function_call_arguments.done",
         # 内置 image_generation 工具的进度事件族（官方语义事件）：codex 类
         # 后端会在服务端注入该工具（请求未声明也会出现）；产出条目由
@@ -76,6 +82,9 @@ _RELAY_EVENTS = frozenset(
     }
 )
 
+# responses-plaintext-reasoning 兼容第三方端点的明文推理别名事件。
+_PLAINTEXT_REASONING_TOLERATED_EVENTS = frozenset({"response.reasoning.done"})
+
 # response.failed 的致命错误码白名单：重试必然徒劳；表外的服务端错误
 # 视为瞬态（经 status_code=500 走基座可重试分类）。
 _FATAL_FAILURE_CODES = frozenset(
@@ -100,6 +109,7 @@ def fold_stream_events(
     """把一次 SSE 流的事件列表折叠为终态 ``LLMResponse``（含交叉验证）。"""
     streamed_content: list[str] = []
     streamed_reasoning: list[str] = []
+    streamed_plaintext_reasoning: list[str] = []
     streamed_arguments: dict[int, str] = {}
     relay_done_items: list[dict[str, Any]] = []
     terminal: dict[str, Any] | None = None
@@ -150,6 +160,13 @@ def fold_stream_events(
             if not isinstance(delta, str):
                 raise _malformed("reasoning delta 畸形。")
             streamed_reasoning.append(delta)
+        elif event_type == "response.reasoning_text.delta" or (
+            profile.allow_plaintext_reasoning and event_type == "response.reasoning.delta"
+        ):
+            delta = event.get("delta")
+            if not isinstance(delta, str):
+                raise _malformed("reasoning text delta 畸形。")
+            streamed_plaintext_reasoning.append(delta)
         elif event_type == "response.function_call_arguments.delta":
             output_index = event.get("output_index")
             delta = event.get("delta")
@@ -230,6 +247,11 @@ def fold_stream_events(
             )
         elif event_type in _TOLERATED_EVENTS:
             continue
+        elif (
+            profile.allow_plaintext_reasoning
+            and event_type in _PLAINTEXT_REASONING_TOLERATED_EVENTS
+        ):
+            continue
         elif profile.recognize_relay_events and event_type in _RELAY_EVENTS:
             continue
         else:
@@ -259,7 +281,10 @@ def fold_stream_events(
         terminal, relay_done_items, profile=profile, fail=_malformed
     )
     response = parse_responses_body(
-        effective_terminal, provider_id=provider_id, fallback_model=fallback_model
+        effective_terminal,
+        provider_id=provider_id,
+        fallback_model=fallback_model,
+        profile=profile,
     )
 
     content = "".join(streamed_content)
@@ -267,8 +292,13 @@ def fold_stream_events(
     if content and content != raw_text:
         raise _malformed("流式正文与终态 items 不一致。")
     reasoning = "".join(streamed_reasoning)
-    if reasoning and reasoning != _response_reasoning(response):
+    if reasoning and reasoning != _summary_text(response.native_blocks or []):
         raise _malformed("流式 reasoning 与终态 items 不一致。")
+    plaintext_reasoning = "".join(streamed_plaintext_reasoning)
+    if plaintext_reasoning and plaintext_reasoning != _plaintext_reasoning_text(
+        response.native_blocks or []
+    ):
+        raise _malformed("流式明文 reasoning 与终态 items 不一致。")
     output_items = effective_terminal.get("output") or []
     for output_index, arguments_text in streamed_arguments.items():
         item = (
@@ -287,13 +317,6 @@ def fold_stream_events(
                 "与终态 item 不一致。"
             )
     return response
-
-
-def _response_reasoning(response: LLMResponse) -> str:
-    for block in response.thinking_blocks:
-        if block.get("type") == "reasoning":
-            return str(block.get("reasoning_content", ""))
-    return ""
 
 
 def _reconcile_relay_terminal(

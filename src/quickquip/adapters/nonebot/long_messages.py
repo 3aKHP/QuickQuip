@@ -3,13 +3,15 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from quickquip.adapters.nonebot._safe_send import send_group_text
+from quickquip.adapters.nonebot._safe_send import send_group_image
+from quickquip.common.text_image import render_text_to_image
 
 logger = logging.getLogger(__name__)
 
-# OneBot 协议实现端（NapCat / LLBot）在单条消息超过 ~2 KB 时可能截断。
+# OneBot 协议实现端（NapCat / LLBot）在单条节点超过 ~2 KB 时可能截断。
 # 按段落 / 换行拆分，保持在限制以内。
 _MAX_SEND_CHARS = 800
+_IMAGE_FALLBACK_FOOTER = "合并转发不可用，已转为长图发送"
 
 
 def split_long_message(content: str, max_chars: int = _MAX_SEND_CHARS) -> list[str]:
@@ -44,6 +46,7 @@ async def send_long_group_message(
     node_name: str,
     log_name: str,
 ) -> None:
+    """优先以群合并转发发送长文；失败时降级渲染为单张长图发送，避免多条文本刷屏。"""
     chunks = split_long_message(content)
     try:
         await bot.call_api(
@@ -62,7 +65,11 @@ async def send_long_group_message(
             ],
         )
     except Exception:
-        logger.warning("%s: forward msg failed, falling back to chunked send", log_name)
-        for chunk in chunks:
-            await send_group_text(bot, group_id, chunk)
-            await asyncio.sleep(0.5)
+        logger.warning("%s: forward msg failed, falling back to long image", log_name)
+        image_bytes = await asyncio.to_thread(
+            render_text_to_image,
+            content,
+            title=node_name,
+            footer=_IMAGE_FALLBACK_FOOTER,
+        )
+        await send_group_image(bot, group_id, image_bytes)

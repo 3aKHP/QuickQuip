@@ -34,28 +34,31 @@ class DailySummaryStore:
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS summaries (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    group_id     TEXT NOT NULL,
-                    summary_date TEXT NOT NULL,
-                    generated_at TEXT NOT NULL,
-                    published_at TEXT DEFAULT NULL,
-                    model_used   TEXT,
-                    run_id       TEXT,
-                    char_count   INTEGER,
-                    content      TEXT NOT NULL,
+                    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id           TEXT NOT NULL,
+                    summary_date       TEXT NOT NULL,
+                    generated_at       TEXT NOT NULL,
+                    published_at       TEXT DEFAULT NULL,
+                    publish_attempts   INTEGER NOT NULL DEFAULT 0,
+                    last_publish_error TEXT DEFAULT NULL,
+                    model_used         TEXT,
+                    run_id             TEXT,
+                    char_count         INTEGER,
+                    content            TEXT NOT NULL,
                     UNIQUE(group_id, summary_date)
                 )
             """)
-            # Migrate: add published_at column if this DB predates it
-            try:
-                conn.execute("ALTER TABLE summaries ADD COLUMN published_at TEXT DEFAULT NULL")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
-            # Migrate: add run_id column（1.15.3 报文生成日志关联）if this DB predates it
-            try:
-                conn.execute("ALTER TABLE summaries ADD COLUMN run_id TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+            # Migrate: add columns if this DB predates them
+            for ddl in (
+                "ALTER TABLE summaries ADD COLUMN published_at TEXT DEFAULT NULL",
+                "ALTER TABLE summaries ADD COLUMN run_id TEXT",
+                "ALTER TABLE summaries ADD COLUMN publish_attempts INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE summaries ADD COLUMN last_publish_error TEXT DEFAULT NULL",
+            ):
+                try:
+                    conn.execute(ddl)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
             conn.commit()
         finally:
             conn.close()
@@ -79,12 +82,14 @@ class DailySummaryStore:
                     (group_id, summary_date, generated_at, model_used, run_id, char_count, content)
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(group_id, summary_date) DO UPDATE SET
-                    generated_at = excluded.generated_at,
-                    model_used   = excluded.model_used,
-                    run_id       = excluded.run_id,
-                    char_count   = excluded.char_count,
-                    content      = excluded.content,
-                    published_at = NULL
+                    generated_at       = excluded.generated_at,
+                    model_used         = excluded.model_used,
+                    run_id             = excluded.run_id,
+                    char_count         = excluded.char_count,
+                    content            = excluded.content,
+                    published_at       = NULL,
+                    publish_attempts   = 0,
+                    last_publish_error = NULL
                 """,
                 (str(group_id), summary_date, generated_at,
                  model_used, run_id, len(content), content),
@@ -126,10 +131,39 @@ class DailySummaryStore:
         conn = self._connect()
         try:
             conn.execute(
-                "UPDATE summaries SET published_at = ? WHERE group_id = ? AND summary_date = ?",
+                "UPDATE summaries SET published_at = ?, last_publish_error = NULL "
+                "WHERE group_id = ? AND summary_date = ?",
                 (published_at, str(group_id), summary_date),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    def record_publish_failure(
+        self,
+        group_id: int | str,
+        summary_date: str,
+        error: str,
+    ) -> int:
+        """递增发布失败次数并记录最近一次错误，返回最新尝试次数。"""
+        if self._unavailable:
+            raise RuntimeError("每日总结 数据库不可用")
+        truncated = str(error)[:500]
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE summaries "
+                "SET publish_attempts = COALESCE(publish_attempts, 0) + 1, "
+                "    last_publish_error = ? "
+                "WHERE group_id = ? AND summary_date = ?",
+                (truncated, str(group_id), summary_date),
+            )
+            row = conn.execute(
+                "SELECT publish_attempts FROM summaries WHERE group_id = ? AND summary_date = ?",
+                (str(group_id), summary_date),
+            ).fetchone()
+            conn.commit()
+            return int(row["publish_attempts"]) if row else 0
         finally:
             conn.close()
 

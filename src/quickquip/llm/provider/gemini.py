@@ -458,6 +458,7 @@ class GeminiProviderClient(BaseProviderClient):
                             and parts
                             and "text" in parts[-1]
                             and not parts[-1].get("thoughtSignature")
+                            and not raw_part.get("thoughtSignature")
                             and bool(parts[-1].get("thought")) == thought
                         ):
                             parts[-1]["text"] = (

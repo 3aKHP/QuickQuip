@@ -23,10 +23,12 @@ def test_stream_preserves_independent_signed_parts_and_text_deltas():
     ], "m")
     assert response.native_blocks == [
         {"text": "a"}, {"text": "b", "thoughtSignature": "sig-b"},
-        {"text": "cd", "thoughtSignature": "sig-cd"},
+        {"text": "cd"},
+        {"text": "", "thoughtSignature": "sig-cd"},
         {"text": "e", "thoughtSignature": "sig-e"},
     ]
     assert response.text == "abcde"
+    assert GeminiProviderClient._replay_parts(response.thinking_blocks) == response.native_blocks
 
 
 def _provider_config() -> ProviderConfig:
@@ -463,12 +465,21 @@ def test_gemini_stream_preserves_signatures_from_thought_and_function_parts():
     response = FakeGeminiClient._assemble_stream_response(chunks, "gemini-test")
 
     assert response.text == ""
-    assert response.tool_calls[0].id == "gemini_tool_2"
-    assert [block["part"]["thoughtSignature"] for block in response.thinking_blocks] == [
+    assert response.tool_calls[0].id == "gemini_tool_3"
+    assert [
+        block["part"].get("thoughtSignature")
+        for block in response.thinking_blocks
+        if block["part"].get("thoughtSignature")
+    ] == [
         "thought-sig",
         "call-sig",
     ]
-    assert response.thinking_blocks[0]["part"]["text"] == "thinking done"
+    assert response.thinking_blocks[0]["part"] == {"text": "thinking", "thought": True}
+    assert response.thinking_blocks[1]["part"] == {
+        "text": " done",
+        "thought": True,
+        "thoughtSignature": "thought-sig",
+    }
 
 
 # ---------------------------------------------------------------------------

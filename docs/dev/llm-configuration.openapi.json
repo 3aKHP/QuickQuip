@@ -378,6 +378,7 @@
                               "codex-relay-hosted-tools",
                               "codex-relay-standalone-search",
                               "openai-public",
+                              "responses-plaintext-reasoning",
                               null
                             ],
                             "type": [
@@ -601,6 +602,7 @@
                         "codex-relay-hosted-tools",
                         "codex-relay-standalone-search",
                         "openai-public",
+                        "responses-plaintext-reasoning",
                         null
                       ],
                       "type": [
@@ -1834,6 +1836,7 @@
                             "codex-relay-hosted-tools",
                             "codex-relay-standalone-search",
                             "openai-public",
+                            "responses-plaintext-reasoning",
                             null
                           ],
                           "type": [
@@ -2057,6 +2060,7 @@
                       "codex-relay-hosted-tools",
                       "codex-relay-standalone-search",
                       "openai-public",
+                      "responses-plaintext-reasoning",
                       null
                     ],
                     "type": [
@@ -2380,6 +2384,7 @@
                               "codex-relay-hosted-tools",
                               "codex-relay-standalone-search",
                               "openai-public",
+                              "responses-plaintext-reasoning",
                               null
                             ],
                             "type": [
@@ -2603,6 +2608,7 @@
                         "codex-relay-hosted-tools",
                         "codex-relay-standalone-search",
                         "openai-public",
+                        "responses-plaintext-reasoning",
                         null
                       ],
                       "type": [

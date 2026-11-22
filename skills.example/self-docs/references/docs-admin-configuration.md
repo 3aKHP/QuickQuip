@@ -329,7 +329,7 @@ LLM 按需检索本群归档历史的只读能力；默认关闭，群级开关�
 | `builtin_search` | 是否启用服务商原生联网搜索（**仅 `gemini` 协议生效**）：开启后请求会携带 `google_search` 声明，保存 Grounding 来源供追溯，QQ 显示层隐藏来源引用及自动来源尾块；同时该渠道会话会自动移除本地 `search_web` 工具并切换提示词引导（其他协议配置此项无效并会记录 warning；检索在 Google 侧执行并计费，不计入本地轮次与 Token 看板）。<br>⚠️ **Gemini 版本兼容性警告**：将 `google_search` 与工具调用（Function Calling）放在同一次请求中混用，**仅 Gemini 3 系列模型支持**！如果你使用的是 Gemini 2.x 模型，必须关闭 `builtin_search` 或关闭全局 `tool_calling_enabled`，否则请求会被 Google API 直接拒绝 | `false` |
 | `gemini_empty_response_recovery` | Gemini GenerateContent 空回复补正开关，触发条件与额度规则见[空回复补正](#gemini-空回复补正) | `false` |
 | `gemini_empty_response_recovery_max_output_tokens` | 补正请求的输出额度上限，包含推理与回答；可设为 `1`–`1048576` | `65536` |
-| `responses_profile` | **`openai_responses` 协议专属后端能力档位**：<br>• `openai-public`（默认）：对接官方 `/v1/responses` 接口；<br>• `codex-http-relay`：对接 Codex 形态的第三方中转网关（不发送 `service_tier`、容忍 `codex.*` 扩展事件、当终态事件缺省字段时以流式完整收集的 item 作为历史回放基准）；<br>• `codex-relay-hosted-tools`：`codex-http-relay` 的全部行为，并在开启工具调用时由请求侧显式声明 `image_generation` 生图与 `web_search` 搜索工具；普通工具对话优先使用该原生搜索路径并移除本地 `search_web`，无 function 工具时也可使用；禁用工具后不声明搜索，相关历史使用通用投影；模型可自主搜索并产生额外费用，渠道不支持时切回 `codex-http-relay` | `openai-public` |
+| `responses_profile` | **`openai_responses` 协议专属后端能力档位**：<br>• `openai-public`（默认）：对接官方 `/v1/responses` 接口；<br>• `responses-plaintext-reasoning`：对接返回明文 `reasoning.content`（`type="reasoning_text"`）及 `response.reasoning.{delta,done}` 别名事件的兼容 Responses 端点（不发送 `service_tier`，保留 `store: false` 与 `low`–`xhigh` 档位）；<br>• `codex-http-relay`：对接 Codex 形态的第三方中转网关（不发送 `service_tier`、容忍 `codex.*` 扩展事件、当终态事件缺省字段时以流式完整收集的 item 作为历史回放基准）；<br>• `codex-relay-hosted-tools`：`codex-http-relay` 的全部行为，并在开启工具调用时由请求侧显式声明 `image_generation` 生图与 `web_search` 搜索工具；普通工具对话优先使用该原生搜索路径并移除本地 `search_web`，无 function 工具时也可使用；禁用工具后不声明搜索，相关历史使用通用投影；模型可自主搜索并产生额外费用，渠道不支持时切回 `codex-http-relay`；<br>• `codex-relay-standalone-search`：保留 relay 档位、事件对账与 `image_generation`，通过原生 `web.run` 与 `/alpha/search` 执行独立搜索 | `openai-public` |
 | `reasoning_effort` | **思考档位（全协议通用）**：可选 `low` / `medium` / `high` / `xhigh` / `max` / `ultra`，留空 `""` 表示不发送思考参数（使用模型自身默认档）。系统会根据协议和模型家族自动翻译为对应的底层参数并做超档钳制（详见下方映射表）。支持在群内用 `/llm effort <档位>` 按群覆盖（`/llm effort default` 恢复跟随；`/llm status` 可查看“配置档 / 覆盖档 / 实际生效档”三层状态），也可在 Web 后台“群 LLM”页按群设置 | `""` |
 | `max_inline_media_bytes` | **单次请求内联图片总解码字节预算**（设为 `0` 表示不限制，详见下方媒体预算说明） | `5242880` (5 MiB) |
 | `epoch_*` / 预算键 | 支持同名覆盖 `settings.runtime` 中的 6 个 `epoch_*` 水位键，以及 `request_input_token_budget` 和 `agent_replay_loop_tokens` | `null` (继承全局) |
@@ -386,7 +386,7 @@ QuickQuip 内部统一的 6 个思考档位（`low` $\rightarrow$ `ultra`）在�
   - **MiniMax**：支持 `low` 到 `max` 五档全集；
   - **xAI (Grok)**：最高钳制到 `xhigh`；
   - **其余后端**：原样透传上表列出的五档名称。
-- **OpenAI Responses 按 `responses_profile` 钳制**：`openai-public` 最高支持并钳制到 `xhigh`；`codex-http-relay` 与 `codex-relay-hosted-tools` 支持到 `max`（`ultra` 自动降为 `max`，因实测中转网关校验层会拒绝 `ultra`）。
+- **OpenAI Responses 按 `responses_profile` 钳制**：`openai-public` 与 `responses-plaintext-reasoning` 最高支持并钳制到 `xhigh`；`codex-http-relay`、`codex-relay-hosted-tools` 与 `codex-relay-standalone-search` 支持到 `max`（`ultra` 自动降为 `max`，因实测中转网关校验层会拒绝 `ultra`）。
 - **Claude 旧式 `budget_tokens` 的下限保护与温度互斥**：
   - Claude ≤ 4.5 的 `budget_tokens` 必须满足 **`≥ 1024` 且 `< max_output_tokens`**。如果该渠道或模型配置的 `max_output_tokens` 太小，导致计算出的思考预算跌破 `1024`，系统会在本次请求中**自动放弃发送思考参数并记录一条 warning 日志**（这是归一化层唯一会自动省略思考参数的场景，其余所有情况一律按表照发）。
   - **Anthropic 温度契约**：当 Claude 思考档位开启生效时，Anthropic API 强制要求只能使用默认温度，因此 QuickQuip 会自动省略非默认的 `temperature` 参数并记录日志。
@@ -561,7 +561,7 @@ Gemini 和 Responses 需要完整的工具调用与结果配对。工具批次�
 | 键名 | 说明 |
 |----|------|
 | `enabled` | 全局总开关（`true` / `false`） |
-| `generate_cron` / `publish_cron` | 后台生成总结的 cron 表达式，以及发往群内的发布 cron 表达式 |
+| `generate_cron` / `publish_cron` | 后台生成总结的 cron 表达式，以及发往群内的发布 cron 表达式（定时自动补发最多保留近 2 天内记录，单条最多尝试 3 次，同群按日期顺序串行发送） |
 | `min_messages` | 当日最小群消息数（不足时自动跳过不生成） |
 | `summary_length_hint` | 提示模型生成的目标字数 |
 | `routes.daily_summary` | 每日总结专属的有序模型级联候选列表 |
@@ -578,7 +578,7 @@ Gemini 和 Responses 需要完整的工具调用与结果配对。工具批次�
 |----|------|--------|
 | `enabled` | 全局总开关 | `false` |
 | `generate_cron` | 报告生成 cron 表达式 | 周报：`0 9 * * 1`（每周一 09:00）<br>月报：`0 9 1 * *`（每月1日 09:00） |
-| `publish_cron` | 报告发布 cron 表达式（周报与月报共用，每天检查发布新报告并补发未发布的报告） | `0 10 * * *`（每天 10:00） |
+| `publish_cron` | 报告发布 cron 表达式（周报与月报共用，每天检查发布新报告并在补发窗口内补发未发布记录：周报近 14 天、月报近 35 天，单条最多尝试 3 次，同群按周期顺序串行发送） | `0 10 * * *`（每天 10:00） |
 | `min_messages` | 周期内触发生成的最小消息数门槛 | 周报：`100` / 月报：`300` |
 | `length_hint` | 目标生成字数提示 | 周报：`2000` / 月报：`2500` |
 | `input_char_budget` | **月报专属**：月报终稿聊天记录字符总预算（最小值为 `8000`） | `240000` |

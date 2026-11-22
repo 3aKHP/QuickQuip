@@ -19,6 +19,7 @@ from quickquip.llm.provider.base import (
     LLMResponse,
 )
 from quickquip.llm.tools import LLMToolCall
+from quickquip.llm.provider.openai_responses.profiles import ResponsesProfile
 from quickquip.llm.provider.openai_responses.web_search import (
     cited_text_and_spans, search_report, validate_search_item,
 )
@@ -61,7 +62,7 @@ def _extract_generated_images(
 
 
 def validate_output_items(
-    items: Any, *, provider_id: str
+    items: Any, *, provider_id: str, allow_plaintext_reasoning: bool = False
 ) -> list[dict[str, Any]]:
     """终态/回放 output items 的逐类型结构校验；返回原列表（不拷贝）。"""
     if not isinstance(items, list):
@@ -76,7 +77,9 @@ def validate_output_items(
         elif item_type == "web_search_call":
             validate_search_item(item, provider_id)
         elif item_type == "reasoning":
-            _validate_reasoning_item(item, provider_id)
+            _validate_reasoning_item(
+                item, provider_id, allow_plaintext_reasoning=allow_plaintext_reasoning
+            )
         elif item_type == "function_call":
             namespace = item.get("namespace")
             if namespace not in (None, "functions") and not (
@@ -122,7 +125,9 @@ def blocks_replay_valid(blocks: list) -> bool:
         ).strip():
             return False
     try:
-        validate_output_items(list(blocks), provider_id="history")
+        validate_output_items(
+            list(blocks), provider_id="history", allow_plaintext_reasoning=True
+        )
     except LLMProviderError:
         return False
     return True
@@ -146,7 +151,9 @@ def _validate_message_item(item: dict[str, Any], provider_id: str) -> None:
         )
 
 
-def _validate_reasoning_item(item: dict[str, Any], provider_id: str) -> None:
+def _validate_reasoning_item(
+    item: dict[str, Any], provider_id: str, *, allow_plaintext_reasoning: bool = False
+) -> None:
     summary = item.get("summary")
     if summary is not None:
         if not isinstance(summary, list) or not all(
@@ -165,10 +172,21 @@ def _validate_reasoning_item(item: dict[str, Any], provider_id: str) -> None:
             "Provider 响应包含畸形 encrypted reasoning。", provider_id
         )
     content = item.get("content")
-    if content is not None and (not isinstance(content, list) or content):
-        raise _malformed(
-            "Provider 响应包含不支持的 reasoning content。", provider_id
-        )
+    if content is not None:
+        if not isinstance(content, list):
+            raise _malformed(
+                "Provider 响应包含不支持的 reasoning content。", provider_id
+            )
+        if content:
+            if not allow_plaintext_reasoning or not all(
+                isinstance(part, dict)
+                and part.get("type") == "reasoning_text"
+                and isinstance(part.get("text"), str)
+                for part in content
+            ):
+                raise _malformed(
+                    "Provider 响应包含不支持的 reasoning content。", provider_id
+                )
 
 
 def failure_detail(body: dict[str, Any]) -> str:
@@ -183,7 +201,11 @@ def failure_detail(body: dict[str, Any]) -> str:
 
 
 def parse_responses_body(
-    body: Any, *, provider_id: str, fallback_model: str
+    body: Any,
+    *,
+    provider_id: str,
+    fallback_model: str,
+    profile: ResponsesProfile | None = None,
 ) -> LLMResponse:
     """终态 response body → ``LLMResponse``。
 
@@ -206,7 +228,12 @@ def parse_responses_body(
         )
 
     generated_images, stripped_items = _extract_generated_images(body["output"])
-    items = validate_output_items(stripped_items, provider_id=provider_id)
+    allow_plaintext = bool(profile and profile.allow_plaintext_reasoning)
+    items = validate_output_items(
+        stripped_items,
+        provider_id=provider_id,
+        allow_plaintext_reasoning=allow_plaintext,
+    )
     citation_spans: list[tuple[int, int]] = []
     opaque_spans: list[tuple[int, int]] = []
     text = _message_text(items, citation_spans=citation_spans, opaque_spans=opaque_spans)
@@ -235,12 +262,22 @@ def parse_responses_body(
             "Provider 响应不包含正文或 function calls。", provider_id
         )
 
-    reasoning = _summary_text(items)
+    summary_text = _summary_text(items)
+    plaintext_text = _plaintext_reasoning_text(items)
     thinking_blocks: list[dict[str, Any]] = []
-    if reasoning:
+    if summary_text:
         thinking_blocks.append(
-            {"type": "reasoning", "reasoning_content": reasoning}
+            {"type": "reasoning", "reasoning_content": summary_text}
         )
+    if plaintext_text:
+        if not summary_text:
+            thinking_blocks.append(
+                {"type": "reasoning", "reasoning_content": plaintext_text}
+            )
+        elif plaintext_text != summary_text:
+            thinking_blocks.append(
+                {"type": "reasoning_text", "reasoning_content": plaintext_text}
+            )
     usage = parse_usage(body.get("usage"))
     return LLMResponse(
         text=text,
@@ -319,7 +356,18 @@ def _summary_text(items: list[dict[str, Any]]) -> str:
         if item.get("type") != "reasoning":
             continue
         for part in item.get("summary") or []:
-            if isinstance(part, dict):
+            if isinstance(part, dict) and part.get("type") == "summary_text":
+                parts.append(str(part.get("text", "")))
+    return "".join(parts)
+
+
+def _plaintext_reasoning_text(items: list[dict[str, Any]]) -> str:
+    parts: list[str] = []
+    for item in items:
+        if item.get("type") != "reasoning":
+            continue
+        for part in item.get("content") or []:
+            if isinstance(part, dict) and part.get("type") == "reasoning_text":
                 parts.append(str(part.get("text", "")))
     return "".join(parts)
 

@@ -218,3 +218,25 @@ def test_enabled_groups_weekly_and_monthly_independent(tmp_path):
 def test_enabled_groups_rejects_invalid_type(tmp_path):
     with pytest.raises(ValueError):
         PeriodReportEnabledGroups("quarterly", tmp_path / "q.json")
+
+
+def test_period_report_store_publish_failure_counter_and_reset(tmp_path):
+    store = PeriodReportStore(tmp_path / "period.db")
+    store.upsert("10001", PERIOD_WEEKLY, "2026-W46", "周报正文", "model-a")
+
+    assert store.record_publish_failure("10001", PERIOD_WEEKLY, "2026-W46", "err-1") == 1
+    assert store.record_publish_failure("10001", PERIOD_WEEKLY, "2026-W46", "err-2") == 2
+    row = store.get("10001", PERIOD_WEEKLY, "2026-W46")
+    assert row["publish_attempts"] == 2
+    assert row["last_publish_error"] == "err-2"
+
+    store.upsert("10001", PERIOD_WEEKLY, "2026-W46", "新周报", "model-b")
+    row = store.get("10001", PERIOD_WEEKLY, "2026-W46")
+    assert row["publish_attempts"] == 0
+    assert row["last_publish_error"] is None
+
+    store.record_publish_failure("10001", PERIOD_WEEKLY, "2026-W46", "err-3")
+    store.mark_published("10001", PERIOD_WEEKLY, "2026-W46")
+    row = store.get("10001", PERIOD_WEEKLY, "2026-W46")
+    assert row["published_at"] is not None
+    assert row["last_publish_error"] is None

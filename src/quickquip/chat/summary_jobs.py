@@ -17,8 +17,9 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections import defaultdict
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from quickquip.chat.config import BEIJING_TIMEZONE
@@ -35,9 +36,44 @@ logger = logging.getLogger(__name__)
 
 _LOCAL_TZ = ZoneInfo(BEIJING_TIMEZONE)
 
+# 自动定时发布的重试上限与补发窗口：防止历史上被平台拦截或退群的失败记录无限重放。
+MAX_PUBLISH_ATTEMPTS = 3
+DAILY_PUBLISH_MAX_AGE_DAYS = 2
+WEEKLY_PUBLISH_MAX_AGE_DAYS = 14
+MONTHLY_PUBLISH_MAX_AGE_DAYS = 35
+
 # 发送回调契约：接收 store 行（含 group_id/content/model_used 等），送达失败时抛异常。
 # 由 adapter 提供，内部负责 bot_action_trace、合并转发节点与 int(group_id) 转换。
 SendRow = Callable[[dict], Awaitable[None]]
+
+
+def _is_daily_summary_expired(
+    summary_date: str,
+    today: date,
+    max_age_days: int,
+) -> bool:
+    try:
+        parsed = date.fromisoformat(str(summary_date))
+    except ValueError:
+        return False
+    return (today - parsed).days > max_age_days
+
+
+def _is_period_report_expired(
+    row: dict,
+    now: datetime,
+    max_age_days: int,
+) -> bool:
+    raw = row.get("generated_at")
+    if not raw:
+        return False
+    try:
+        generated = datetime.fromisoformat(str(raw))
+    except ValueError:
+        return False
+    if generated.tzinfo is None:
+        generated = generated.replace(tzinfo=_LOCAL_TZ)
+    return (now - generated).total_seconds() > max_age_days * 86400
 
 
 # ── 每日总结 ─────────────────────────────────────────────────────────────
@@ -187,6 +223,7 @@ async def publish_summary_one(
     """Send one summary to its group and mark published on success.
 
     1.15.2 起：消息归档永不删除（chat_archive 契约），发布成功只标记状态。
+    发送失败时不标记 published_at，并记录失败次数以受重试上限约束。
     """
     group_id = row["group_id"]
     summary_date = row["summary_date"]
@@ -194,9 +231,23 @@ async def publish_summary_one(
         await send(row)
         store.mark_published(group_id, summary_date)
         logger.info("daily_summary: published for group %s (%s)", group_id, summary_date)
-    except Exception:
+    except Exception as exc:
+        record_failure = getattr(store, "record_publish_failure", None)
+        attempts: int | None = None
+        if callable(record_failure):
+            try:
+                attempts = record_failure(group_id, summary_date, str(exc))
+            except Exception:
+                logger.warning(
+                    "daily_summary: failed to record publish failure for group %s (%s)",
+                    group_id, summary_date,
+                    exc_info=True,
+                )
         logger.warning(
-            "daily_summary: publish failed for group %s (%s)", group_id, summary_date,
+            "daily_summary: publish failed for group %s (%s)%s",
+            group_id,
+            summary_date,
+            f" (attempt {attempts})" if attempts is not None else "",
             exc_info=True,
         )
 
@@ -206,19 +257,52 @@ async def publish_summaries_job(
     store,
     enabled_groups,
     send: SendRow,
+    max_age_days: int = DAILY_PUBLISH_MAX_AGE_DAYS,
+    max_attempts: int = MAX_PUBLISH_ATTEMPTS,
+    now: datetime | None = None,
 ) -> None:
-    """12:00 scheduled job: publish all unpublished summaries."""
+    """定时发布 job：发布近期未发布的每日总结。
+
+    过滤已禁用群、超过补发窗口的过期记录与达到重试上限的记录；
+    同群多条记录按 summary_date 升序串行发送，不同群之间并发隔离。
+    """
     unpublished = store.get_unpublished()
     if not unpublished:
         return
 
-    # Only publish for groups that are still enabled
+    current = now if now is not None else datetime.now(tz=_LOCAL_TZ)
+    today = current.astimezone(_LOCAL_TZ).date()
     enabled = set(enabled_groups.all_groups())
-    tasks = [
-        publish_summary_one(row, store=store, send=send)
-        for row in unpublished
-        if row["group_id"] in enabled
-    ]
+
+    by_group: dict[str, list[dict]] = defaultdict(list)
+    for row in unpublished:
+        group_id = row["group_id"]
+        summary_date = row["summary_date"]
+        if group_id not in enabled:
+            continue
+        if _is_daily_summary_expired(summary_date, today, max_age_days):
+            logger.info(
+                "daily_summary: skipping expired summary for group %s (%s, > %d days)",
+                group_id, summary_date, max_age_days,
+            )
+            continue
+        attempts = int(row.get("publish_attempts") or 0)
+        if attempts >= max_attempts:
+            logger.warning(
+                "daily_summary: skipping group %s (%s), reached max publish attempts (%d/%d)",
+                group_id, summary_date, attempts, max_attempts,
+            )
+            continue
+        by_group[group_id].append(row)
+
+    if not by_group:
+        return
+
+    async def _publish_group(rows: list[dict]) -> None:
+        for row in sorted(rows, key=lambda r: str(r["summary_date"])):
+            await publish_summary_one(row, store=store, send=send)
+
+    tasks = [_publish_group(rows) for rows in by_group.values()]
     await asyncio.gather(*tasks, return_exceptions=True)
 
 
@@ -357,7 +441,7 @@ async def publish_period_one(
     store,
     send: SendRow,
 ) -> None:
-    """发送单个周期报告到群里并标记已发布。"""
+    """发送单个周期报告到群里并标记已发布；失败时记录尝试次数。"""
     group_id = row["group_id"]
     period_key = row["period_key"]
     try:
@@ -367,10 +451,24 @@ async def publish_period_one(
             "period_report[%s]: published for group %s (%s)",
             period_type, group_id, period_key,
         )
-    except Exception:
+    except Exception as exc:
+        record_failure = getattr(store, "record_publish_failure", None)
+        attempts: int | None = None
+        if callable(record_failure):
+            try:
+                attempts = record_failure(group_id, period_type, period_key, str(exc))
+            except Exception:
+                logger.warning(
+                    "period_report[%s]: failed to record publish failure for group %s (%s)",
+                    period_type, group_id, period_key,
+                    exc_info=True,
+                )
         logger.warning(
-            "period_report[%s]: publish failed for group %s (%s)",
-            period_type, group_id, period_key,
+            "period_report[%s]: publish failed for group %s (%s)%s",
+            period_type,
+            group_id,
+            period_key,
+            f" (attempt {attempts})" if attempts is not None else "",
             exc_info=True,
         )
 
@@ -381,15 +479,58 @@ async def publish_period_reports_job(
     store,
     enabled_groups,
     send: SendRow,
+    max_age_days: int | None = None,
+    max_attempts: int = MAX_PUBLISH_ATTEMPTS,
+    now: datetime | None = None,
 ) -> None:
-    """定时发布 job：把所有未发布的周期报告发出去。"""
+    """定时发布 job：发布近期未发布的周期报告。
+
+    过滤已禁用群、超过补发窗口的过期记录与达到重试上限的记录；
+    同群多条记录按 period_key 升序串行发送，不同群之间并发隔离。
+    """
     unpublished = store.get_unpublished(period_type)
     if not unpublished:
         return
+
+    current = now if now is not None else datetime.now(tz=_LOCAL_TZ)
+    effective_max_age = (
+        max_age_days
+        if max_age_days is not None
+        else (
+            WEEKLY_PUBLISH_MAX_AGE_DAYS
+            if period_type == PERIOD_WEEKLY
+            else MONTHLY_PUBLISH_MAX_AGE_DAYS
+        )
+    )
     enabled = set(enabled_groups.all_groups())
-    tasks = [
-        publish_period_one(row, period_type, store=store, send=send)
-        for row in unpublished
-        if row["group_id"] in enabled
-    ]
+
+    by_group: dict[str, list[dict]] = defaultdict(list)
+    for row in unpublished:
+        group_id = row["group_id"]
+        period_key = row["period_key"]
+        if group_id not in enabled:
+            continue
+        if _is_period_report_expired(row, current, effective_max_age):
+            logger.info(
+                "period_report[%s]: skipping expired report for group %s (%s, > %d days)",
+                period_type, group_id, period_key, effective_max_age,
+            )
+            continue
+        attempts = int(row.get("publish_attempts") or 0)
+        if attempts >= max_attempts:
+            logger.warning(
+                "period_report[%s]: skipping group %s (%s), reached max publish attempts (%d/%d)",
+                period_type, group_id, period_key, attempts, max_attempts,
+            )
+            continue
+        by_group[group_id].append(row)
+
+    if not by_group:
+        return
+
+    async def _publish_group(rows: list[dict]) -> None:
+        for row in sorted(rows, key=lambda r: str(r["period_key"])):
+            await publish_period_one(row, period_type, store=store, send=send)
+
+    tasks = [_publish_group(rows) for rows in by_group.values()]
     await asyncio.gather(*tasks, return_exceptions=True)
