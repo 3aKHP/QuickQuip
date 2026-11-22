@@ -236,15 +236,15 @@ python -m quickquip.tieba.login
 
 <a id="42-准备-cjk-中文字体文件词云与-svg-画图"></a>
 
-### 准备 CJK 中文字体文件（词云与 SVG 画图）
+### 准备 CJK 中文字体文件（词云、SVG 画图与长消息转图）
 
-词云（`/wordcloud`）与 SVG 画图（`draw_svg` 工具）共用同一个中文字体文件。该文件不随代码仓库分发，需手动下载放置：
+词云（`/wordcloud`）、SVG 画图（`draw_svg` 工具）以及长消息合并转发失败时的长图降级渲染（每日总结、周/月报与 `/profile`）共用同一个中文字体文件。该文件不随代码仓库分发，需手动下载放置：
 
 1. 从 [Google Fonts](https://fonts.google.com/noto/specimen/Noto+Sans+SC) 下载 `NotoSansSC-Regular.ttf`。
 2. 将其放入项目的 `data/fonts/NotoSansSC-Regular.ttf`（容器化部署时，`data/fonts/` 会随 `data/` 目录自动挂载进容器，上传一次即可持久生效）。
 
 > **缺少字体文件及不同平台的渲染差异**：
-> - **若缺失 `NotoSansSC-Regular.ttf`**：执行 `/wordcloud` 时 Bot 会直接回复明确的错误提示；而 `draw_svg` 会回退使用系统字体（在精简版 Linux 系统上中文可能会渲染成方框，因此强烈建议放置该字体）。
+> - **若缺失 `NotoSansSC-Regular.ttf`**：执行 `/wordcloud` 时 Bot 会直接回复明确的错误提示；`draw_svg` 会回退使用系统字体（在精简版 Linux 系统上中文可能会渲染成方框）；长消息长图降级会按常见系统路径与 `fc-match :lang=zh` 回退查找中文字体，若宿主机与容器内均无可用中文字体，则长图降级发送会失败并记为投递异常。
 > - **渲染引擎与 Emoji 字体**：SVG 渲染引擎 `resvg` 已包含在 `requirements.txt` 中，随 pip 依赖自动安装，无需额外系统构建步骤。文字优先使用上述 NotoSansSC 字体，Emoji 等字符则通过系统字体回退——官方 Playwright 基础镜像和 Windows 系统（微软雅黑 / Segoe UI Emoji）均自带彩色 Emoji 字体，无需额外处理；仅在精简 Linux 宿主机上裸机源码部署时，可能因缺少系统 Emoji 字体导致 Emoji 显示为方框。
 > - **渲染子进程资源保护**：渲染子进程的内存地址空间与 CPU 时间硬限制依赖 POSIX `rlimit`，在 Linux 等 POSIX 平台自动生效；Windows 平台则保留 8 秒墙钟超时（wall-clock timeout）兜底。
 

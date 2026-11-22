@@ -746,3 +746,36 @@ async def test_job_publish_summaries_wiring_matches_signature(monkeypatch):
     await daily_summary_plugin._job_publish_summaries()
     assert sent == [{"gid": 10001, "content": "a"}]
     assert marked == [("10001", "2026-05-03")]
+
+
+@pytest.mark.asyncio
+async def test_publish_summaries_job_skips_expired_before_max_attempts_warning(caplog):
+    """过期且已达重试上限的历史记录应走过期分支，不持续刷 WARNING。"""
+    store = types.SimpleNamespace(
+        get_unpublished=lambda: [
+            {
+                "group_id": "10001",
+                "summary_date": "2026-05-01",
+                "content": "old",
+                "publish_attempts": summary_jobs.MAX_PUBLISH_ATTEMPTS,
+            },
+        ],
+        mark_published=lambda *a: None,
+    )
+    enabled = types.SimpleNamespace(all_groups=lambda: ["10001"])
+    sent: list[dict] = []
+
+    async def _send(row: dict) -> None:
+        sent.append(row)
+
+    with caplog.at_level("INFO", logger="quickquip.chat.summary_jobs"):
+        await summary_jobs.publish_summaries_job(
+            store=store,
+            enabled_groups=enabled,
+            send=_send,
+            now=datetime(2026, 5, 10, 9, 0, tzinfo=LOCAL_TZ),
+        )
+
+    assert sent == []
+    assert any("skipping expired summary" in rec.message for rec in caplog.records)
+    assert not any(rec.levelname == "WARNING" for rec in caplog.records)

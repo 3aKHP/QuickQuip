@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import io
 import re
+import shutil
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -41,8 +43,10 @@ _QUOTE_RE = re.compile(r"^>\s?(.*)$")
 _CANDIDATE_FONT_PATHS: tuple[Path, ...] = (
     DATA_DIR / "fonts" / "NotoSansSC-Regular.ttf",
     Path("/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc"),
+    Path("/usr/share/fonts/truetype/wqy/wqy-microhei.ttc"),
     Path("/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc"),
     Path("/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc"),
+    Path("/usr/share/fonts/noto-cjk/NotoSansCJK-Regular.ttc"),
     Path("/usr/share/fonts/opentype/unifont/unifont.otf"),
     Path("C:/Windows/Fonts/msyh.ttc"),
     Path("C:/Windows/Fonts/simhei.ttf"),
@@ -57,6 +61,29 @@ class _LayoutLine:
     indent: int = 0
 
 
+def _find_font_via_fc_match() -> Path | None:
+    fc_match = shutil.which("fc-match")
+    if not fc_match:
+        return None
+    try:
+        proc = subprocess.run(
+            [fc_match, ":lang=zh", "-f", "%{file}"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if proc.returncode != 0:
+        return None
+    raw = proc.stdout.strip()
+    if not raw:
+        return None
+    candidate = Path(raw)
+    return candidate if candidate.is_file() else None
+
+
 def find_cjk_font_path(font_path: str | Path | None = None) -> Path:
     """查找可用的中文字体文件；全部缺失时抛出 FileNotFoundError。"""
     if font_path is not None:
@@ -68,6 +95,9 @@ def find_cjk_font_path(font_path: str | Path | None = None) -> Path:
     for candidate in _CANDIDATE_FONT_PATHS:
         if candidate.is_file():
             return candidate
+    matched = _find_font_via_fc_match()
+    if matched is not None:
+        return matched
     raise FileNotFoundError(
         "未找到可用的中文字体文件（已检查 data/fonts/NotoSansSC-Regular.ttf 及系统常见字体路径）"
     )

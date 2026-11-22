@@ -4,6 +4,7 @@ import base64
 
 import pytest
 
+from quickquip.adapters.nonebot import long_messages
 from quickquip.adapters.nonebot.long_messages import send_long_group_message, split_long_message
 
 
@@ -59,17 +60,30 @@ async def test_send_long_group_message_uses_forward_nodes():
 
 
 @pytest.mark.asyncio
-async def test_send_long_group_message_falls_back_to_single_long_image():
+async def test_send_long_group_message_falls_back_to_single_long_image(monkeypatch):
     bot = _FallbackBot()
+    render_calls: list[tuple[str, str, str]] = []
+    fake_png = b"\x89PNG\r\n\x1a\nfake-long-image"
+
+    def _fake_render(content: str, *, title: str = "", footer: str = "") -> bytes:
+        render_calls.append((content, title, footer))
+        return fake_png
+
+    monkeypatch.setattr(long_messages, "render_text_to_image", _fake_render)
+    body = "第一段内容\n\n" + "测试长图渲染" * 200
 
     await send_long_group_message(
         bot,
         456,
-        "第一段内容\n\n" + "测试长图渲染" * 200,
+        body,
         node_name="群聊日报",
         log_name="daily_summary",
     )
 
+    assert len(render_calls) == 1
+    assert render_calls[0][0] == body
+    assert render_calls[0][1] == "群聊日报"
+    assert render_calls[0][2] == long_messages._IMAGE_FALLBACK_FOOTER
     # 合并转发失败时只发 1 条图片消息，不拆成多条纯文本刷屏
     assert len(bot.sent) == 1
     assert bot.sent[0]["group_id"] == 456
@@ -79,12 +93,17 @@ async def test_send_long_group_message_falls_back_to_single_long_image():
     file_uri = message[0].data["file"]
     assert file_uri.startswith("base64://")
     raw_png = base64.b64decode(file_uri.removeprefix("base64://"))
-    assert raw_png[:8] == b"\x89PNG\r\n\x1a\n"
+    assert raw_png == fake_png
 
 
 @pytest.mark.asyncio
-async def test_send_long_group_message_raises_without_text_spam_when_image_fails():
+async def test_send_long_group_message_raises_without_text_spam_when_image_fails(monkeypatch):
     bot = _FallbackBot(fail_send=True)
+    monkeypatch.setattr(
+        long_messages,
+        "render_text_to_image",
+        lambda content, *, title="", footer="": b"\x89PNG\r\n\x1a\nfake-long-image",
+    )
 
     with pytest.raises(RuntimeError, match="image send failed"):
         await send_long_group_message(

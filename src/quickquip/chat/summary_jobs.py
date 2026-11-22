@@ -280,17 +280,17 @@ async def publish_summaries_job(
         summary_date = row["summary_date"]
         if group_id not in enabled:
             continue
+        if _is_daily_summary_expired(summary_date, today, max_age_days):
+            logger.info(
+                "daily_summary: skipping expired summary for group %s (%s, > %d days)",
+                group_id, summary_date, max_age_days,
+            )
+            continue
         attempts = int(row.get("publish_attempts") or 0)
         if attempts >= max_attempts:
             logger.warning(
                 "daily_summary: skipping group %s (%s), reached max publish attempts (%d/%d)",
                 group_id, summary_date, attempts, max_attempts,
-            )
-            continue
-        if _is_daily_summary_expired(summary_date, today, max_age_days):
-            logger.info(
-                "daily_summary: skipping expired summary for group %s (%s, > %d days)",
-                group_id, summary_date, max_age_days,
             )
             continue
         by_group[group_id].append(row)
@@ -510,17 +510,17 @@ async def publish_period_reports_job(
         period_key = row["period_key"]
         if group_id not in enabled:
             continue
+        if _is_period_report_expired(row, current, effective_max_age):
+            logger.info(
+                "period_report[%s]: skipping expired report for group %s (%s, > %d days)",
+                period_type, group_id, period_key, effective_max_age,
+            )
+            continue
         attempts = int(row.get("publish_attempts") or 0)
         if attempts >= max_attempts:
             logger.warning(
                 "period_report[%s]: skipping group %s (%s), reached max publish attempts (%d/%d)",
                 period_type, group_id, period_key, attempts, max_attempts,
-            )
-            continue
-        if _is_period_report_expired(row, current, effective_max_age):
-            logger.info(
-                "period_report[%s]: skipping expired report for group %s (%s, > %d days)",
-                period_type, group_id, period_key, effective_max_age,
             )
             continue
         by_group[group_id].append(row)
