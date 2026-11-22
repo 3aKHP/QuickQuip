@@ -9,9 +9,8 @@
       "auth_method": "api_key",
       "aliases": [],
       "parameters": {
-        "timeout_seconds": 45.0,
-        "temperature": 0.8,
-        "max_output_tokens": 2048,
+        "timeout_seconds": 180.0,
+        "max_output_tokens": 16384,
         "style_profile": "openai_family",
         "style_overrides": ""
       },
@@ -53,9 +52,8 @@
       "auth_method": "api_key",
       "aliases": [],
       "parameters": {
-        "timeout_seconds": 45.0,
-        "temperature": 0.8,
-        "max_output_tokens": 2048,
+        "timeout_seconds": 180.0,
+        "max_output_tokens": 16384,
         "style_profile": "claude_family",
         "style_overrides": ""
       },
@@ -97,9 +95,8 @@
       "auth_method": "api_key",
       "aliases": [],
       "parameters": {
-        "timeout_seconds": 45.0,
-        "temperature": 0.5,
-        "max_output_tokens": 2048,
+        "timeout_seconds": 180.0,
+        "max_output_tokens": 16384,
         "gemini_empty_response_recovery": false,
         "gemini_empty_response_recovery_max_output_tokens": 65536,
         "style_profile": "gemini_family",
@@ -136,9 +133,8 @@
       "auth_method": "api_key",
       "aliases": [],
       "parameters": {
-        "timeout_seconds": 45.0,
-        "temperature": 0.5,
-        "max_output_tokens": 2048,
+        "timeout_seconds": 180.0,
+        "max_output_tokens": 16384,
         "epoch_cold_idle_seconds": 21600,
         "style_profile": "openai_family",
         "style_overrides": ""
@@ -174,9 +170,8 @@
       "auth_method": "api_key",
       "aliases": [],
       "parameters": {
-        "timeout_seconds": 45.0,
-        "temperature": 0.8,
-        "max_output_tokens": 2048,
+        "timeout_seconds": 180.0,
+        "max_output_tokens": 16384,
         "style_profile": "openai_family",
         "style_overrides": ""
       },
@@ -342,7 +337,7 @@
       "provider_id": "",
       "model": "",
       "timeout": 2.0,
-      "max_tokens": 64
+      "max_tokens": 256
     },
     "tools": {
       "enabled": [],
@@ -442,7 +437,7 @@
       "provider_id": "",
       "model": "",
       "max_tokens": 300,
-      "temperature": 0.3,
+      "temperature": null,
       "prompt": ""
     }
   }

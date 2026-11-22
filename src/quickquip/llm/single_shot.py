@@ -71,7 +71,7 @@ class CommandSingleShotSpec:
     rule_name: str
     usage_reply: str
     invalid_reply: str
-    temperature: float
+    temperature: float | None
     input_channel: str
     output_channel: str
     usage_scope_name: str
@@ -85,7 +85,7 @@ def _build_request(
     provider: ProviderConfig,
     model: str,
     prompt_pack: SingleShotPrompt,
-    temperature: float,
+    temperature: float | None = None,
     image_urls: list[str] | None = None,
 ) -> LLMRequest:
     return LLMRequest(
@@ -100,7 +100,7 @@ def _build_request(
                 image_urls=list(image_urls or []),
             )
         ],
-        temperature=temperature,
+        temperature=provider.temperature if temperature is None else temperature,
         # 不限小预算：推理模型的 reasoning_content 计入 max_tokens
         max_output_tokens=provider.max_output_tokens,
         thinking_budget=None,
@@ -287,7 +287,7 @@ async def run_card_le_nearest(
         provider=provider,
         model=qj.model if qj.model else provider.default_model,
         prompt_pack=prompt_pack,
-        temperature=0.5,  # 最近匹配偏低温求稳
+        temperature=None,
     )
     try:
         with usage_scope("card_le_nearest", group_id=str(chat_id)):

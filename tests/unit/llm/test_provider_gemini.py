@@ -910,3 +910,27 @@ async def test_gemini_retries_once_with_downgraded_signatures_on_400_rejection()
     with pytest.raises(LLMProviderError):
         await noop_client.complete(unsigned_req)
     assert len(noop_client.seen_payloads) == 1
+
+
+async def test_gemini_optional_temperature_omitted_when_none():
+    client = FakeGeminiClient(_provider_config(), _text_body())
+    req = LLMRequest(
+        model="gemini-3.7-flash",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi")],
+        temperature=None,
+        max_output_tokens=128,
+    )
+    await client.complete(req)
+    assert "temperature" not in client.last_payload["generationConfig"]
+
+    client_zero = FakeGeminiClient(_provider_config(), _text_body())
+    req_zero = LLMRequest(
+        model="gemini-3.7-flash",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi")],
+        temperature=0.0,
+        max_output_tokens=128,
+    )
+    await client_zero.complete(req_zero)
+    assert client_zero.last_payload["generationConfig"]["temperature"] == 0.0

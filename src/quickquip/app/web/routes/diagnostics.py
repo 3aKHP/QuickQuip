@@ -20,7 +20,7 @@ class SampleRequest(BaseModel):
     system_prompt: str = "你是一个测试助手。"
     user_prompt: str = "你好，请做一下自我介绍。"
     stream: bool = False
-    max_output_tokens: int = Field(default=256, ge=1, le=16384)
+    max_output_tokens: int = Field(default=512, ge=1, le=16384)
     source: str | int = "published"
     request_id: str = Field(min_length=1, max_length=128)
 

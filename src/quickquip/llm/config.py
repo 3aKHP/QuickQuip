@@ -58,7 +58,7 @@ class QuickJudgeConfig:
     provider_id: str = ""
     model: str = ""
     timeout: float = 2.0
-    max_tokens: int = 64
+    max_tokens: int = 256
 
 
 @dataclass(slots=True)
@@ -224,7 +224,7 @@ class ImagePreprocessingConfig:
     provider_id: str = ""
     model: str = ""
     max_tokens: int = 300
-    temperature: float = 0.3
+    temperature: float | None = None
     prompt: str = ""
 
 
@@ -255,9 +255,9 @@ class ProviderConfig:
     client_fingerprint: str = "default"
     fingerprint_runtime: FingerprintRuntime | None = None
     non_vision_models: list[str] = field(default_factory=list)
-    timeout_seconds: float = 45.0
-    temperature: float = 0.8
-    max_output_tokens: int = 800
+    timeout_seconds: float = 180.0
+    temperature: float | None = None
+    max_output_tokens: int = 16384
     style_overrides: str = ""
     stream_enabled: bool = True
     headers: dict[str, str] = field(default_factory=dict)

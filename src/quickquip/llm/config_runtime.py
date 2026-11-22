@@ -162,15 +162,18 @@ class ConfigRuntimeWorker:
                     epoch_id=epoch_id,
                     model=payload["model"], system_prompt=payload.get("system_prompt", ""),
                     messages=[LLMConversationMessage(role="user", content=payload["user_prompt"])],
-                    max_output_tokens=payload.get("max_output_tokens", 64),
-                    temperature=0.0, tools=[], allow_tool_calls=False,
+                    max_output_tokens=payload.get("max_output_tokens", 512),
+                    temperature=provider.temperature, tools=[], allow_tool_calls=False,
                 )
                 from quickquip.llm.provider import collect_trace_calls, trace_store
                 from quickquip.llm.usage import usage_scope
 
                 started = time.monotonic()
+                probe_timeout = max(30.0, min(provider.timeout_seconds, 120.0))
                 with usage_scope("diagnostics"), collect_trace_calls(force=True) as trace_call_ids:
-                    response = await asyncio.wait_for(client.complete(request), timeout=30)
+                    response = await asyncio.wait_for(
+                        client.complete(request), timeout=probe_timeout
+                    )
                 duration_ms = round((time.monotonic() - started) * 1000, 1)
                 trace_calls = [
                     detail for call_id in trace_call_ids

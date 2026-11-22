@@ -77,6 +77,12 @@ def test_nullable_union_unwraps_to_member_type() -> None:
 
 def test_parameters_scalar_annotations_unchanged() -> None:
     assert _meta["parameters"]["temperature"]["type"] == "number"
+    assert _meta["parameters"]["temperature"]["default"] is None
     assert _meta["parameters"]["max_output_tokens"]["type"] == "integer"
+    assert _meta["parameters"]["max_output_tokens"]["default"] == 16384
+    assert _meta["parameters"]["timeout_seconds"]["default"] == 180.0
+    assert _meta["settings"]["quick_judge"]["max_tokens"]["default"] == 256
+    assert _meta["settings"]["image_preprocessing"]["temperature"]["nullable"] is True
+    assert _meta["settings"]["image_preprocessing"]["temperature"]["default"] is None
     assert _meta["parameters"]["stream_enabled"]["type"] == "boolean"
     assert _meta["parameters"]["reasoning_effort"]["enum"]

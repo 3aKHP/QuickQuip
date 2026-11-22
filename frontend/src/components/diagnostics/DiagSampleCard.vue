@@ -126,7 +126,7 @@ const sample = ref<SampleRequest>({
   model: '',
   system_prompt: '你是一个测试助手。',
   user_prompt: '你好，请做一下自我介绍。',
-  max_output_tokens: 256,
+  max_output_tokens: 512,
 })
 
 const currentProvider = computed(() => providers.value.find(p => p.id === sample.value.provider_id))

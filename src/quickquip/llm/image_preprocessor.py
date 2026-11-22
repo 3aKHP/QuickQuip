@@ -109,7 +109,7 @@ class VisionImagePreprocessor(ImagePreprocessor):
         provider_client,
         model: str,
         max_tokens: int = 300,
-        temperature: float = 0.3,
+        temperature: float | None = None,
         prompt: str = "",
         max_concurrency: int = 3,
     ):

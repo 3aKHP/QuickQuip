@@ -12,7 +12,7 @@ from quickquip.llm.usage import configuration_pricing_entry
 from quickquip.llm.tools import LLMConversationMessage
 from quickquip.llm.usage import set_usage_scope
 
-_TEMPERATURE = 0.9
+_TEMPERATURE: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -34,7 +34,7 @@ PROFILE_MODES: dict[str, ProfileModeConfig] = {
         id="short",
         label="短版",
         target_chars=100,
-        max_output_tokens=300,
+        max_output_tokens=1024,
         memory_limit=8,
         sample_limit=5,
         sample_max_chars=80,
@@ -178,7 +178,7 @@ async def generate_profile(
         model=model,
         system_prompt=system_prompt,
         messages=[user_message],
-        temperature=_TEMPERATURE,
+        temperature=provider_config.temperature if _TEMPERATURE is None else _TEMPERATURE,
         max_output_tokens=profile_mode.max_output_tokens,
         tools=[],
         allow_tool_calls=False,

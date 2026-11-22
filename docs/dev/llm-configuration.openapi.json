@@ -940,7 +940,10 @@
                   "temperature": {
                     "maximum": 2,
                     "minimum": 0,
-                    "type": "number"
+                    "type": [
+                      "number",
+                      "null"
+                    ]
                   }
                 },
                 "type": "object"

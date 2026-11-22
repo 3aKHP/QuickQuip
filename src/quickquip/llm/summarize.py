@@ -29,13 +29,13 @@ from quickquip.llm.usage import configuration_pricing_entry, new_usage_run_id, s
 logger = logging.getLogger(__name__)
 
 _SUMMARY_MAX_OUTPUT_TOKENS = 16384
-_SUMMARY_TEMPERATURE = 0.7
+_SUMMARY_TEMPERATURE: float | None = None
 
 # 周报/月报篇幅更长，输出 token 上限上调。8192 token 约覆盖默认 length_hint
 # （周报 2000 / 月报 2500 字，中文约 1.5-2 字/token）；调高 length_hint 时
 # 注意可能在此截断——如需更长输出请同步上调此常量。
 _PERIOD_REPORT_MAX_OUTPUT_TOKENS = 8192
-_PERIOD_REPORT_TEMPERATURE = 0.7
+_PERIOD_REPORT_TEMPERATURE: float | None = None
 
 # 聊天记录字符预算：按级联中可解析容量的模型取最大可用输入推导
 # （窗口 − 输出预留 − 信封/系统开销），中文按 1 字 ≈ 1 token 保守换算。
@@ -190,7 +190,7 @@ async def _run_summary_cascade(
     raw_log: str,
     build_user_content: Callable[[str, bool], str],
     *,
-    temperature: float,
+    temperature: float | None,
     max_output_tokens: int,
 ) -> tuple[str, str]:
     """对已解析级联逐跳生成；每跳留档 finish/token/跳序，全败抛 RuntimeError。
@@ -218,7 +218,7 @@ async def _run_summary_cascade(
             model=model,
             system_prompt=system_prompt,
             messages=[user_message],
-            temperature=temperature,
+            temperature=provider_config.temperature if temperature is None else temperature,
             max_output_tokens=output_cap,
         )
 

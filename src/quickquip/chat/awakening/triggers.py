@@ -300,7 +300,7 @@ async def check_relevance(
     svc: AwakeningJudgeChannel | None,
     state: AwakeningState | None = None,
     timeout: float = 2.0,
-    max_tokens: int = 64,
+    max_tokens: int = 256,
 ) -> AwakeningTriggerResult | None:
     """Check if user message is continuing a conversation with the bot.
 
@@ -363,7 +363,7 @@ async def check_qa(
     svc: AwakeningJudgeChannel | None,
     state: AwakeningState | None = None,
     timeout: float = 2.0,
-    max_tokens: int = 64,
+    max_tokens: int = 256,
 ) -> AwakeningTriggerResult | None:
     """Check if user message is a question needing a professional answer.
 

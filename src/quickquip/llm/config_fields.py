@@ -126,7 +126,7 @@ def reject(path: str, message: str, code: str = "invalid_field", details: Any = 
 
 def _matches(value: Any, annotation: Any) -> bool:
     origin = get_origin(annotation)
-    if origin is UnionType:
+    if origin in (UnionType, Union):
         return any(_matches(value, t) for t in get_args(annotation))
     if annotation is type(None):
         return value is None

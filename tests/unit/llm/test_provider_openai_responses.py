@@ -2187,3 +2187,12 @@ def test_plaintext_reasoning_tool_loop_replay_and_owner_isolation():
     assert profile_fingerprint(_config(responses_profile="openai-public")) != (
         profile_fingerprint(_config(responses_profile="responses-plaintext-reasoning"))
     )
+
+
+def test_responses_optional_temperature_omitted_when_none():
+    messages = [LLMConversationMessage(role="user", content="hi")]
+    payload_none = _payload(_request(messages, temperature=None))
+    assert "temperature" not in payload_none
+
+    payload_zero = _payload(_request(messages, temperature=0.0))
+    assert payload_zero["temperature"] == 0.0

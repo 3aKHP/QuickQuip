@@ -321,9 +321,11 @@ function providersPanel(store) {
     computed, ref, watch, onMounted() {}, structuredClone, toast() {}, confirm: () => true,
     injectLlmConfigStore: () => store,
     PARAM_LABELS: library.PARAM_LABELS, PARAM_SOURCE_LABELS: library.PARAM_SOURCE_LABELS,
-    PROTOCOL_LABELS: library.PROTOCOL_LABELS, fieldTemplate: library.fieldTemplate,
+    PROTOCOL_LABELS: library.PROTOCOL_LABELS,
+    PROTOCOL_RECOMMENDED_PARAMS: library.PROTOCOL_RECOMMENDED_PARAMS,
+    fieldTemplate: library.fieldTemplate,
     isObject: library.isObject, providerEnvVars: library.providerEnvVars,
-  }, 'selected,addProvider,removeProvider,onIdInput,current,patch,fingerprintOptions')
+  }, 'selected,addProvider,removeProvider,onIdInput,onProtocolChange,formatValue,current,patch,fingerprintOptions')
 }
 
 test('new provider identity survives panel remount and index shifts, then locks after save', async () => {
@@ -550,11 +552,11 @@ test('commit refuses a preview whose draft base revision went stale', async () =
 
 /* ── F4 回归：枚举下拉选项 ── */
 
-function settingField(props) {
+function settingField(props, emit = () => {}) {
   return componentScript('components/llm-config/SettingField.vue', {
-    computed, controlSequence: 0, defineProps: () => props, withDefaults: value => value, defineEmits: () => () => {},
+    computed, controlSequence: 0, defineProps: () => props, withDefaults: value => value, defineEmits: () => emit,
     ENUM_OPTION_LABELS: library.ENUM_OPTION_LABELS,
-  }, 'kind,selectOptions')
+  }, 'kind,selectOptions,onNumber')
 }
 
 test('enum fields render options from metadata with Chinese labels', () => {
@@ -832,4 +834,80 @@ test('renaming an unsaved provider carries its prices', () => {
   panel.onIdInput('final-id')
   assert.deepEqual(normalized(store.document.value.pricing), [{ provider_id: 'final-id', model: 'm' }])
   assert.equal(store.document.value.providers[0].id, 'final-id')
+})
+
+test('new provider protocol change pre-fills and cleans up untouched recommended params only before save', async () => {
+  const store = createStore({
+    saveLlmConfiguration: async document => ({ revision: 2, document }),
+    fetchLlmConfigStatus: async () => status,
+  })
+  store.accept({ revision: 1, document: { providers: [] } })
+  const panel = providersPanel(store)
+  panel.addProvider()
+  assert.equal(panel.current.value.protocol, 'openai')
+  assert.deepEqual(normalized(panel.current.value.parameters), {})
+
+  // 新建渠道切到 claude：自动预填 prompt_caching: true
+  panel.onProtocolChange('claude')
+  assert.equal(panel.current.value.protocol, 'claude')
+  assert.deepEqual(normalized(panel.current.value.parameters), { prompt_caching: true })
+
+  // 未修改时切到 gemini：自动清理 claude 默认推荐并预填 gemini 默认推荐
+  panel.onProtocolChange('gemini')
+  assert.equal(panel.current.value.protocol, 'gemini')
+  assert.deepEqual(normalized(panel.current.value.parameters), { gemini_empty_response_recovery: true })
+
+  // 用户手动修改推荐项后切换协议：保留用户手动设置的值不被误删
+  panel.patch({ parameters: { gemini_empty_response_recovery: false } })
+  panel.onProtocolChange('claude')
+  assert.deepEqual(
+    normalized(panel.current.value.parameters),
+    { gemini_empty_response_recovery: false, prompt_caching: true },
+  )
+
+  // 保存后（已保存渠道 canEditProviderId === false）切换协议不自动改写 parameters
+  await store.save()
+  panel.onProtocolChange('openai')
+  assert.equal(panel.current.value.protocol, 'openai')
+  assert.deepEqual(
+    normalized(panel.current.value.parameters),
+    { gemini_empty_response_recovery: false, prompt_caching: true },
+  )
+
+  // 生效参数预览中 null 显示为破折号而非 "null"
+  assert.equal(panel.formatValue(null), '—')
+  assert.equal(panel.formatValue(0), '0')
+  assert.equal(panel.formatValue({ a: 1 }), '{"a":1}')
+})
+
+test('nullable numeric SettingField emits null on clear and preserves explicit zero', () => {
+  const emitted = []
+  const nullableField = settingField(
+    { label: '温度', modelValue: 0.7, meta: { type: 'number', nullable: true, minimum: 0, maximum: 2 } },
+    (_event, value) => emitted.push(value),
+  )
+  nullableField.onNumber({ target: { value: '' } })
+  nullableField.onNumber({ target: { value: '0' } })
+  nullableField.onNumber({ target: { value: '1.2' } })
+  assert.deepEqual(normalized(emitted), [null, 0, 1.2])
+
+  const nonNullableEmitted = []
+  const strictField = settingField(
+    { label: '最大输出', modelValue: 16384, meta: { type: 'integer', nullable: false, minimum: 1 } },
+    (_event, value) => nonNullableEmitted.push(value),
+  )
+  strictField.onNumber({ target: { value: '' } })
+  assert.deepEqual(normalized(nonNullableEmitted), [])
+})
+
+test('ParamsEditor uses 1 as initial override value when temperature default is null', () => {
+  const editor = paramsEditor(
+    {},
+    { temperature: { type: 'number', inherit: true, nullable: true, minimum: 0, maximum: 2, default: null } },
+  )
+  assert.equal(editor.isOverridden('temperature'), false)
+  assert.equal(editor.initialValue('temperature'), 1)
+  editor.overrideParam('temperature')
+  assert.equal(editor.props.modelValue.temperature, 1)
+  assert.equal(editor.isOverridden('temperature'), true)
 })

@@ -18,7 +18,7 @@ from quickquip.llm.usage import configuration_pricing_entry, new_usage_run_id, s
 logger = logging.getLogger(__name__)
 
 _BRIEFING_MAX_OUTPUT_TOKENS = 8192
-_BRIEFING_TEMPERATURE = 0.8
+_BRIEFING_TEMPERATURE: float | None = None
 _PERIOD_INSTRUCTIONS = {
     "morning": "你现在要写一条群聊早报。重点是开场、回顾昨天的群聊氛围，并自然带出今天的开始。",
     "noon": "你现在要写一条群聊午报。重点是中场播报，概括今天到中午为止的节奏，语气轻快一些。",
@@ -183,7 +183,11 @@ async def generate_daily_briefing(
             model=model,
             system_prompt=system_prompt,
             messages=[user_message],
-            temperature=_BRIEFING_TEMPERATURE,
+            temperature=(
+                effective_config.temperature
+                if _BRIEFING_TEMPERATURE is None
+                else _BRIEFING_TEMPERATURE
+            ),
             max_output_tokens=_BRIEFING_MAX_OUTPUT_TOKENS,
             tools=[],
             allow_tool_calls=False,

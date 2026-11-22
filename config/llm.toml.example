@@ -103,7 +103,7 @@ search_max_calls_per_round = 3
 provider_id = ""   # 引用 [[providers]] 中的 id，留空用 default_provider
 model = ""         # 留空用该 provider 的 default_model
 timeout = 2.0      # 秒；reasoning 模型延迟更高，需调大（如 6.0）
-max_tokens = 64    # reasoning 模型的思考 token 计入该预算，需调大（如 256）
+max_tokens = 256   # 默认 256；reasoning 模型的思考 token 计入该预算，按需调大
 
 [tools]
 # enabled 是工具名单：留空 [] 用默认白名单 + 全部 MCP 工具；
@@ -405,7 +405,7 @@ enabled = false
 provider_id = ""        # 用于视觉理解的 provider ID（如 "openai-main"）
 model = ""              # 留空则用该 provider 的 default_model
 max_tokens = 300        # 单张图片描述最大 token 数，运行时限制为 80-2048
-temperature = 0.3       # 低温度确保描述准确
+# temperature = 0.3     # 采样温度；留空则沿用所选渠道设置或不下发（推理模型建议留空）
 prompt = ""             # 自定义 system prompt，留空使用内置默认
 
 [[providers]]
@@ -416,9 +416,9 @@ api_key_env = "OPENAI_API_KEY"
 default_model = "gpt-5.4"
 models = ["gpt-5.4", "gpt-5.2", "gpt-5.1"]
 style_profile = "openai_family"
-timeout_seconds = 45
-temperature = 0.8
-max_output_tokens = 2048
+timeout_seconds = 180
+# temperature = 0.8       # 采样温度（0-2）；留空表示不下发，采用模型自身默认值
+max_output_tokens = 16384
 # enabled = false   # 暂时禁用该 provider：不进 /llm providers/models 列表、不参与探活与级联，
 #                   # /llm use 拒绝；配置保留，改回 true 即恢复。
 # stream_enabled = true  # 是否启用 SSE 流式响应（默认开启）。
@@ -447,9 +447,9 @@ style_profile = "claude_family"
 # max_inline_media_bytes = 5242880   # 单请求内联媒体解码字节总量预算，缺省 5MB（0 = 不限）。超出单图上限
 #                                    # 或剩余额度的图片先自动降采样重编码压入预算，压缩后仍装不下的跳过并
 #                                    # 记日志；GIF 自动取首帧。网关按更紧的请求体/token 口径风控时调小。
-timeout_seconds = 45
-temperature = 0.8
-max_output_tokens = 2048
+timeout_seconds = 180
+# temperature = 1.0
+max_output_tokens = 16384
 
 [[providers]]
 id = "gemini-main"
@@ -467,9 +467,9 @@ style_profile = "gemini_family"
 #                         # 2.x 模型请关闭本键或全局 tool_calling_enabled，否则请求会被 API 拒绝。
 # gemini_empty_response_recovery = false  # MAX_TOKENS 且无正文、工具或图片时，凭 token 续接一次
 # gemini_empty_response_recovery_max_output_tokens = 65536  # 补正额度最多翻倍，推理与回答合计不超过此值
-timeout_seconds = 45
-temperature = 0.5
-max_output_tokens = 2048
+timeout_seconds = 180
+# temperature = 0.5
+max_output_tokens = 16384
 
 [[providers]]
 id = "deepseek"
@@ -482,9 +482,9 @@ style_profile = "openai_family"
 # non_vision_models = ["deepseek-chat", "deepseek-reasoner"]  # 非视觉模型：触发图片预处理+剥离
 # 本示例将冷场收缩间隔设为 6h，请按实际渠道缓存有效期调整
 epoch_cold_idle_seconds = 21600
-timeout_seconds = 45
-temperature = 0.5
-max_output_tokens = 2048
+timeout_seconds = 180
+# temperature = 0.5
+max_output_tokens = 16384
 
 [[providers]]
 # OpenAI Responses 协议（1.16 起）：store:false 手动上下文管理 + 每轮全量
@@ -522,10 +522,10 @@ style_profile = "openai_family"
 # 搜索材料作为工具结果保存。需渠道同时支持 namespace 工具和独立搜索端点。
 # 选择该 Profile 后不声明 hosted web_search；工具许可仍约束搜索。
 # reasoning_effort = "high"
-# 注意：部分思考系模型只接受默认温度，如遇请求被拒可把 temperature 调回 1.0。
-timeout_seconds = 45
-temperature = 0.8
-max_output_tokens = 2048
+# 注意：部分思考系模型只接受默认温度或禁止传入 temperature，留空即可由上游采用默认温度。
+timeout_seconds = 180
+# temperature = 1.0
+max_output_tokens = 16384
 
 # ════════════════════════════════════════════════════════════════════════════
 # 模型定价（per-MTok，USD）—— 供 LLM 用量/成本统计计算 cost_usd。

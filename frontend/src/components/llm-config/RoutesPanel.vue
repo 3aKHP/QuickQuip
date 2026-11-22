@@ -50,7 +50,7 @@
           <p v-if="imagePrep.enabled && !imagePrep.provider_id" class="warn-text">已启用但未选择渠道，应用时将失败。</p>
         </div>
         <SettingField label="输出上限" unit="token" :meta="metaFor('image_preprocessing', 'max_tokens')" :model-value="imagePrep.max_tokens" @update:model-value="patchImagePrep({ max_tokens: $event })" />
-        <SettingField label="温度" :meta="metaFor('image_preprocessing', 'temperature')" :model-value="imagePrep.temperature" @update:model-value="patchImagePrep({ temperature: $event })" />
+        <SettingField label="温度" placeholder="留空则跟随所选渠道 / 不下发" :meta="metaFor('image_preprocessing', 'temperature')" :model-value="imagePrep.temperature" @update:model-value="patchImagePrep({ temperature: $event })" />
         <SettingField class="feature-grid__wide" label="预处理提示词" :multiline="true" :model-value="imagePrep.prompt" @update:model-value="patchImagePrep({ prompt: $event })" />
       </div>
     </UiCard>
@@ -87,8 +87,8 @@ function settingsSection(name: string): JsonObject {
 }
 const quickJudgeRaw = computed(() => settingsSection('quick_judge'))
 const imagePrepRaw = computed(() => settingsSection('image_preprocessing'))
-const quickJudge = computed(() => ({ provider_id: String(quickJudgeRaw.value.provider_id ?? ''), model: String(quickJudgeRaw.value.model ?? ''), timeout: quickJudgeRaw.value.timeout ?? 2, max_tokens: quickJudgeRaw.value.max_tokens ?? 64 }))
-const imagePrep = computed(() => ({ enabled: imagePrepRaw.value.enabled === true, provider_id: String(imagePrepRaw.value.provider_id ?? ''), model: String(imagePrepRaw.value.model ?? ''), max_tokens: imagePrepRaw.value.max_tokens ?? 300, temperature: imagePrepRaw.value.temperature ?? 0.3, prompt: String(imagePrepRaw.value.prompt ?? '') }))
+const quickJudge = computed(() => ({ provider_id: String(quickJudgeRaw.value.provider_id ?? ''), model: String(quickJudgeRaw.value.model ?? ''), timeout: quickJudgeRaw.value.timeout ?? 2, max_tokens: quickJudgeRaw.value.max_tokens ?? 256 }))
+const imagePrep = computed(() => ({ enabled: imagePrepRaw.value.enabled === true, provider_id: String(imagePrepRaw.value.provider_id ?? ''), model: String(imagePrepRaw.value.model ?? ''), max_tokens: imagePrepRaw.value.max_tokens ?? 300, temperature: imagePrepRaw.value.temperature ?? null, prompt: String(imagePrepRaw.value.prompt ?? '') }))
 
 function patchQuickJudge(fields: JsonObject) { store.updateSettingsSection('quick_judge', { ...quickJudgeRaw.value, ...fields }) }
 function patchImagePrep(fields: JsonObject) { store.updateSettingsSection('image_preprocessing', { ...imagePrepRaw.value, ...fields }) }

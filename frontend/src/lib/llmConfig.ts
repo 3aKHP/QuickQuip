@@ -47,6 +47,11 @@ export const PROTOCOL_LABELS: Record<string, string> = {
   openai_responses: 'OpenAI Responses',
 }
 
+export const PROTOCOL_RECOMMENDED_PARAMS: Record<string, JsonObject> = {
+  claude: { prompt_caching: true },
+  gemini: { gemini_empty_response_recovery: true },
+}
+
 export const OPERATION_STATUS_LABELS: Record<string, string> = {
   queued: '排队中', running: '执行中', succeeded: '已成功', failed: '失败', cancelled: '已取消',
 }
@@ -59,12 +64,12 @@ export const PARAM_SOURCE_LABELS: Record<string, string> = {
 
 /** 请求参数的中文标签与说明；分组决定 ProvidersPanel 的展示结构 */
 export const PARAM_LABELS: Record<string, FieldLabel> = {
-  temperature: { label: '温度', hint: '采样温度，越高越发散。0–2。' },
-  max_output_tokens: { label: '最大输出 token', hint: '单次回复允许生成的 token 上限。' },
+  temperature: { label: '温度', hint: '采样温度（0–2）。留空则不下发，采用模型默认温度；推理模型建议留空。' },
+  max_output_tokens: { label: '最大输出 token', hint: '单次回复允许生成的 token 上限（推理模型包含思考 token，默认 16384）。' },
   style_profile: { label: '风格档案', hint: '引用「回复风格」中定义的风格名。' },
   style_overrides: { label: '风格附加文本', hint: '拼接在风格档案之后的补充指令。' },
   reasoning_effort: { label: '思考档位', hint: '留空表示不发送思考参数。' },
-  timeout_seconds: { label: '请求超时', unit: '秒', hint: '单次 API 请求的超时时间。' },
+  timeout_seconds: { label: '请求超时', unit: '秒', hint: '单次 API 请求的超时时间（默认 180 秒）。' },
   stream_enabled: { label: '流式输出', hint: '开启后边生成边返回。' },
   user_agent: { label: 'User-Agent', hint: '请求头中的客户端标识，留空用默认。' },
   extra_body: { label: '附加请求体', hint: '整体合并进请求 JSON，键冲突时覆盖。' },

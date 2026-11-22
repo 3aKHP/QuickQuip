@@ -652,3 +652,37 @@ def test_claude_stream_preserves_start_input_and_isolates_server_and_client_tool
     assert resp.web_search is not None
     assert resp.web_search.queries == ["direct query"]
     assert [b["type"] for b in (resp.native_blocks or [])] == ["tool_use"]
+
+
+async def test_claude_optional_temperature_omitted_when_none():
+    # Without thinking
+    client = FakeClaudeClient(_provider_config(), _text_body())
+    req = LLMRequest(
+        model="claude-sonnet-5-5",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi")],
+        temperature=None,
+        max_output_tokens=128,
+    )
+    await client.complete(req)
+    assert "temperature" not in client.last_payload
+
+    # With thinking enabled and temperature=None (must not fail or emit temperature)
+    cfg = _provider_config()
+    cfg.reasoning_effort = "high"
+    client_think = FakeClaudeClient(cfg, _text_body())
+    await client_think.complete(req)
+    assert "temperature" not in client_think.last_payload
+    assert client_think.last_payload["thinking"] == {"type": "adaptive"}
+
+    # Explicit 0.0 without thinking sends 0.0
+    client_zero = FakeClaudeClient(_provider_config(), _text_body())
+    req_zero = LLMRequest(
+        model="claude-sonnet-5-5",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi")],
+        temperature=0.0,
+        max_output_tokens=128,
+    )
+    await client_zero.complete(req_zero)
+    assert client_zero.last_payload["temperature"] == 0.0
