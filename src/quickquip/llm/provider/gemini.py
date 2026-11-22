@@ -4,6 +4,7 @@ from __future__ import annotations
 from copy import deepcopy
 import asyncio
 import json
+import logging
 import time
 from typing import Any
 from urllib import parse
@@ -23,6 +24,12 @@ from quickquip.llm.provider.base import (
     _json_string,
     sanitize_gemini_schema,
 )
+from quickquip.llm.provider.gemini_compat import (
+    downgrade_thought_signatures,
+    is_empty_text_part,
+    is_thought_signature_rejection,
+    sanitize_model_parts,
+)
 from quickquip.llm.provider.gemini_recovery import (
     empty_response_recovery_payload,
     merge_recovery_response,
@@ -33,6 +40,8 @@ from quickquip.llm.client_fingerprints.assembly import selected_profile
 from quickquip.llm.client_fingerprints.gemini_policy import (
     GeminiBodyPolicy, validate_gemini_overrides,
 )
+
+logger = logging.getLogger(__name__)
 
 
 def _inline_image_payload(part: dict[str, Any]) -> tuple[str, str] | None:
@@ -96,7 +105,7 @@ class GeminiProviderClient(BaseProviderClient):
         ]
         if message.content:
             parts.append({"text": message.content})
-        return parts or [{"text": ""}]
+        return parts or [{"text": " "}]
 
     async def _serialize_messages(
         self, messages: list[LLMConversationMessage]
@@ -134,15 +143,10 @@ class GeminiProviderClient(BaseProviderClient):
             if message.role == "assistant":
                 if message.native_content is not None:
                     # 原生路径（§7.2）：历史记录的原样 parts 深拷贝回放，
-                    # 保留 functionCall 与 thoughtSignature 的原始位置。
-                    serialized.append(
-                        {
-                            "role": "model",
-                            "parts": [
-                                deepcopy(part) for part in message.native_content
-                            ],
-                        }
-                    )
+                    # 保留 functionCall 与 thoughtSignature 的原始位置，
+                    # 同时过滤空文本 part 并为缺签名的 functionCall 补齐哨兵签名。
+                    parts = sanitize_model_parts(list(message.native_content))
+                    serialized.append({"role": "model", "parts": parts or [{"text": " "}]})
                     continue
                 parts = self._replay_parts(message.thinking_blocks)
                 if not parts:
@@ -160,7 +164,8 @@ class GeminiProviderClient(BaseProviderClient):
                                 "args": args,
                             }
                         })
-                serialized.append({"role": "model", "parts": parts or [{"text": ""}]})
+                sanitized = sanitize_model_parts(parts)
+                serialized.append({"role": "model", "parts": sanitized or [{"text": " "}]})
                 continue
 
             serialized.append(
@@ -448,7 +453,7 @@ class GeminiProviderClient(BaseProviderClient):
                 if content.get("role"):
                     candidate["content"]["role"] = content["role"]
                 for part_index, raw_part in enumerate(content.get("parts") or []):
-                    if not isinstance(raw_part, dict):
+                    if not isinstance(raw_part, dict) or is_empty_text_part(raw_part):
                         continue
                     parts = candidate["content"]["parts"]
                     if "text" in raw_part:
@@ -477,25 +482,58 @@ class GeminiProviderClient(BaseProviderClient):
             combined["modelVersion"] = fallback_model
         return combined
 
+    async def _dispatch_with_signature_fallback(
+        self,
+        request: LLMRequest,
+        url: str,
+        headers: dict[str, str],
+        payload: dict[str, Any],
+        *,
+        stream: bool,
+    ) -> tuple[Any, str, dict[str, Any]]:
+        """Dispatch GenerateContent and downgrade model signatures once on 400 rejection."""
+        post = self._post_stream_sse_candidate if stream else self._post_json_candidate
+        try:
+            result, final_url = await post(url, headers, payload)
+            return result, final_url, payload
+        except LLMProviderError as exc:
+            if self.single_dispatch or not is_thought_signature_rejection(exc):
+                raise
+            downgraded, changed = downgrade_thought_signatures(payload)
+            if not changed:
+                raise
+            retry_payload = self._project_body(request, downgraded)
+            logger.warning(
+                "Gemini rejected thought signature (%s); downgraded %d part(s) and retrying once",
+                exc,
+                changed,
+            )
+            result, final_url = await post(url, headers, retry_payload)
+            return result, final_url, retry_payload
+
     async def _complete_non_stream(self, request: LLMRequest) -> LLMResponse:
         started = time.monotonic()
         url, headers, payload = await self._build_request_parts(request)
-        data, final_url = await self._post_json_candidate(url, headers, payload)
+        data, final_url, effective_payload = await self._dispatch_with_signature_fallback(
+            request, url, headers, payload, stream=False,
+        )
         response = self._parse_response(data, request.model)
         response.owner = build_response_owner(self.config, final_url, request.model)
         return await self._recover_empty_response(
-            request, headers, payload, data, response, final_url, started, stream=False,
+            request, headers, effective_payload, data, response, final_url, started, stream=False,
         )
 
     async def _complete_stream(self, request: LLMRequest) -> LLMResponse:
         started = time.monotonic()
         url, headers, payload = await self._build_request_parts(request, stream=True)
-        chunks, final_url = await self._post_stream_sse_candidate(url, headers, payload)
+        chunks, final_url, effective_payload = await self._dispatch_with_signature_fallback(
+            request, url, headers, payload, stream=True,
+        )
         data = self._combine_stream_trace(chunks, request.model)
         response = self._parse_response(data, request.model)
         response.owner = build_response_owner(self.config, final_url, request.model)
         return await self._recover_empty_response(
-            request, headers, payload, data, response, final_url, started, stream=True,
+            request, headers, effective_payload, data, response, final_url, started, stream=True,
         )
 
     async def _recover_empty_response(

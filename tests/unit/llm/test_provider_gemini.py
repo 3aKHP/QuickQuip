@@ -615,3 +615,298 @@ async def test_gemini_no_effort_sends_no_thinking_config():
     client = FakeGeminiClient(_provider_config(), _text_body())
     await client.complete(_simple_request("gemini-3.7-flash"))
     assert "thinkingConfig" not in client.last_payload["generationConfig"]
+
+
+def test_stream_drops_trailing_empty_text_part_but_keeps_signed_empty_carrier():
+    response = GeminiProviderClient._assemble_stream_response(
+        [
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "role": "model",
+                            "parts": [
+                                {
+                                    "functionCall": {
+                                        "id": "call_1",
+                                        "name": "tool_search",
+                                        "args": {"query": "q"},
+                                    },
+                                    "thoughtSignature": "sig-call",
+                                }
+                            ],
+                        }
+                    }
+                ]
+            },
+            {
+                "candidates": [
+                    {
+                        "content": {
+                            "role": "model",
+                            "parts": [{"text": "", "thoughtSignature": "sig-carrier"}],
+                        }
+                    }
+                ]
+            },
+            {
+                "candidates": [
+                    {
+                        "finishReason": "STOP",
+                        "content": {
+                            "role": "model",
+                            "parts": [{"text": ""}],
+                        },
+                    }
+                ]
+            },
+        ],
+        "gemini-4-argon",
+    )
+    assert response.native_blocks == [
+        {
+            "functionCall": {
+                "id": "call_1",
+                "name": "tool_search",
+                "args": {"query": "q"},
+            },
+            "thoughtSignature": "sig-call",
+        },
+        {"text": "", "thoughtSignature": "sig-carrier"},
+    ]
+
+
+async def test_gemini_serializes_missing_signatures_and_strips_empty_native_parts():
+    from plugins.llm_tools import LLMToolCall
+    from quickquip.llm.provider.gemini_compat import SKIP_THOUGHT_SIGNATURE
+
+    client = FakeGeminiClient(_provider_config(), _text_body())
+    request = LLMRequest(
+        model="gemini-4-argon",
+        system_prompt="系统提示",
+        messages=[
+            LLMConversationMessage(role="user", content="查一下"),
+            # Cross-model fallback assistant turn (no native_content, no thoughtSignature)
+            LLMConversationMessage(
+                role="assistant",
+                content="",
+                tool_calls=[
+                    LLMToolCall(
+                        id="call_cross",
+                        name="tool_search",
+                        arguments_json='{"query":"x"}',
+                    )
+                ],
+            ),
+            LLMConversationMessage(
+                role="tool",
+                content="ok",
+                tool_call_id="call_cross",
+                tool_name="tool_search",
+            ),
+            # Native history turn containing stale {"text": ""} and unsigned functionCall
+            LLMConversationMessage(
+                role="assistant",
+                content="",
+                native_content=[
+                    {
+                        "functionCall": {
+                            "id": "call_native_signed",
+                            "name": "search_web",
+                            "args": {"q": "a"},
+                        },
+                        "thoughtSignature": "real-sig",
+                    },
+                    {
+                        "functionCall": {
+                            "id": "call_native_unsigned",
+                            "name": "search_web",
+                            "args": {"q": "b"},
+                        }
+                    },
+                    {"text": ""},
+                    {"text": "", "thought": True},
+                ],
+            ),
+            LLMConversationMessage(
+                role="tool",
+                content="done",
+                tool_call_id="call_native_signed",
+                tool_name="search_web",
+            ),
+            LLMConversationMessage(role="user", content=""),
+        ],
+        temperature=0.2,
+        max_output_tokens=128,
+    )
+    _url, _headers, payload = await client._build_request_parts(request)
+    contents = payload["contents"]
+    assert contents[1] == {
+        "role": "model",
+        "parts": [
+            {
+                "functionCall": {
+                    "id": "call_cross",
+                    "name": "tool_search",
+                    "args": {"query": "x"},
+                },
+                "thoughtSignature": SKIP_THOUGHT_SIGNATURE,
+            }
+        ],
+    }
+    assert contents[3] == {
+        "role": "model",
+        "parts": [
+            {
+                "functionCall": {
+                    "id": "call_native_signed",
+                    "name": "search_web",
+                    "args": {"q": "a"},
+                },
+                "thoughtSignature": "real-sig",
+            },
+            {
+                "functionCall": {
+                    "id": "call_native_unsigned",
+                    "name": "search_web",
+                    "args": {"q": "b"},
+                },
+            },
+        ],
+    }
+    # Empty user message falls back to non-empty space rather than ""
+    assert contents[-1] == {"role": "user", "parts": [{"text": " "}]}
+
+
+async def test_gemini_retries_once_with_downgraded_signatures_on_400_rejection():
+    import pytest
+    from quickquip.llm.provider.base import LLMProviderError
+    from quickquip.llm.provider.gemini_compat import SKIP_THOUGHT_SIGNATURE
+
+    class _RetryingGeminiClient(GeminiProviderClient):
+        def __init__(
+            self,
+            config: ProviderConfig,
+            outcomes: list[object],
+            *,
+            single_dispatch: bool = False,
+        ):
+            super().__init__(config, single_dispatch=single_dispatch)
+            self._outcomes = list(outcomes)
+            self.seen_payloads: list[dict] = []
+
+        def _get_api_key(self) -> str:
+            return "test-key"
+
+        async def _post_json_candidate(self, url, headers, payload):
+            self.seen_payloads.append(payload)
+            outcome = self._outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome, url
+
+        async def _post_stream_sse_candidate(self, url, headers, payload):
+            self.seen_payloads.append(payload)
+            outcome = self._outcomes.pop(0)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome, url
+
+    def _signed_history_request() -> LLMRequest:
+        return LLMRequest(
+            model="gemini-4-argon",
+            system_prompt="系统提示",
+            messages=[
+                LLMConversationMessage(role="user", content="hello"),
+                LLMConversationMessage(
+                    role="assistant",
+                    content="",
+                    native_content=[
+                        {"text": "plan", "thought": True, "thoughtSignature": "vertex-sig-1"},
+                        {
+                            "functionCall": {"id": "c1", "name": "tool_a", "args": {}},
+                            "thoughtSignature": "vertex-sig-2",
+                        },
+                    ],
+                ),
+                LLMConversationMessage(
+                    role="tool",
+                    content="res",
+                    tool_call_id="c1",
+                    tool_name="tool_a",
+                ),
+            ],
+            temperature=0.2,
+            max_output_tokens=128,
+        )
+
+    sig_400 = LLMProviderError(
+        'HTTP 400 {"error":{"code":400,"message":"Invalid thought signature.",'
+        '"status":"INVALID_ARGUMENT"}}',
+        status_code=400,
+        http_reject=True,
+    )
+
+    # 1. Non-stream succeeds on downgraded retry
+    cfg = replace(_provider_config(), client_fingerprint="legacy-gemini", stream_enabled=False)
+    client = _RetryingGeminiClient(cfg, [sig_400, _text_body()])
+    resp = await client.complete(_signed_history_request())
+    assert resp.text == "ok"
+    assert len(client.seen_payloads) == 2
+    assert client.seen_payloads[0]["contents"][1]["parts"][1]["thoughtSignature"] == "vertex-sig-2"
+    assert client.seen_payloads[1]["contents"][1]["parts"] == [
+        {"text": "plan", "thought": True},
+        {
+            "functionCall": {"id": "c1", "name": "tool_a", "args": {}},
+            "thoughtSignature": SKIP_THOUGHT_SIGNATURE,
+        },
+    ]
+
+    # 2. Stream succeeds on downgraded retry
+    stream_cfg = replace(
+        _provider_config(),
+        client_fingerprint="legacy-gemini",
+        stream_enabled=True,
+    )
+    stream_client = _RetryingGeminiClient(stream_cfg, [sig_400, [_text_body()]])
+    stream_resp = await stream_client.complete(_signed_history_request())
+    assert stream_resp.text == "ok"
+    assert len(stream_client.seen_payloads) == 2
+    retry_sig = stream_client.seen_payloads[1]["contents"][1]["parts"][1]["thoughtSignature"]
+    assert retry_sig == SKIP_THOUGHT_SIGNATURE
+
+    # 3. single_dispatch must never retry
+    single_client = _RetryingGeminiClient(cfg, [sig_400, _text_body()], single_dispatch=True)
+    with pytest.raises(LLMProviderError):
+        await single_client.complete(_signed_history_request())
+    assert len(single_client.seen_payloads) == 1
+
+    # 4. Unrelated 400 must not retry
+    other_400 = LLMProviderError(
+        'HTTP 400 {"error":{"code":400,"message":"Invalid schema","status":"INVALID_ARGUMENT"}}',
+        status_code=400,
+        http_reject=True,
+    )
+    other_client = _RetryingGeminiClient(cfg, [other_400, _text_body()])
+    with pytest.raises(LLMProviderError):
+        await other_client.complete(_signed_history_request())
+    assert len(other_client.seen_payloads) == 1
+
+    # 5. Persistent signature 400 after downgrade stops after exactly one retry
+    persistent_client = _RetryingGeminiClient(cfg, [sig_400, sig_400, _text_body()])
+    with pytest.raises(LLMProviderError):
+        await persistent_client.complete(_signed_history_request())
+    assert len(persistent_client.seen_payloads) == 2
+
+    # 6. No downgradable signatures in payload (changed == 0) must not retry
+    unsigned_req = LLMRequest(
+        model="gemini-4-argon",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hello")],
+        temperature=0.2,
+        max_output_tokens=128,
+    )
+    noop_client = _RetryingGeminiClient(cfg, [sig_400, _text_body()])
+    with pytest.raises(LLMProviderError):
+        await noop_client.complete(unsigned_req)
+    assert len(noop_client.seen_payloads) == 1
