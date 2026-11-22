@@ -4,8 +4,8 @@
 （``pilk_nogil``）的解析与解码隔离在短命子进程内：
 
 - argv：``input_path output_path sample_rate max_decoded_bytes as_limit_bytes cpu_seconds``
-- rlimit 在导入 ``pilk_nogil`` 之前生效（POSIX 平台）；畸形帧引发的段错误、
-  异常中止或超限不会影响机器人主进程。
+- rlimit 在导入 ``pilk_nogil`` 之前生效（POSIX 平台），且自动向宿主机现有硬上限夹紧；
+  畸形帧引发的段错误、异常中止或超限不会影响机器人主进程。
 - 解码后的 16-bit 单声道 PCM 写入 ``output_path``（标准 WAV 头），避开底层 C SDK
   向 stdout 打印诊断信息对二进制数据的干扰。
 - 退出码：``0`` 成功；``2`` 解码结果超过 ``max_decoded_bytes``；``1`` 其他失败。
@@ -26,6 +26,25 @@ _WAV_CHANNELS = 1
 _WAV_SAMPLE_WIDTH = 2
 
 
+def _clamp_rlimit(
+    resource_module,
+    resource_id: int,
+    target_soft: int,
+    target_hard: int,
+) -> None:
+    cur_soft, cur_hard = resource_module.getrlimit(resource_id)
+    infinity = resource_module.RLIM_INFINITY
+    if cur_hard != infinity:
+        new_hard = min(target_hard, cur_hard)
+    else:
+        new_hard = target_hard
+    if cur_soft != infinity:
+        new_soft = min(target_soft, cur_soft, new_hard)
+    else:
+        new_soft = min(target_soft, new_hard)
+    resource_module.setrlimit(resource_id, (new_soft, new_hard))
+
+
 def _apply_limits(as_limit_bytes: int, cpu_seconds: int) -> None:
     """在导入解码库之前应用 POSIX rlimit；非 POSIX 平台静默跳过。"""
     if as_limit_bytes <= 0 and cpu_seconds <= 0:
@@ -35,9 +54,9 @@ def _apply_limits(as_limit_bytes: int, cpu_seconds: int) -> None:
     except ImportError:
         return
     if as_limit_bytes > 0:
-        resource.setrlimit(resource.RLIMIT_AS, (as_limit_bytes, as_limit_bytes))
+        _clamp_rlimit(resource, resource.RLIMIT_AS, as_limit_bytes, as_limit_bytes)
     if cpu_seconds > 0:
-        resource.setrlimit(resource.RLIMIT_CPU, (cpu_seconds, cpu_seconds + 1))
+        _clamp_rlimit(resource, resource.RLIMIT_CPU, cpu_seconds, cpu_seconds + 1)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -63,9 +82,9 @@ def main(argv: list[str] | None = None) -> int:
         sys.stderr.write("ERR invalid sample_rate or max_decoded_bytes\n")
         return EXIT_ERROR
 
-    _apply_limits(as_limit_bytes, cpu_seconds)
-
     try:
+        _apply_limits(as_limit_bytes, cpu_seconds)
+
         import pilk_nogil
 
         silk_bytes = Path(input_path_arg).read_bytes()

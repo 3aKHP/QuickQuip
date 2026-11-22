@@ -1,5 +1,7 @@
 .dockerignore
 .env.example
+LICENSE
+THIRD-PARTY-NOTICES.md
 bot.py
 web_api.py
 pyproject.toml

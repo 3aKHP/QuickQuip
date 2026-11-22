@@ -116,7 +116,7 @@ jobs:
           # start.bat 首启依赖的模板清单：copy_if_missing 对缺失源静默跳过，
           # 这里在打包前钉住"模板都在 staging 里"（对齐 Docker smoke 的 test -f 思路）。
           $expected = @(
-            "staging\start.bat", "staging\.env.example", "staging\scripts\maintenance\backfill_chat_archive.py", "staging\scripts\maintenance\backfill_record_identities.py",
+            "staging\start.bat", "staging\.env.example", "staging\LICENSE", "staging\THIRD-PARTY-NOTICES.md", "staging\scripts\maintenance\backfill_chat_archive.py", "staging\scripts\maintenance\backfill_record_identities.py",
             "staging\scripts\maintenance\sync_preset_skills.py", "staging\scripts\maintenance\reset_niuniu_lengths.py",
             "staging\config\llm.json.example", "staging\config\llm.toml.example", "staging\config\chat_rules.toml.example",
             "staging\config\generation.toml.example", "staging\config\games.toml.example",
@@ -315,7 +315,8 @@ jobs:
 
       - name: Smoke test Docker image
         run: |
-          docker run --rm quickquip:smoke sh -euxc 'test -f /app/frontend/dist/index.html && test -f /app/llm_about/vocab.yaml.example && docker --version && python -m compileall -q bot.py web_api.py && python -m quickquip.llm.config_cli init && python -m quickquip.llm.config_cli validate config/llm.json.example && python -c "import quickquip, plugins, web_api"'
+          docker run --rm quickquip:smoke sh -euxc 'test -f /app/LICENSE && test -f /app/THIRD-PARTY-NOTICES.md && test -f /app/frontend/dist/index.html && test -f /app/llm_about/vocab.yaml.example && docker --version && python -m compileall -q bot.py web_api.py && python -m quickquip.llm.config_cli init && python -m quickquip.llm.config_cli validate config/llm.json.example && python -c "import quickquip, plugins, web_api"'
+          docker run --rm quickquip:smoke python -c "import asyncio, struct, pilk_nogil; from quickquip.generation.audio_transcode import normalize_audio_for_asr, validate_wav_bytes; silk = pilk_nogil.encode(struct.pack('<4800h', *([1000, -1000] * 2400)), None, pcm_rate=24000, tencent=True); res = asyncio.run(normalize_audio_for_asr(silk, filename='smoke.amr')); assert res.transcoded and validate_wav_bytes(res.data, expected_sample_rate=16000)[3] > 0; print('release docker silk transcode ok')"
           docker run --rm quickquip:smoke sh -euxc 'python scripts/maintenance/reset_niuniu_lengths.py --help && python scripts/maintenance/sync_preset_skills.py --apply --skills-dir /tmp/preset-sync-smoke && python scripts/maintenance/sync_preset_skills.py --check --skills-dir /tmp/preset-sync-smoke'
           # 存活探测：bot.py 必须活到 timeout（退出码 124）——import 冒烟抓不到
           # nonebot.load_plugins 的路径约束。勿改成 -euxc：set -e 会让 124 直接

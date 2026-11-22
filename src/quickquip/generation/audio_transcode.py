@@ -25,8 +25,8 @@ import struct
 import subprocess
 import sys
 import tempfile
-import threading
 import wave
+import weakref
 
 from quickquip.generation.errors import GenerationProviderError
 
@@ -87,6 +87,27 @@ _PASSTHROUGH_FORMATS: dict[str, tuple[str, str]] = {
     "webm": ("audio/webm", ".webm"),
 }
 
+# 子进程白名单环境变量：避免把 .env 中的 API Key 等涉密变量暴露给本地媒体解码器
+_SUBPROCESS_ENV_ALLOWLIST: tuple[str, ...] = (
+    "PATH",
+    "LANG",
+    "LC_ALL",
+    "LC_CTYPE",
+    "TZ",
+    "LD_LIBRARY_PATH",
+    "DYLD_LIBRARY_PATH",
+    "VIRTUAL_ENV",
+    "PYTHONHOME",
+    "PYTHONUTF8",
+    "SYSTEMROOT",
+    "WINDIR",
+    "TEMP",
+    "TMP",
+    "TMPDIR",
+    "COMSPEC",
+    "PATHEXT",
+)
+
 WORKER_AS_LIMIT_BYTES = 2 * 1024**3
 WORKER_CPU_SECONDS = 10
 WORKER_WALL_TIMEOUT_SECONDS = 15.0
@@ -94,8 +115,19 @@ MAX_TRANSCODE_CONCURRENCY = 2
 
 _WORKER_EXIT_TOO_LARGE = 2
 
-# 并发闸门仅在工作线程内获取与释放，避免阻塞事件循环
-_TRANSCODE_SLOTS = threading.Semaphore(MAX_TRANSCODE_CONCURRENCY)
+# 按事件循环维护的异步并发闸门：排队不占用共享 ThreadPoolExecutor 线程，且立即响应取消
+_LOOP_TRANSCODE_SEMAPHORES: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, asyncio.Semaphore
+] = weakref.WeakKeyDictionary()
+
+
+def _get_loop_semaphore() -> asyncio.Semaphore:
+    loop = asyncio.get_running_loop()
+    sem = _LOOP_TRANSCODE_SEMAPHORES.get(loop)
+    if sem is None:
+        sem = asyncio.Semaphore(MAX_TRANSCODE_CONCURRENCY)
+        _LOOP_TRANSCODE_SEMAPHORES[loop] = sem
+    return sem
 
 
 @dataclass(frozen=True, slots=True)
@@ -157,7 +189,7 @@ def validate_silk_stream(
     sample_rate: int = TARGET_WAV_SAMPLE_RATE,
     max_decoded_bytes: int = DEFAULT_ASR_MAX_DECODED_BYTES,
 ) -> tuple[str, int]:
-    """校验 SILK v3 帧边界与最小解压体积下界，返回 ``(format, frame_count)``。"""
+    """校验 SILK v3 帧边界与最小解压体积下界，返回 ``(format, voiced_frame_count)``。"""
     if data.startswith(TENCENT_SILK_MAGIC):
         fmt = "tencent_silk"
         pos = len(TENCENT_SILK_MAGIC)
@@ -167,8 +199,15 @@ def validate_silk_stream(
     else:
         raise GenerationProviderError("非有效 SILK 音频头，跳过 ASR")
 
+    min_pcm_per_frame = (sample_rate * _MIN_FRAME_MS // 1000) * TARGET_WAV_SAMPLE_WIDTH
+    if min_pcm_per_frame <= 0 or max_decoded_bytes <= _WAV_HEADER_BYTES:
+        raise GenerationProviderError("SILK 解码后音频预计超过大小上限，跳过 ASR")
+    max_frames = (max_decoded_bytes - _WAV_HEADER_BYTES) // min_pcm_per_frame
+
     total = len(data)
-    frame_count = 0
+    voiced_frames = 0
+    post_voiced_dtx_frames = 0
+    total_frames = 0
     while pos < total:
         if pos + 2 > total:
             raise GenerationProviderError("SILK 音频帧头截断，跳过 ASR")
@@ -178,22 +217,30 @@ def validate_silk_stream(
             if pos != total:
                 raise GenerationProviderError("SILK 音频结束标记后存在非法尾部数据，跳过 ASR")
             break
-        if frame_len <= 0 or frame_len > _MAX_SILK_FRAME_BYTES:
+        if frame_len < 0 or frame_len > _MAX_SILK_FRAME_BYTES:
             raise GenerationProviderError("SILK 音频帧长度非法，跳过 ASR")
         if pos + frame_len > total:
             raise GenerationProviderError("SILK 音频帧数据截断，跳过 ASR")
         pos += frame_len
-        frame_count += 1
+        total_frames += 1
+        if frame_len == 0:
+            # 0 字节帧在 SILK v3 中为合法 DTX/静音帧；仅计入有效解码下界但不稀释语音帧数
+            if voiced_frames > 0:
+                post_voiced_dtx_frames += 1
+        else:
+            voiced_frames += 1
+        if total_frames > max_frames:
+            raise GenerationProviderError("SILK 解码后音频预计超过大小上限，跳过 ASR")
 
-    # SILK SDK 解码器内部抖动缓冲要求至少 2 个有效分组（>=40ms）才能产出可靠音频
-    if frame_count < 2:
+    # SILK SDK 解码器内部抖动缓冲要求至少 2 个非空有效语音分组（>=40ms）才能产出可靠音频
+    if voiced_frames < 2:
         raise GenerationProviderError("SILK 音频有效帧不足，跳过 ASR")
 
-    min_pcm_per_frame = (sample_rate * _MIN_FRAME_MS // 1000) * TARGET_WAV_SAMPLE_WIDTH
-    if frame_count * min_pcm_per_frame + _WAV_HEADER_BYTES > max_decoded_bytes:
+    decoded_frames_lower_bound = voiced_frames + post_voiced_dtx_frames
+    if decoded_frames_lower_bound * min_pcm_per_frame + _WAV_HEADER_BYTES > max_decoded_bytes:
         raise GenerationProviderError("SILK 解码后音频预计超过大小上限，跳过 ASR")
 
-    return fmt, frame_count
+    return fmt, voiced_frames
 
 
 def validate_amr_stream(
@@ -214,6 +261,11 @@ def validate_amr_stream(
     else:
         raise GenerationProviderError("非有效 AMR 音频头，跳过 ASR")
 
+    pcm_per_frame = (sample_rate * _MIN_FRAME_MS // 1000) * TARGET_WAV_SAMPLE_WIDTH
+    if pcm_per_frame <= 0 or max_decoded_bytes <= _WAV_HEADER_BYTES:
+        raise GenerationProviderError("AMR 解码后音频预计超过大小上限，跳过 ASR")
+    max_frames = (max_decoded_bytes - _WAV_HEADER_BYTES) // pcm_per_frame
+
     total = len(data)
     frame_count = 0
     while pos < total:
@@ -229,13 +281,11 @@ def validate_amr_stream(
             raise GenerationProviderError("AMR 帧数据截断，跳过 ASR")
         pos += frame_size
         frame_count += 1
+        if frame_count > max_frames:
+            raise GenerationProviderError("AMR 解码后音频预计超过大小上限，跳过 ASR")
 
     if frame_count == 0:
         raise GenerationProviderError("AMR 音频不含有效帧，跳过 ASR")
-
-    pcm_per_frame = (sample_rate * _MIN_FRAME_MS // 1000) * TARGET_WAV_SAMPLE_WIDTH
-    if frame_count * pcm_per_frame + _WAV_HEADER_BYTES > max_decoded_bytes:
-        raise GenerationProviderError("AMR 解码后音频预计超过大小上限，跳过 ASR")
 
     return fmt, frame_count
 
@@ -288,16 +338,26 @@ def _rewrite_filename(filename: str, target_suffix: str) -> str:
     return f"{stem}{target_suffix}"
 
 
+def _base_subprocess_env() -> dict[str, str]:
+    """仅保留运行必需的基础环境变量，隔离 .env 凭据与业务密钥。"""
+    return {key: os.environ[key] for key in _SUBPROCESS_ENV_ALLOWLIST if key in os.environ}
+
+
 def _worker_env() -> dict[str, str]:
-    """子进程环境：兜底将 quickquip 包父目录加入 PYTHONPATH。"""
-    env = dict(os.environ)
+    """Python 解码 worker 环境：最小白名单 + 兜底 PYTHONPATH。"""
+    env = _base_subprocess_env()
     package_parent = str(Path(__file__).resolve().parents[2])
-    existing = env.get("PYTHONPATH", "")
+    existing = os.environ.get("PYTHONPATH", "")
     parts = [part for part in existing.split(os.pathsep) if part]
     if package_parent not in parts:
         parts.insert(0, package_parent)
     env["PYTHONPATH"] = os.pathsep.join(parts)
     return env
+
+
+def _ffmpeg_env() -> dict[str, str]:
+    """外部 ffmpeg 子进程环境：最小运行白名单，不透传任何应用密钥。"""
+    return _base_subprocess_env()
 
 
 def _transcode_silk_sync(
@@ -306,67 +366,74 @@ def _transcode_silk_sync(
     sample_rate: int,
     max_decoded_bytes: int,
 ) -> bytes:
-    _, frame_count = validate_silk_stream(
+    _, voiced_frames = validate_silk_stream(
         data,
         sample_rate=sample_rate,
         max_decoded_bytes=max_decoded_bytes,
     )
-    with _TRANSCODE_SLOTS, tempfile.TemporaryDirectory(prefix="quickquip-asr-silk-") as tmp_dir:
-        tmp_root = Path(tmp_dir)
-        input_path = tmp_root / "input.silk"
-        output_path = tmp_root / "output.wav"
-        input_path.write_bytes(data)
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="quickquip-asr-silk-",
+            ignore_cleanup_errors=True,
+        ) as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            input_path = tmp_root / "input.silk"
+            output_path = tmp_root / "output.wav"
+            input_path.write_bytes(data)
 
-        command = [
-            sys.executable,
-            "-m",
-            "quickquip.generation.audio_worker",
-            str(input_path),
-            str(output_path),
-            str(sample_rate),
-            str(max_decoded_bytes),
-            str(WORKER_AS_LIMIT_BYTES),
-            str(WORKER_CPU_SECONDS),
-        ]
-        try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                timeout=WORKER_WALL_TIMEOUT_SECONDS,
-                env=_worker_env(),
-            )
-        except subprocess.TimeoutExpired:
-            raise GenerationProviderError(
-                f"SILK 解码超时（>{WORKER_WALL_TIMEOUT_SECONDS:.0f}s），跳过 ASR"
-            ) from None
-        except OSError as exc:
-            raise GenerationProviderError(f"无法启动 SILK 解码子进程：{exc}") from exc
+            command = [
+                sys.executable,
+                "-m",
+                "quickquip.generation.audio_worker",
+                str(input_path),
+                str(output_path),
+                str(sample_rate),
+                str(max_decoded_bytes),
+                str(WORKER_AS_LIMIT_BYTES),
+                str(WORKER_CPU_SECONDS),
+            ]
+            try:
+                completed = subprocess.run(
+                    command,
+                    capture_output=True,
+                    timeout=WORKER_WALL_TIMEOUT_SECONDS,
+                    env=_worker_env(),
+                )
+            except subprocess.TimeoutExpired:
+                raise GenerationProviderError(
+                    f"SILK 解码超时（>{WORKER_WALL_TIMEOUT_SECONDS:.0f}s），跳过 ASR"
+                ) from None
+            except OSError as exc:
+                raise GenerationProviderError(f"无法启动 SILK 解码子进程：{exc}") from exc
 
-        if completed.returncode == _WORKER_EXIT_TOO_LARGE:
-            raise GenerationProviderError("SILK 解码后音频超过大小上限，跳过 ASR")
-        if completed.returncode != 0:
-            stderr_text = completed.stderr.decode("utf-8", errors="replace").strip()
-            logger.warning(
-                "SILK 解码 worker 退出失败：exitcode=%s stderr=%s",
-                completed.returncode,
-                stderr_text[:200],
-            )
-            raise GenerationProviderError(
-                f"SILK 解码失败（exitcode={completed.returncode}），跳过 ASR"
-            )
+            if completed.returncode == _WORKER_EXIT_TOO_LARGE:
+                raise GenerationProviderError("SILK 解码后音频超过大小上限，跳过 ASR")
+            if completed.returncode != 0:
+                stderr_text = completed.stderr.decode("utf-8", errors="replace").strip()
+                logger.warning(
+                    "SILK 解码 worker 退出失败：exitcode=%s stderr=%s",
+                    completed.returncode,
+                    stderr_text[:200],
+                )
+                raise GenerationProviderError(
+                    f"SILK 解码失败（exitcode={completed.returncode}），跳过 ASR"
+                )
 
-        stdout_text = completed.stdout.decode("utf-8", errors="replace")
-        decode_errors = stdout_text.count(_SILK_DECODE_ERROR_MARKER)
-        if decode_errors > 0 and (
-            decode_errors >= max(1, frame_count - 2) or decode_errors * 2 >= frame_count
-        ):
-            raise GenerationProviderError("SILK 音频帧解码损坏，跳过 ASR")
+            stdout_text = completed.stdout.decode("utf-8", errors="replace")
+            decode_errors = stdout_text.count(_SILK_DECODE_ERROR_MARKER)
+            if decode_errors > 0 and (
+                decode_errors >= max(1, voiced_frames - 2)
+                or decode_errors * 2 >= voiced_frames
+            ):
+                raise GenerationProviderError("SILK 音频帧解码损坏，跳过 ASR")
 
-        if not output_path.is_file():
-            raise GenerationProviderError("SILK 解码未生成输出文件，跳过 ASR")
-        if output_path.stat().st_size > max_decoded_bytes:
-            raise GenerationProviderError("SILK 解码后音频超过大小上限，跳过 ASR")
-        wav_bytes = output_path.read_bytes()
+            if not output_path.is_file():
+                raise GenerationProviderError("SILK 解码未生成输出文件，跳过 ASR")
+            if output_path.stat().st_size > max_decoded_bytes:
+                raise GenerationProviderError("SILK 解码后音频超过大小上限，跳过 ASR")
+            wav_bytes = output_path.read_bytes()
+    except OSError as exc:
+        raise GenerationProviderError(f"SILK 转码临时文件读写失败：{exc}") from exc
 
     validate_wav_bytes(
         wav_bytes,
@@ -395,63 +462,70 @@ def _transcode_amr_sync(
             f"检测到原始 {fmt.upper()} 语音，但运行环境未安装 ffmpeg，跳过 ASR"
         )
 
-    with _TRANSCODE_SLOTS, tempfile.TemporaryDirectory(prefix="quickquip-asr-amr-") as tmp_dir:
-        tmp_root = Path(tmp_dir)
-        input_path = tmp_root / ("input.awb" if fmt == "amr_wb" else "input.amr")
-        output_path = tmp_root / "output.wav"
-        input_path.write_bytes(data)
+    try:
+        with tempfile.TemporaryDirectory(
+            prefix="quickquip-asr-amr-",
+            ignore_cleanup_errors=True,
+        ) as tmp_dir:
+            tmp_root = Path(tmp_dir)
+            input_path = tmp_root / ("input.awb" if fmt == "amr_wb" else "input.amr")
+            output_path = tmp_root / "output.wav"
+            input_path.write_bytes(data)
 
-        command = [
-            ffmpeg_bin,
-            "-nostdin",
-            "-hide_banner",
-            "-loglevel",
-            "error",
-            "-y",
-            "-f",
-            "amr",
-            "-i",
-            str(input_path),
-            "-vn",
-            "-ac",
-            str(TARGET_WAV_CHANNELS),
-            "-ar",
-            str(sample_rate),
-            "-c:a",
-            "pcm_s16le",
-            "-f",
-            "wav",
-            str(output_path),
-        ]
-        try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                timeout=WORKER_WALL_TIMEOUT_SECONDS,
-            )
-        except subprocess.TimeoutExpired:
-            raise GenerationProviderError(
-                f"AMR 转码超时（>{WORKER_WALL_TIMEOUT_SECONDS:.0f}s），跳过 ASR"
-            ) from None
-        except OSError as exc:
-            raise GenerationProviderError(f"无法启动 ffmpeg 转码 AMR：{exc}") from exc
+            command = [
+                ffmpeg_bin,
+                "-nostdin",
+                "-hide_banner",
+                "-loglevel",
+                "error",
+                "-y",
+                "-f",
+                "amr",
+                "-i",
+                str(input_path),
+                "-vn",
+                "-ac",
+                str(TARGET_WAV_CHANNELS),
+                "-ar",
+                str(sample_rate),
+                "-c:a",
+                "pcm_s16le",
+                "-f",
+                "wav",
+                str(output_path),
+            ]
+            try:
+                completed = subprocess.run(
+                    command,
+                    capture_output=True,
+                    timeout=WORKER_WALL_TIMEOUT_SECONDS,
+                    env=_ffmpeg_env(),
+                )
+            except subprocess.TimeoutExpired:
+                raise GenerationProviderError(
+                    f"AMR 转码超时（>{WORKER_WALL_TIMEOUT_SECONDS:.0f}s），跳过 ASR"
+                ) from None
+            except OSError as exc:
+                raise GenerationProviderError(f"无法启动 ffmpeg 转码 AMR：{exc}") from exc
 
-        if completed.returncode != 0:
-            stderr_text = completed.stderr.decode("utf-8", errors="replace").strip()
-            logger.warning(
-                "ffmpeg 转码 AMR 失败：exitcode=%s stderr=%s",
-                completed.returncode,
-                stderr_text[:200],
-            )
-            raise GenerationProviderError(
-                f"AMR 转码失败（exitcode={completed.returncode}），跳过 ASR"
-            )
+            if completed.returncode != 0:
+                stderr_text = completed.stderr.decode("utf-8", errors="replace").strip()
+                logger.warning(
+                    "ffmpeg 转码 AMR 失败：exitcode=%s stderr=%s",
+                    completed.returncode,
+                    stderr_text[:200],
+                )
+                raise GenerationProviderError(
+                    f"AMR 转码失败（exitcode={completed.returncode}），跳过 ASR"
+                )
 
-        if not output_path.is_file():
-            raise GenerationProviderError("AMR 转码未生成输出文件，跳过 ASR")
-        if output_path.stat().st_size > max_decoded_bytes:
-            raise GenerationProviderError("AMR 解码后音频超过大小上限，跳过 ASR")
-        wav_bytes = output_path.read_bytes()
+            if not output_path.is_file():
+                raise GenerationProviderError("AMR 转码未生成输出文件，跳过 ASR")
+            if output_path.stat().st_size > max_decoded_bytes:
+                raise GenerationProviderError("AMR 解码后音频超过大小上限，跳过 ASR")
+            wav_bytes = output_path.read_bytes()
+    except OSError as exc:
+        raise GenerationProviderError(f"AMR 转码临时文件读写失败：{exc}") from exc
 
     validate_wav_bytes(
         wav_bytes,
@@ -462,15 +536,20 @@ def _transcode_amr_sync(
     return wav_bytes
 
 
-def _normalize_sync(
+async def normalize_audio_for_asr(
     audio_bytes: bytes,
     *,
-    filename: str,
-    max_audio_bytes: int,
-    max_decoded_bytes: int,
-    sample_rate: int,
-    ffmpeg_path: str | None,
+    filename: str = "voice",
+    max_audio_bytes: int = DEFAULT_ASR_MAX_AUDIO_BYTES,
+    max_decoded_bytes: int = DEFAULT_ASR_MAX_DECODED_BYTES,
+    sample_rate: int = TARGET_WAV_SAMPLE_RATE,
+    ffmpeg_path: str | None = None,
 ) -> NormalizedAudio:
+    """将原始语音字节按魔数归一化为 ASR 可接受的音频载荷。
+
+    常规可识别音频直接透传；SILK / AMR 转码先在事件循环侧通过异步并发闸门排队，
+    再卸载到工作线程与隔离临时目录执行，避免阻塞事件循环或耗尽共享线程池。
+    """
     if not audio_bytes:
         raise GenerationProviderError("语音文件为空，跳过 ASR")
     if len(audio_bytes) > max_audio_bytes:
@@ -478,11 +557,13 @@ def _normalize_sync(
 
     detected = detect_audio_format(audio_bytes)
     if detected in ("silk", "tencent_silk"):
-        wav_bytes = _transcode_silk_sync(
-            audio_bytes,
-            sample_rate=sample_rate,
-            max_decoded_bytes=max_decoded_bytes,
-        )
+        async with _get_loop_semaphore():
+            wav_bytes = await asyncio.to_thread(
+                _transcode_silk_sync,
+                audio_bytes,
+                sample_rate=sample_rate,
+                max_decoded_bytes=max_decoded_bytes,
+            )
         return NormalizedAudio(
             data=wav_bytes,
             filename=_rewrite_filename(filename, ".wav"),
@@ -492,12 +573,14 @@ def _normalize_sync(
         )
 
     if detected in ("amr_nb", "amr_wb"):
-        wav_bytes = _transcode_amr_sync(
-            audio_bytes,
-            sample_rate=sample_rate,
-            max_decoded_bytes=max_decoded_bytes,
-            ffmpeg_path=ffmpeg_path,
-        )
+        async with _get_loop_semaphore():
+            wav_bytes = await asyncio.to_thread(
+                _transcode_amr_sync,
+                audio_bytes,
+                sample_rate=sample_rate,
+                max_decoded_bytes=max_decoded_bytes,
+                ffmpeg_path=ffmpeg_path,
+            )
         return NormalizedAudio(
             data=wav_bytes,
             filename=_rewrite_filename(filename, ".wav"),
@@ -518,30 +601,6 @@ def _normalize_sync(
         )
 
     raise GenerationProviderError("无法识别的音频格式（非有效音频数据），跳过 ASR")
-
-
-async def normalize_audio_for_asr(
-    audio_bytes: bytes,
-    *,
-    filename: str = "voice",
-    max_audio_bytes: int = DEFAULT_ASR_MAX_AUDIO_BYTES,
-    max_decoded_bytes: int = DEFAULT_ASR_MAX_DECODED_BYTES,
-    sample_rate: int = TARGET_WAV_SAMPLE_RATE,
-    ffmpeg_path: str | None = None,
-) -> NormalizedAudio:
-    """将原始语音字节按魔数归一化为 ASR 可接受的音频载荷。
-
-    所有解码、校验与临时文件操作均在工作线程与隔离临时目录内执行，不阻塞事件循环。
-    """
-    return await asyncio.to_thread(
-        _normalize_sync,
-        audio_bytes,
-        filename=filename,
-        max_audio_bytes=max_audio_bytes,
-        max_decoded_bytes=max_decoded_bytes,
-        sample_rate=sample_rate,
-        ffmpeg_path=ffmpeg_path,
-    )
 
 
 __all__ = [

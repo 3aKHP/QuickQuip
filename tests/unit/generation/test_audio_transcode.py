@@ -5,21 +5,27 @@ import io
 import math
 from pathlib import Path
 import struct
+import subprocess
 import sys
 import tempfile
+import threading
 import wave
 
 import pilk_nogil
 import pytest
 
+from quickquip.generation import audio_worker
 from quickquip.generation.audio_transcode import (
     AMR_NB_MAGIC,
     AMR_WB_MAGIC,
+    MAX_TRANSCODE_CONCURRENCY,
     SILK_MAGIC,
     TARGET_WAV_CHANNELS,
     TARGET_WAV_SAMPLE_RATE,
     TARGET_WAV_SAMPLE_WIDTH,
     TENCENT_SILK_MAGIC,
+    _ffmpeg_env,
+    _worker_env,
     detect_audio_format,
     normalize_audio_for_asr,
     validate_amr_stream,
@@ -49,7 +55,12 @@ def _make_wav_bytes(
     return buf.getvalue()
 
 
-def _make_silk_bytes(*, tencent: bool, duration_s: float = 0.2) -> bytes:
+def _make_silk_bytes(*, tencent: bool, duration_s: float = 0.2, use_dtx: bool = False) -> bytes:
+    if use_dtx:
+        tone = _make_sine_pcm(sample_rate=24000, duration_s=0.3)
+        silence = b"\x00" * (24000 * 2)  # 1.0s silence triggers DTX 0-byte frames
+        pcm = tone + silence + tone
+        return pilk_nogil.encode(pcm, None, pcm_rate=24000, tencent=tencent, use_dtx=True)
     pcm = _make_sine_pcm(sample_rate=24000, duration_s=duration_s)
     return pilk_nogil.encode(pcm, None, pcm_rate=24000, tencent=tencent)
 
@@ -128,6 +139,37 @@ async def test_normalize_silk_decodes_to_valid_wav_ignoring_extension(
 
 
 @pytest.mark.asyncio
+async def test_normalize_silk_dtx_zero_length_frames_roundtrip():
+    """真实移动客户端开启 DTX 会在停顿处产出 0 字节帧，必须正常校验并解码。"""
+    silk_dtx = _make_silk_bytes(tencent=True, use_dtx=True)
+    # 确认样本确实包含至少一个 0 字节 DTX 帧，避免测试未触发目标路径
+    pos = len(TENCENT_SILK_MAGIC)
+    zero_frames = 0
+    while pos + 2 <= len(silk_dtx):
+        (flen,) = struct.unpack_from("<h", silk_dtx, pos)
+        pos += 2
+        if flen == -1:
+            break
+        if flen == 0:
+            zero_frames += 1
+        pos += flen
+    assert zero_frames > 0
+
+    result = await normalize_audio_for_asr(silk_dtx, filename="pause.amr")
+    assert result.transcoded is True
+    assert result.source_format == "tencent_silk"
+    channels, sampwidth, framerate, nframes = validate_wav_bytes(
+        result.data,
+        expected_sample_rate=16000,
+        expected_channels=1,
+        expected_sample_width=2,
+    )
+    assert (channels, sampwidth, framerate) == (1, 2, 16000)
+    assert nframes == 25600  # 1.6s @ 16 kHz
+    assert _pcm_rms(result.data) > 500.0
+
+
+@pytest.mark.asyncio
 async def test_normalize_passthrough_preserves_wav_and_mp3_bytes():
     wav_bytes = _make_wav_bytes(sample_rate=22050, duration_s=0.1)
     wav_result = await normalize_audio_for_asr(wav_bytes, filename="clip.bin")
@@ -157,19 +199,44 @@ async def test_normalize_passthrough_preserves_wav_and_mp3_bytes():
         TENCENT_SILK_MAGIC,
         SILK_MAGIC + b"\xff\xff",
         SILK_MAGIC + b"\x10\x00" + b"\xaa" * 4,  # 帧截断
-        TENCENT_SILK_MAGIC + b"\x00\x00",  # 非法 0 长度帧
+        TENCENT_SILK_MAGIC + b"\x00\x00",  # 全 0 字节 DTX 帧（无有效语音帧）
+        TENCENT_SILK_MAGIC + b"\x00\x00" * 4,  # 全 0 字节无语音帧
+        TENCENT_SILK_MAGIC + b"\xfe\xff",  # 非 -1 负长度
         TENCENT_SILK_MAGIC + (b"\x10\x00" + b"\xaa" * 16) * 4,  # 畸形帧触发 SDK 解码报错
         _make_silk_bytes(tencent=False) + b"\x00",  # EOF 标记后多余字节
+    ],
+)
+async def test_normalize_rejects_non_audio_and_corrupted_silk(bad_payload: bytes):
+    with pytest.raises(GenerationProviderError):
+        await normalize_audio_for_asr(bad_payload, filename="voice.silk")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "bad_amr",
+    [
         AMR_NB_MAGIC,
         AMR_NB_MAGIC + b"\x80" + b"\x00" * 12,  # 非法保留位
         AMR_NB_MAGIC + b"\x4c" + b"\x00" * 12,  # 保留 FT=9
         AMR_NB_MAGIC + b"\x3c" + b"\x00" * 5,  # 帧截断
+        AMR_WB_MAGIC,
         AMR_WB_MAGIC + b"\x54" + b"\x00" * 17,  # 保留 FT=10
     ],
 )
-async def test_normalize_rejects_non_audio_and_corrupted_streams(bad_payload: bytes):
+async def test_malformed_amr_rejected_before_invoking_ffmpeg(
+    bad_amr: bytes,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """损坏 AMR 必须在校验阶段被拒，绝不能被缺 ffmpeg 分支掩盖或进入子进程。"""
     with pytest.raises(GenerationProviderError):
-        await normalize_audio_for_asr(bad_payload, filename="voice.amr", ffmpeg_path="")
+        validate_amr_stream(bad_amr)
+
+    def forbid_subprocess(*args, **kwargs):
+        raise AssertionError("畸形 AMR 不得调用 ffmpeg 子进程")
+
+    monkeypatch.setattr("quickquip.generation.audio_transcode.subprocess.run", forbid_subprocess)
+    with pytest.raises(GenerationProviderError):
+        await normalize_audio_for_asr(bad_amr, filename="voice.amr", ffmpeg_path="/fake/ffmpeg")
 
 
 @pytest.mark.asyncio
@@ -182,6 +249,17 @@ async def test_normalize_enforces_input_and_decoded_size_limits():
     # 0.2s @ 16kHz 16-bit mono = 6444 bytes WAV；设置小于该值触发解码上限
     with pytest.raises(GenerationProviderError, match="上限"):
         await normalize_audio_for_asr(silk_bytes, max_decoded_bytes=2000)
+
+
+def test_stream_validators_short_circuit_on_excessive_frames():
+    """超额帧数必须在扫描循环内提前短路，不应扫完全部畸形大载荷。"""
+    amr_bomb = AMR_NB_MAGIC + bytes([0x7C]) * 200_000  # 200k NO_DATA frames
+    with pytest.raises(GenerationProviderError, match="上限"):
+        validate_amr_stream(amr_bomb, max_decoded_bytes=2000)
+
+    silk_bomb = TENCENT_SILK_MAGIC + b"\x01\x00\x00" * 100_000
+    with pytest.raises(GenerationProviderError, match="上限"):
+        validate_silk_stream(silk_bomb, max_decoded_bytes=2000)
 
 
 @pytest.mark.asyncio
@@ -202,16 +280,17 @@ def test_validate_silk_stream_accepts_standard_and_tencent():
 
 
 @pytest.mark.asyncio
-async def test_amr_transcode_via_ffmpeg_subprocess_and_tempdir_cleanup(
+async def test_amr_transcode_via_ffmpeg_subprocess_args_and_tempdir_cleanup(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """验证 AMR-NB/AMR-WB 走任务级临时目录调 ffmpeg、校验 WAV 且事后清理临时目录。"""
+    """验证 AMR-NB/AMR-WB 的 ffmpeg 命令行参数契约、隔离目录输入字节、输出校验与目录清理。"""
     created_dirs: list[Path] = []
     real_tempdir = tempfile.TemporaryDirectory
 
     class TrackingTempDir:
         def __init__(self, *args, **kwargs):
+            assert kwargs.get("ignore_cleanup_errors") is True
             self._inner = real_tempdir(*args, **kwargs)
             created_dirs.append(Path(self._inner.name))
 
@@ -229,10 +308,19 @@ async def test_amr_transcode_via_ffmpeg_subprocess_and_tempdir_cleanup(
     wav_fixture = _make_wav_bytes(sample_rate=16000, duration_s=0.1)
     fixture_path = tmp_path / "fixture.wav"
     fixture_path.write_bytes(wav_fixture)
+    expected_sample: list[bytes] = []
 
     def fake_subprocess_run(command, *, capture_output, timeout, env=None):
-        assert "-f" in command and "amr" in command
+        assert command[0] == "/fake/ffmpeg"
+        assert env is not None
+        fmt_idx = command.index("-f")
+        assert command[fmt_idx : fmt_idx + 3] == ["-f", "amr", "-i"]
+        input_path = Path(command[fmt_idx + 3])
+        assert input_path.parent == created_dirs[-1]
+        assert input_path.read_bytes() == expected_sample[-1]
+        assert ["-ac", "1", "-ar", "16000", "-c:a", "pcm_s16le", "-f", "wav"] == command[-9:-1]
         out_path = Path(command[-1])
+        assert out_path.parent == created_dirs[-1]
         out_path.write_bytes(fixture_path.read_bytes())
 
         class Completed:
@@ -248,6 +336,7 @@ async def test_amr_transcode_via_ffmpeg_subprocess_and_tempdir_cleanup(
         (_make_amr_nb_sample(), "amr_nb"),
         (_make_amr_wb_sample(), "amr_wb"),
     ):
+        expected_sample.append(sample)
         result = await normalize_audio_for_asr(
             sample,
             filename="voice.bin",
@@ -265,10 +354,11 @@ async def test_amr_transcode_via_ffmpeg_subprocess_and_tempdir_cleanup(
 
 
 @pytest.mark.asyncio
-async def test_audio_worker_enforces_decoded_limit_and_cleans_tempdir(
+@pytest.mark.parametrize("failure_mode", ["nonzero", "timeout", "oversize"])
+async def test_amr_ffmpeg_failure_modes_raise_and_clean_tempdir(
+    failure_mode: str,
     monkeypatch: pytest.MonkeyPatch,
 ):
-    """验证 worker 子进程自身在解码超限时返回超限退出码且临时目录被清理。"""
     created_dirs: list[Path] = []
     real_tempdir = tempfile.TemporaryDirectory
 
@@ -287,45 +377,202 @@ async def test_audio_worker_enforces_decoded_limit_and_cleans_tempdir(
         "quickquip.generation.audio_transcode.tempfile.TemporaryDirectory",
         TrackingTempDir,
     )
-    # 绕过 Python 侧最小帧估算预检，直达 worker 自身的 max_decoded_bytes 校验
-    monkeypatch.setattr(
-        "quickquip.generation.audio_transcode.validate_silk_stream",
-        lambda data, **kwargs: ("tencent_silk", 10),
-    )
 
-    silk_bytes = _make_silk_bytes(tencent=True, duration_s=0.2)
-    with pytest.raises(GenerationProviderError, match="上限"):
-        await normalize_audio_for_asr(silk_bytes, max_decoded_bytes=1024)
+    def fake_run(command, *, capture_output, timeout, env=None):
+        if failure_mode == "timeout":
+            raise subprocess.TimeoutExpired(command, timeout)
+        if failure_mode == "oversize":
+            Path(command[-1]).write_bytes(_make_wav_bytes(sample_rate=16000, duration_s=0.2))
+
+            class Ok:
+                returncode = 0
+                stdout = b""
+                stderr = b""
+
+            return Ok()
+
+        class Failed:
+            returncode = 1
+            stdout = b""
+            stderr = b"invalid amr stream"
+
+        return Failed()
+
+    monkeypatch.setattr("quickquip.generation.audio_transcode.subprocess.run", fake_run)
+
+    with pytest.raises(GenerationProviderError):
+        await normalize_audio_for_asr(
+            _make_amr_nb_sample(frames=2),
+            filename="voice.amr",
+            max_decoded_bytes=4000,
+            ffmpeg_path="/fake/ffmpeg",
+        )
 
     assert len(created_dirs) == 1
     assert not created_dirs[0].exists()
 
 
-@pytest.mark.asyncio
-async def test_concurrent_silk_transcodes_do_not_deadlock():
-    """三并发 SILK 解码（并发闸门=2）必须全部完成且不阻塞事件循环。"""
-    samples = [
-        _make_silk_bytes(tencent=False, duration_s=0.16),
-        _make_silk_bytes(tencent=True, duration_s=0.2),
-        _make_silk_bytes(tencent=True, duration_s=0.16),
-    ]
-    results = await asyncio.wait_for(
-        asyncio.gather(
-            *(normalize_audio_for_asr(sample, filename="seg.amr") for sample in samples)
-        ),
-        timeout=30.0,
+def test_audio_worker_direct_too_large_exit_code_and_no_output(tmp_path: Path):
+    """直接调用 worker 入口断言精确 EXIT_TOO_LARGE 退出码且不写出超限文件。"""
+    in_path = tmp_path / "in.silk"
+    out_path = tmp_path / "out.wav"
+    in_path.write_bytes(_make_silk_bytes(tencent=True, duration_s=0.2))
+
+    exit_code = audio_worker.main(
+        [str(in_path), str(out_path), "16000", "1024", "0", "0"]
     )
+
+    assert exit_code == audio_worker.EXIT_TOO_LARGE
+    assert not out_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_audio_worker_tempdir_oserror_converts_to_provider_error(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """临时目录 I/O 失败（如磁盘满 ENOSPC）必须收口为 GenerationProviderError。"""
+
+    def broken_tempdir(*args, **kwargs):
+        raise OSError("No space left on device")
+
+    monkeypatch.setattr(
+        "quickquip.generation.audio_transcode.tempfile.TemporaryDirectory",
+        broken_tempdir,
+    )
+
+    with pytest.raises(GenerationProviderError, match="临时文件"):
+        await normalize_audio_for_asr(_make_silk_bytes(tencent=True), filename="seg.amr")
+
+
+def test_subprocess_env_excludes_application_secrets(monkeypatch: pytest.MonkeyPatch):
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-secret-sentinel")
+    monkeypatch.setenv("WEB_ADMIN_PASSWORD", "admin-secret-sentinel")
+    monkeypatch.setenv("ONEBOT_ACCESS_TOKEN", "onebot-secret-sentinel")
+
+    worker_env = _worker_env()
+    ffmpeg_env = _ffmpeg_env()
+
+    for secret_key in ("OPENAI_API_KEY", "WEB_ADMIN_PASSWORD", "ONEBOT_ACCESS_TOKEN"):
+        assert secret_key not in worker_env
+        assert secret_key not in ffmpeg_env
+    assert "PYTHONPATH" in worker_env
+    assert "PYTHONPATH" not in ffmpeg_env
+
+
+def test_worker_clamp_rlimit_never_raises_above_current_hard_limit():
+    applied: list[tuple[int, tuple[int, int]]] = []
+
+    class FakeResource:
+        RLIM_INFINITY = -1
+        RLIMIT_AS = 9
+        RLIMIT_CPU = 0
+
+        @staticmethod
+        def getrlimit(res_id: int) -> tuple[int, int]:
+            if res_id == FakeResource.RLIMIT_AS:
+                return (512 * 1024**2, 1024**3)  # 宿主机硬上限 1 GiB < 目标 2 GiB
+            return (FakeResource.RLIM_INFINITY, 5)  # 宿主机 CPU 硬上限 5s < 目标 10s
+
+        @staticmethod
+        def setrlimit(res_id: int, limits: tuple[int, int]) -> None:
+            applied.append((res_id, limits))
+
+    audio_worker._clamp_rlimit(FakeResource, FakeResource.RLIMIT_AS, 2 * 1024**3, 2 * 1024**3)
+    audio_worker._clamp_rlimit(FakeResource, FakeResource.RLIMIT_CPU, 10, 11)
+
+    assert applied == [
+        (FakeResource.RLIMIT_AS, (512 * 1024**2, 1024**3)),
+        (FakeResource.RLIMIT_CPU, (5, 5)),
+    ]
+
+
+@pytest.mark.asyncio
+async def test_concurrent_transcodes_do_not_block_event_loop_and_enforce_limit(
+    monkeypatch: pytest.MonkeyPatch,
+):
+    """以同步屏障确定性验证：不阻塞事件循环、在途并发不超过上限、排队任务响应取消。"""
+    wav_fixture = _make_wav_bytes(sample_rate=16000, duration_s=0.1)
+    lock = threading.Lock()
+    in_flight = 0
+    max_in_flight = 0
+    two_entered = threading.Event()
+    release_gate = threading.Event()
+    call_count = 0
+
+    def gated_run(command, *, capture_output, timeout, env=None):
+        nonlocal in_flight, max_in_flight, call_count
+        with lock:
+            in_flight += 1
+            call_count += 1
+            max_in_flight = max(max_in_flight, in_flight)
+            if in_flight >= MAX_TRANSCODE_CONCURRENCY:
+                two_entered.set()
+        try:
+            assert release_gate.wait(timeout=10.0), "等待事件循环放行超时（可能阻塞了事件循环）"
+            # audio_worker argv: [py, -m, mod, input_path, output_path, ...]
+            Path(command[4]).write_bytes(wav_fixture)
+
+            class Ok:
+                returncode = 0
+                stdout = b""
+                stderr = b""
+
+            return Ok()
+        finally:
+            with lock:
+                in_flight -= 1
+
+    monkeypatch.setattr("quickquip.generation.audio_transcode.subprocess.run", gated_run)
+
+    silk = _make_silk_bytes(tencent=True, duration_s=0.16)
+    task1 = asyncio.create_task(normalize_audio_for_asr(silk, filename="s1.amr"))
+    task2 = asyncio.create_task(normalize_audio_for_asr(silk, filename="s2.amr"))
+    task3 = asyncio.create_task(normalize_audio_for_asr(silk, filename="s3.amr"))
+    task4_cancelled = asyncio.create_task(normalize_audio_for_asr(silk, filename="s4.amr"))
+
+    # 独立协程在事件循环上轮询，证明转码工作未阻塞事件循环
+    ticks = 0
+    while not two_entered.is_set() and ticks < 200:
+        await asyncio.sleep(0.01)
+        ticks += 1
+    assert two_entered.is_set()
+    assert max_in_flight == MAX_TRANSCODE_CONCURRENCY
+
+    # 取消排队中的第 4 个任务，确认其立即退出且不会进入子进程
+    task4_cancelled.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await task4_cancelled
+
+    release_gate.set()
+    results = await asyncio.wait_for(asyncio.gather(task1, task2, task3), timeout=10.0)
+    assert len(results) == 3
     assert all(item.transcoded and item.mime_type == "audio/wav" for item in results)
-    assert all(validate_wav_bytes(item.data, expected_sample_rate=16000)[3] > 0 for item in results)
+    assert max_in_flight == MAX_TRANSCODE_CONCURRENCY
+    assert call_count == 3
 
 
 def test_audio_worker_cli_usage_error():
-    import subprocess
-
     completed = subprocess.run(
         [sys.executable, "-m", "quickquip.generation.audio_worker"],
         capture_output=True,
         text=True,
+        env=_worker_env(),
     )
     assert completed.returncode != 0
     assert "usage" in completed.stderr
+
+
+def test_third_party_notices_included_in_deploy_manifest_and_dockerfiles():
+    """防止生产 deploy-v4 缺文件构建失败：通知文件与 Dockerfile COPY 必须保持同步。"""
+    repo_root = Path(__file__).resolve().parents[3]
+    manifest_lines = {
+        line.strip()
+        for line in (repo_root / "scripts" / "deploy" / "deploy-manifest.txt")
+        .read_text(encoding="utf-8")
+        .splitlines()
+        if line.strip() and not line.strip().startswith("#")
+    }
+    for required in ("LICENSE", "THIRD-PARTY-NOTICES.md"):
+        assert required in manifest_lines
+        assert required in (repo_root / "Dockerfile").read_text(encoding="utf-8")
+        assert required in (repo_root / "docker" / "Dockerfile.prod").read_text(encoding="utf-8")
