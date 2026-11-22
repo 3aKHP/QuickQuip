@@ -632,11 +632,12 @@ Gemini 和 Responses 需要完整的工具调用与结果配对。工具批次�
 ### 3. `[asr]` — 语音消息识别（语音转文字）
 
 用于将群友或私聊发送的 OneBot V11 `record` 语音消息自动转写为文字，并注入 LLM 对话上下文：
-- **优先复用协议端转写**：如果 OneBot 协议端已经在语音消息段中直接提供了 `text` / `transcript` / `transcription` 字段，QuickQuip 会直接采用该文本；否则会调用 OneBot `get_record` 接口拉取音频文件，再发给此处配置的 ASR 渠道进行转写（转写出的文本在进入 LLM 前同样会经过统一敏感词过滤）。
+- **优先复用协议端转写**：如果 OneBot 协议端已经在语音消息段中直接提供了 `text` / `transcript` / `transcription` 字段，QuickQuip 会直接采用该文本；否则下载语音 URL 或读取本地／`get_record` 返回的文件，按字节魔数完成格式识别后再交给此处配置的 ASR 渠道（转写出的文本在进入 LLM 前同样会经过统一敏感词过滤）。
+- **原始格式转码与降级**：标准 SILK（`#!SILK_V3`）与腾讯前缀 SILK（`\x02#!SILK_V3`）由内置独立子进程自动解码为 16 kHz 单声道 16-bit WAV；原始 AMR／AMR-WB（`#!AMR\n`、`#!AMR-WB\n`）在宿主机或容器 `PATH` 中存在系统 `ffmpeg` 时转为 WAV，未安装 `ffmpeg` 时记录日志并跳过该段语音；可识别的 WAV、MP3、OGG、FLAC、M4A、WebM 直接透传，非音频内容或解码失败按段跳过。
 
 | 层级 | 键名 | 说明 |
 |---|---|---|
-| **`[asr]`** | `enabled` / `default_model` / `max_audio_bytes` | 总开关、默认 ASR 模型 ID、以及单条语音最大字节数上限（超过此大小则自动跳过转写） |
+| **`[asr]`** | `enabled` / `default_model` / `max_audio_bytes` / `max_decoded_bytes` | 总开关、默认 ASR 模型 ID、原始语音下载／读取字节上限（默认 25 MiB），以及转码后 WAV 字节上限（默认 25 MiB）；任一上限超出均跳过该段转写 |
 | **`[[asr.providers]]`** | `id` / `protocol` / `base_url` / `api_key_env` / `timeout_seconds` | 当前 `protocol` 固定支持 **`openai_transcriptions`**（即 OpenAI 兼容的 `POST /audio/transcriptions`，采用 `multipart/form-data` 上传音频） |
 | **`[[asr.providers.models]]`** | `id` / `label` / `model` / `language` / `prompt` / `response_format` | `language` 为可选语言提示（如 `zh`），`prompt` 为可选上下文提示词，`response_format` 支持 `json` 或 `text` |
 

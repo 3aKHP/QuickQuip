@@ -172,10 +172,15 @@ output_format = "hex"
 enabled = false
 default_model = "whisper"
 max_audio_bytes = 26214400
+max_decoded_bytes = 26214400
 
 # ASR 用于把收到的 QQ 语音消息转写为文字并注入 LLM 上下文。
 # OneBot 协议端如果在 record 段中直接提供 text/transcript/transcription，
-# QuickQuip 会优先使用该文本；否则调用 OneBot get_record 转码，再交给这里的 ASR provider。
+# QuickQuip 会优先使用该文本；否则按字节魔数识别音频格式：
+#   - 原始 SILK（#!SILK_V3 与腾讯前缀 \x02#!SILK_V3）通过内置独立子进程解码为 16 kHz 单声道 WAV；
+#   - 原始 AMR / AMR-WB（#!AMR\n、#!AMR-WB\n）在运行环境存在系统 ffmpeg 时转为 WAV，否则记录日志并跳过；
+#   - 常规 WAV/MP3/OGG/FLAC/M4A/WebM 保持原字节透传，再交给下方 ASR provider 转写。
+# max_audio_bytes 限制下载或读取的原始语音字节数；max_decoded_bytes 限制转码后的 WAV 字节数。
 #
 # 当前支持的 protocol：
 #   openai_transcriptions — POST /audio/transcriptions，兼容 OpenAI Whisper 风格接口
