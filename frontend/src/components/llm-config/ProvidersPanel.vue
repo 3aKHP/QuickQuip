@@ -374,7 +374,10 @@ async function loadEffective() {
   catch (error: unknown) { toast((error as Error).message, 'error') }
 }
 function paramLabel(key: string) { return PARAM_LABELS[key]?.label || key }
-function formatValue(value: JsonValue) { return typeof value === 'object' ? JSON.stringify(value) : String(value ?? '—') }
+function formatValue(value: JsonValue) {
+  if (value === null || value === undefined) return '—'
+  return typeof value === 'object' ? JSON.stringify(value) : String(value)
+}
 async function probe() {
   if (!current.value?.id || !effectiveModel.value) return
   if (!confirm('探测会通过 Bot 发起一次真实请求，可能产生费用。是否继续？')) return

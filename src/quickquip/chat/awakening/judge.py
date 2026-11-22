@@ -146,7 +146,7 @@ def resolve_judge_settings(config: JudgeTargetSource) -> JudgeSettings:
     qj = config.quick_judge
     return JudgeSettings(
         timeout=qj.timeout if qj.timeout > 0 else 2.0,
-        max_tokens=qj.max_tokens if qj.max_tokens > 0 else 64,
+        max_tokens=qj.max_tokens if qj.max_tokens > 0 else 256,
         target=_judge_target(config),
     )
 

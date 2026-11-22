@@ -151,7 +151,7 @@ class DrawSvgToolMixin:
             f"图片文本：\n{visible_text[:2000] or '（无文字）'}"
         )
         try:
-            data = extract_json_object(await self.quick_judge(prompt, max_tokens=128))
+            data = extract_json_object(await self.quick_judge(prompt))
             safe = _coerce_verdict(data.get("safe"))
         except Exception:
             logger.warning("SVG 内容安全裁决失败，按 fail-open 放行")
