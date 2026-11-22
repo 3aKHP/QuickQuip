@@ -43,14 +43,14 @@ def test_is_empty_text_part_matrix():
     assert is_empty_text_part("not-a-dict") is False
 
 
-def test_sanitize_model_parts_filters_empty_and_fills_missing_call_signatures():
+def test_sanitize_model_parts_filters_empty_and_preserves_signed_parallel_calls():
     raw_parts = [
         {"text": "", "thought": True},
-        {"functionCall": {"id": "c1", "name": "tool_a", "args": {}}},
         {
-            "functionCall": {"id": "c2", "name": "tool_b", "args": {}},
+            "functionCall": {"id": "c1", "name": "tool_a", "args": {}},
             "thoughtSignature": "real-sig",
         },
+        {"functionCall": {"id": "c2", "name": "tool_b", "args": {}}},
         {"text": ""},
         {"text": "", "thoughtSignature": "carrier-sig"},
         {"text": "answer"},
@@ -59,17 +59,30 @@ def test_sanitize_model_parts_filters_empty_and_fills_missing_call_signatures():
     assert sanitized == [
         {
             "functionCall": {"id": "c1", "name": "tool_a", "args": {}},
-            "thoughtSignature": SKIP_THOUGHT_SIGNATURE,
-        },
-        {
-            "functionCall": {"id": "c2", "name": "tool_b", "args": {}},
             "thoughtSignature": "real-sig",
         },
+        {"functionCall": {"id": "c2", "name": "tool_b", "args": {}}},
         {"text": "", "thoughtSignature": "carrier-sig"},
         {"text": "answer"},
     ]
     # Original input must not be mutated.
-    assert "thoughtSignature" not in raw_parts[1]
+    assert "thoughtSignature" not in raw_parts[2]
+
+
+def test_sanitize_model_parts_fills_sentinel_on_first_unsigned_parallel_call():
+    raw_parts = [
+        {"functionCall": {"id": "c1", "name": "tool_a", "args": {}}},
+        {"functionCall": {"id": "c2", "name": "tool_b", "args": {}}},
+    ]
+    sanitized = sanitize_model_parts(raw_parts)
+    assert sanitized == [
+        {
+            "functionCall": {"id": "c1", "name": "tool_a", "args": {}},
+            "thoughtSignature": SKIP_THOUGHT_SIGNATURE,
+        },
+        {"functionCall": {"id": "c2", "name": "tool_b", "args": {}}},
+    ]
+    assert "thoughtSignature" not in raw_parts[0]
 
 
 def test_is_thought_signature_rejection_recognizes_google_and_relay_formats():
@@ -184,6 +197,10 @@ def test_downgrade_thought_signatures_preserves_calls_and_drops_empty_carriers()
                     }
                 }
             ],
+        },
+        {
+            "role": "model",
+            "parts": [{"text": " "}],
         },
         {
             "role": "model",

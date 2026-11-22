@@ -642,6 +642,16 @@ def test_stream_drops_trailing_empty_text_part_but_keeps_signed_empty_carrier():
             {
                 "candidates": [
                     {
+                        "content": {
+                            "role": "model",
+                            "parts": [{"text": "", "thoughtSignature": "sig-carrier"}],
+                        }
+                    }
+                ]
+            },
+            {
+                "candidates": [
+                    {
                         "finishReason": "STOP",
                         "content": {
                             "role": "model",
@@ -661,7 +671,8 @@ def test_stream_drops_trailing_empty_text_part_but_keeps_signed_empty_carrier():
                 "args": {"query": "q"},
             },
             "thoughtSignature": "sig-call",
-        }
+        },
+        {"text": "", "thoughtSignature": "sig-carrier"},
     ]
 
 
@@ -760,7 +771,6 @@ async def test_gemini_serializes_missing_signatures_and_strips_empty_native_part
                     "name": "search_web",
                     "args": {"q": "b"},
                 },
-                "thoughtSignature": SKIP_THOUGHT_SIGNATURE,
             },
         ],
     }
@@ -881,3 +891,22 @@ async def test_gemini_retries_once_with_downgraded_signatures_on_400_rejection()
     with pytest.raises(LLMProviderError):
         await other_client.complete(_signed_history_request())
     assert len(other_client.seen_payloads) == 1
+
+    # 5. Persistent signature 400 after downgrade stops after exactly one retry
+    persistent_client = _RetryingGeminiClient(cfg, [sig_400, sig_400, _text_body()])
+    with pytest.raises(LLMProviderError):
+        await persistent_client.complete(_signed_history_request())
+    assert len(persistent_client.seen_payloads) == 2
+
+    # 6. No downgradable signatures in payload (changed == 0) must not retry
+    unsigned_req = LLMRequest(
+        model="gemini-4-argon",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hello")],
+        temperature=0.2,
+        max_output_tokens=128,
+    )
+    noop_client = _RetryingGeminiClient(cfg, [sig_400, _text_body()])
+    with pytest.raises(LLMProviderError):
+        await noop_client.complete(unsigned_req)
+    assert len(noop_client.seen_payloads) == 1
