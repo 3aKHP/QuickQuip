@@ -236,6 +236,7 @@ class AsrConfig(_ResolveModelMixin):
     enabled: bool = False
     default_model: str = ""
     max_audio_bytes: int = 25 * 1024 * 1024
+    max_decoded_bytes: int = 25 * 1024 * 1024
     providers: dict[str, AsrProviderConfig] = field(default_factory=dict)
     models: dict[str, ResolvedAsrModel] = field(default_factory=dict)
 
@@ -514,6 +515,7 @@ def _read_asr(raw: dict[str, Any]) -> AsrConfig:
         enabled=as_bool(raw.get("enabled", False), default=False),
         default_model=default_model,
         max_audio_bytes=max(1, int(raw.get("max_audio_bytes", 25 * 1024 * 1024))),
+        max_decoded_bytes=max(1, int(raw.get("max_decoded_bytes", 25 * 1024 * 1024))),
         providers=providers,
         models=models,
     )

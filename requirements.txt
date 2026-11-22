@@ -16,3 +16,5 @@ PyYAML>=6.0
 tomlkit==0.13.3
 # search_skill_resources 匹配超时:regex 引擎内建可中断超时(防 ReDoS)
 regex>=2023.12.25
+# ASR 语音 SILK v3 解码（GPL-3.0，独立子进程隔离调用）
+pilk-nogil==0.4.3

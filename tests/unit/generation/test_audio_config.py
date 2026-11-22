@@ -61,6 +61,7 @@ def test_load_asr_config_from_generation_file(tmp_path: Path):
             enabled = true
             default_model = "whisper"
             max_audio_bytes = 12345
+            max_decoded_bytes = 54321
 
             [[asr.providers]]
             id = "openai-asr"
@@ -84,6 +85,7 @@ def test_load_asr_config_from_generation_file(tmp_path: Path):
     assert loaded.load_error is None
     assert loaded.asr.enabled is True
     assert loaded.asr.max_audio_bytes == 12345
+    assert loaded.asr.max_decoded_bytes == 54321
     resolved = loaded.asr.resolve_model()
     assert resolved is not None
     assert resolved.provider.id == "openai-asr"
