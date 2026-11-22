@@ -547,6 +547,9 @@ class ClaudeProviderClient(BaseProviderClient):
                     message["usage"].update(chunk["usage"])
 
         for index, raw_json in tool_json.items():
+            existing_input = blocks[index].get("input")
+            if not raw_json and isinstance(existing_input, dict) and existing_input:
+                continue
             try:
                 blocks[index]["input"] = json.loads(raw_json or "{}")
             except json.JSONDecodeError:

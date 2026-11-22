@@ -27,7 +27,7 @@ from quickquip.common.sensitive_filter import (
     log_hits as _log_sensitive_hits,
     reload_filter as _reload_sensitive_filter,
 )
-from quickquip.llm.search_policy import resolve_search_mode
+from quickquip.llm.search_policy import BUILTIN_SEARCH_MODES, resolve_search_mode
 
 from quickquip.llm.config import (
     DISABLED_PROVIDER_REPLY,
@@ -1288,9 +1288,7 @@ class LLMService(
             provider, tools_allowed=self.config.runtime.tool_calling_enabled,
             local_search_enabled=self.config.auto_search.enabled,
         )
-        builtin_search_active = search_mode in {
-            "gemini_grounding", "claude_web_search", "responses_hosted", "responses_standalone",
-        }
+        builtin_search_active = search_mode in BUILTIN_SEARCH_MODES
         history_enabled = self._effective_history_enabled(
             request.chat_id, request.chat_type
         )

@@ -595,3 +595,60 @@ def test_claude_builtin_search_policy_and_config_active():
         resolve_search_mode(cfg, tools_allowed=False, local_search_enabled=False)
         == "claude_web_search"
     )
+
+
+def test_claude_stream_preserves_start_input_and_isolates_server_and_client_tool_calls():
+    from quickquip.llm.provider.claude import ClaudeProviderClient
+
+    chunks = [
+        {
+            "_sse_event": "message_start",
+            "message": {
+                "id": "msg_mix",
+                "model": "claude-sonnet-5-5",
+                "usage": {"input_tokens": 50},
+            },
+        },
+        # Relay provides full input directly in content_block_start without input_json_delta
+        {
+            "_sse_event": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "server_tool_use",
+                "id": "srvtoolu_direct",
+                "name": "web_search",
+                "input": {"query": "direct query"},
+            },
+        },
+        {
+            "_sse_event": "content_block_start",
+            "index": 1,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_client_1",
+                "name": "get_time",
+                "input": {},
+            },
+        },
+        {
+            "_sse_event": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": '{"tz":"Asia/Shanghai"}'},
+        },
+        {
+            "_sse_event": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 12},
+        },
+    ]
+    combined = ClaudeProviderClient._combine_stream_trace(chunks, "claude-sonnet-5-5")
+    assert combined["content"][0]["input"] == {"query": "direct query"}
+    assert combined["content"][1]["input"] == {"tz": "Asia/Shanghai"}
+
+    resp = ClaudeProviderClient._assemble_stream_response(chunks, "claude-sonnet-5-5")
+    assert [(tc.id, tc.name, tc.arguments_json) for tc in resp.tool_calls] == [
+        ("toolu_client_1", "get_time", '{"tz":"Asia/Shanghai"}')
+    ]
+    assert resp.web_search is not None
+    assert resp.web_search.queries == ["direct query"]
+    assert [b["type"] for b in (resp.native_blocks or [])] == ["tool_use"]
