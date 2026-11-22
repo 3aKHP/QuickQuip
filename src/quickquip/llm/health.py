@@ -11,7 +11,7 @@ from quickquip.common.paths import CONFIG_GENERATION_TOML, CONFIG_SENSITIVE_WORD
 from quickquip.common.sensitive_filter import SensitiveFilter
 from quickquip.generation.config import load_generation_config
 from quickquip.llm.config import LLMConfig, ProviderConfig
-from quickquip.llm.search_policy import resolve_search_mode
+from quickquip.llm.search_policy import BUILTIN_SEARCH_MODES, resolve_search_mode
 from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.settings import ResolvedGroupSettings
 
@@ -253,9 +253,7 @@ async def build_health_report(
         provider, tools_allowed=config.runtime.tool_calling_enabled,
         local_search_enabled=config.auto_search.enabled,
     ) if provider is not None and provider.enabled else "none")
-    builtin_covered = search_mode in {
-            "gemini_grounding", "responses_hosted", "responses_standalone",
-        }
+    builtin_covered = search_mode in BUILTIN_SEARCH_MODES
     search_needed = config.auto_search.enabled or "search_web" in tool_names
     if search_mode == "responses_standalone":
         search_status = "warn"

@@ -128,7 +128,7 @@ JSON 顶层固定为 `format_version`、`providers`、`style_profiles`、`pricin
 
 `extra_body` 每次整体替换。模型选择共享风格的 `style_profile`，与追加文本 `style_overrides` 分别覆盖渠道对应字段；最终风格由共享风格文本与有效追加文本拼接。`style_profile: ""` 表示不选择共享风格，`style_overrides: ""` 表示清空追加文本。
 
-常用参数包括超时秒数、温度、最大输出 token、流式、思考档位、缓存和风格。高级参数包括 User-Agent、`extra_body`、重试策略、上下文纪元、输入预算、媒体字节预算、历史重放预算、Responses profile 和原生搜索。原生搜索 `builtin_search` 的请求效果适用于 Gemini；协议特有字段应说明适用协议。
+常用参数包括超时秒数、温度、最大输出 token、流式、思考档位、缓存和风格。高级参数包括 User-Agent、`extra_body`、重试策略、上下文纪元、输入预算、媒体字节预算、历史重放预算、Responses profile 和原生搜索。原生搜索 `builtin_search` 的请求效果适用于 Gemini 与 Claude；协议特有字段应说明适用协议。
 
 ### 有效值与字段约束
 

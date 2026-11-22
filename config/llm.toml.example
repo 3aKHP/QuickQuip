@@ -91,8 +91,8 @@ empty_prompt_reply = "请在触发指令或艾特后面补上想说的话。"
 # 自动联网判定：开启后模型会在需要最新信息时自行触发 search_web，
 # 搜索走项目内 SearXNG。search_max_calls_per_round 控制每次工具调用
 # 轮次中最多执行多少次搜索调用（1-32，默认 3）。
-# 本段只作用于 search_web 路径；provider 的 builtin_search（见 gemini 段）
-# 开启后该 provider 会话移除 search_web，改走服务端 grounding 检索。
+# 本段只作用于 search_web 路径；provider 的 builtin_search（见 gemini / claude 段）
+# 开启后该 provider 会话移除 search_web，改走服务端原生检索。
 [triggers.auto_search]
 enabled = false
 search_max_calls_per_round = 3
@@ -439,6 +439,7 @@ style_profile = "claude_family"
 # auth_method = "bearer"      # 认证方式："api_key"=x-api-key 头（默认），"bearer"=Authorization: Bearer
 # prompt_caching = true       # 启用 Anthropic Prompt Caching（需中转站支持 CLI 格式）
 # cache_ttl = "1h"            # Claude prompt cache TTL：留空 = 默认 5min，"1h" = 扩展缓存（仅 prompt_caching 开启时生效）
+# builtin_search = true       # 声明 Anthropic web_search_20250305 服务端搜索工具（max_uses=5），可与自定义工具共存；开启后该会话移除本地 search_web 工具
 # headers = { x-app = "cli" } # 自定义 HTTP 头；不设置 x-app 时自动补为 "cli"
 # model_context_windows = { "claude-sonnet-4-6" = 200000 }  # wire 模型 → 上下文窗口；未配置的模型按内置家族表解析，中继自定义模型名建议显式声明
 # agent_replay_loop_tokens = 131072  # 重放投影预算硬覆盖（优先于按窗口推导）
@@ -461,7 +462,7 @@ style_profile = "gemini_family"
 # auth_method = "bearer"  # 原生 Gemini 网关可用 Bearer；启用后 key 仅进 Authorization，不进 URL
 # builtin_search = true   # 声明 google_search 服务端搜索工具（grounding）：检索由 provider 侧
 #                         # 执行并计费；开启后该 provider 会话移除 search_web 工具，回复末尾
-#                         # 自动附上检索来源。仅 gemini 协议生效，其他协议下该键不生效。
+#                         # 自动附上检索来源。仅 gemini 与 claude 协议生效，其他协议下该键不生效。
 #                         # 注意：google_search 与 function calling 组合仅 Gemini 3 系列模型支持，
 #                         # 2.x 模型请关闭本键或全局 tool_calling_enabled，否则请求会被 API 拒绝。
 # gemini_empty_response_recovery = false  # MAX_TOKENS 且无正文、工具或图片时，凭 token 续接一次

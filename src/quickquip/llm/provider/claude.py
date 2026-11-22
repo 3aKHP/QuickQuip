@@ -23,6 +23,10 @@ from quickquip.llm.provider.base import (
     LLMResponse,
     _json_string,
 )
+from quickquip.llm.provider.claude_web_search import (
+    build_claude_web_search_tool,
+    extract_claude_web_search_report,
+)
 
 def _cache_creation_tokens(usage: dict[str, Any]) -> int | None:
     """缓存写 token：顶层 cache_creation_input_tokens 优先，否则 5m/1h 细分求和。"""
@@ -243,17 +247,21 @@ class ClaudeProviderClient(BaseProviderClient):
                 )
         if self.config.extra_body:
             payload.update(self.config.extra_body)
+        tools: list[dict[str, Any]] = []
         if request.allow_tool_calls and request.tools:
-            tools: list[dict[str, Any]] = [
+            tools.extend(
                 {
                     "name": spec.name,
                     "description": spec.description,
                     "input_schema": spec.input_schema,
                 }
                 for spec in request.tools
-            ]
+            )
+        if request.builtin_search:
+            tools.append(build_claude_web_search_tool())
+        if tools:
             # Match Claude Code: cache_control on the final tool definition.
-            if use_cache and tools:
+            if use_cache:
                 tools[-1]["cache_control"] = dict(cache_control)
             payload["tools"] = tools
         return url, headers, self._project_body(request, payload)
@@ -315,6 +323,7 @@ class ClaudeProviderClient(BaseProviderClient):
             cache_read_tokens=usage.get("cache_read_input_tokens"),
             thinking_blocks=thinking_blocks,
             native_blocks=native_blocks or None,
+            web_search=extract_claude_web_search_report(content, usage),
         )
 
     @staticmethod
@@ -451,6 +460,7 @@ class ClaudeProviderClient(BaseProviderClient):
                 )
             )
         native_blocks = [block for _, block in sorted(indexed_blocks, key=lambda pair: pair[0])]
+        combined = ClaudeProviderClient._combine_stream_trace(chunks, fallback_model)
         return LLMResponse(
             text="".join(text for _, text in sorted(text_acc.items())).strip(),
             model=model,
@@ -462,6 +472,9 @@ class ClaudeProviderClient(BaseProviderClient):
             output_tokens=output_tokens,
             cache_creation_tokens=cache_creation_tokens,
             cache_read_tokens=cache_read_tokens,
+            web_search=extract_claude_web_search_report(
+                combined.get("content"), combined.get("usage")
+            ),
         )
 
     @staticmethod
@@ -495,8 +508,8 @@ class ClaudeProviderClient(BaseProviderClient):
                 index = int(chunk.get("index", len(blocks)) or 0)
                 block = chunk.get("content_block") or {}
                 if isinstance(block, dict):
-                    blocks[index] = dict(block)
-                    if block.get("type") == "tool_use":
+                    blocks[index] = deepcopy(block)
+                    if block.get("type") in {"tool_use", "server_tool_use"}:
                         tool_json[index] = ""
             elif event == "content_block_delta":
                 index = int(chunk.get("index", 0) or 0)
@@ -520,6 +533,12 @@ class ClaudeProviderClient(BaseProviderClient):
                     )
                 elif delta_type == "input_json_delta":
                     tool_json[index] = tool_json.get(index, "") + str(delta.get("partial_json", ""))
+                elif delta_type == "citations_delta":
+                    citation = delta.get("citation")
+                    if isinstance(citation, dict):
+                        citations = block.setdefault("citations", [])
+                        if isinstance(citations, list):
+                            citations.append(deepcopy(citation))
             elif event == "message_delta":
                 delta = chunk.get("delta") or {}
                 if isinstance(delta, dict):
@@ -528,6 +547,9 @@ class ClaudeProviderClient(BaseProviderClient):
                     message["usage"].update(chunk["usage"])
 
         for index, raw_json in tool_json.items():
+            existing_input = blocks[index].get("input")
+            if not raw_json and isinstance(existing_input, dict) and existing_input:
+                continue
             try:
                 blocks[index]["input"] = json.loads(raw_json or "{}")
             except json.JSONDecodeError:

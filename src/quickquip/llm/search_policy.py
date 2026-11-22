@@ -4,8 +4,16 @@ from typing import Literal
 from quickquip.llm.config import ProviderConfig, provider_builtin_search_active
 
 SearchMode = Literal[
-    "none", "local", "gemini_grounding", "responses_hosted", "responses_standalone",
+    "none", "local", "gemini_grounding", "claude_web_search",
+    "responses_hosted", "responses_standalone",
 ]
+
+BUILTIN_SEARCH_MODES: frozenset[str] = frozenset({
+    "gemini_grounding",
+    "claude_web_search",
+    "responses_hosted",
+    "responses_standalone",
+})
 
 
 def resolve_search_mode(
@@ -19,6 +27,8 @@ def resolve_search_mode(
     if provider_builtin_search_active(provider):
         if provider.protocol == "gemini":
             return "gemini_grounding"
+        if provider.protocol == "claude":
+            return "claude_web_search"
         if tools_allowed:
             return "responses_hosted"
     return "local" if tools_allowed and local_search_enabled else "none"

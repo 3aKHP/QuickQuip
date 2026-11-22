@@ -931,11 +931,12 @@ def _validate_and_fix_config(config: LLMConfig) -> None:
             provider_errors.append(
                 f"非法 cache_ttl {provider.cache_ttl!r}（claude 仅支持 5m / 1h，留空=默认 5min）"
             )
-        if provider.builtin_search and provider.protocol != "gemini":
-            # 非 gemini 协议不剪除 provider：键误配只影响该键本身，记录
+        if provider.builtin_search and provider.protocol not in {"gemini", "claude"}:
+            # 不支持的协议不剪除 provider：键误配只影响该键本身，记录
             # warning 即可，请求级生效由 provider_builtin_search_active 兜底为惰性。
             logger.warning(
-                "provider %s 的 builtin_search 仅支持 gemini 协议，当前协议 %r 下该配置不生效",
+                "provider %s 的 builtin_search 仅支持 gemini / claude 协议，"
+                "当前协议 %r 下该配置不生效",
                 pid,
                 provider.protocol,
             )

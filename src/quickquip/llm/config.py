@@ -269,7 +269,7 @@ class ProviderConfig:
     prompt_caching: bool = False
     cache_ttl: str = ""  # Claude prompt-cache TTL；空=默认 5min，"1h"=扩展缓存
     auth_method: str = "api_key"  # "api_key" | "bearer"
-    builtin_search: bool = False  # 声明 provider 原生搜索工具；仅 gemini 协议有请求级效果
+    builtin_search: bool = False  # 声明 provider 原生搜索工具；gemini 与 claude 协议有请求级效果
     # Gemini MAX_TOKENS 空回复最多续接一次，输出额度翻倍并受独立上限约束。
     gemini_empty_response_recovery: bool = False
     gemini_empty_response_recovery_max_output_tokens: int = 65536
@@ -313,12 +313,12 @@ class ProviderConfig:
 
 
 def provider_builtin_search_active(provider: ProviderConfig) -> bool:
-    """Provider 原生搜索能力：Gemini 配置开关或 Responses profile。
+    """Provider 原生搜索能力：Gemini/Claude 配置开关或 Responses profile。
 
     本函数描述 provider 能力；应用层 search_policy 结合当次工具许可，
     统一解析提示词、工具曝光和健康检查使用的有效搜索模式。
     """
-    return (provider.builtin_search and provider.protocol == "gemini") or (
+    return (provider.builtin_search and provider.protocol in {"gemini", "claude"}) or (
         provider.protocol == "openai_responses"
         and ("web_search" in RESPONSES_HOSTED_TOOLS.get(provider.responses_profile, ())
              or provider.responses_profile in RESPONSES_STANDALONE_SEARCH)

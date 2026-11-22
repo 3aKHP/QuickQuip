@@ -379,3 +379,276 @@ async def test_claude_no_effort_sends_nothing():
     client = FakeClaudeClient(_provider_config(), _text_body())
     await client.complete(_simple_request("claude-opus-4-7"))
     assert "thinking" not in client.last_payload
+
+
+async def test_claude_builtin_search_declared_alone_and_alongside_custom_tools():
+    config = _provider_config()
+    config.prompt_caching = True
+
+    # 1. Declared alone even when allow_tool_calls=False
+    req = _simple_request("claude-sonnet-5-5")
+    req.builtin_search = True
+    req.allow_tool_calls = False
+    client = FakeClaudeClient(config, _text_body())
+    await client.complete(req)
+    assert client.last_payload["tools"] == [
+        {
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 5,
+            "cache_control": {"type": "ephemeral"},
+        }
+    ]
+
+    # 2. Declared alongside custom client tools; cache_control lands on the final tool
+    req_with_tools = LLMRequest(
+        model="claude-sonnet-5-5",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="查一下")],
+        temperature=0.2,
+        max_output_tokens=128,
+        tools=[
+            LLMToolSpec(
+                name="get_time",
+                description="获取时间",
+                input_schema={"type": "object", "properties": {}},
+            )
+        ],
+        allow_tool_calls=True,
+        builtin_search=True,
+    )
+    client2 = FakeClaudeClient(config, _text_body())
+    await client2.complete(req_with_tools)
+    assert len(client2.last_payload["tools"]) == 2
+    assert client2.last_payload["tools"][0]["name"] == "get_time"
+    assert "cache_control" not in client2.last_payload["tools"][0]
+    assert client2.last_payload["tools"][1] == {
+        "type": "web_search_20250305",
+        "name": "web_search",
+        "max_uses": 5,
+        "cache_control": {"type": "ephemeral"},
+    }
+
+
+async def test_claude_builtin_search_non_stream_and_stream_parse_and_trace():
+    from quickquip.llm.provider.claude import ClaudeProviderClient
+
+    non_stream_body = {
+        "id": "msg_1",
+        "type": "message",
+        "role": "assistant",
+        "model": "claude-sonnet-5-5",
+        "stop_reason": "end_turn",
+        "content": [
+            {
+                "type": "server_tool_use",
+                "id": "srvtoolu_1",
+                "name": "web_search",
+                "input": {"query": "Python 3.13 release"},
+            },
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtoolu_1",
+                "content": [
+                    {
+                        "type": "web_search_result",
+                        "title": "Python 3.13.18",
+                        "url": "https://www.python.org/downloads/release/python-31318/",
+                        "encrypted_content": "CIPHER",
+                    }
+                ],
+            },
+            {"type": "text", "text": "Latest is Python 3.13."},
+            {
+                "type": "text",
+                "text": "18.",
+                "citations": [
+                    {
+                        "type": "web_search_result_location",
+                        "url": "https://www.python.org/downloads/release/python-31318/",
+                        "title": "Python 3.13.18",
+                        "cited_text": "Python 3.13.18",
+                    }
+                ],
+            },
+        ],
+        "usage": {
+            "input_tokens": 100,
+            "output_tokens": 20,
+            "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 0},
+        },
+    }
+    resp = ClaudeProviderClient._parse_response(non_stream_body, "claude-sonnet-5-5")
+    assert resp.text == "Latest is Python 3.13.18."
+    assert resp.web_search is not None
+    assert resp.web_search.queries == ["Python 3.13 release"]
+    assert resp.web_search.link_urls is True
+    assert [(s.title, s.url) for s in resp.web_search.sources] == [
+        ("Python 3.13.18", "https://www.python.org/downloads/release/python-31318/")
+    ]
+    # Native replay blocks must not retain bulky server_tool_use / web_search_tool_result.
+    assert [b["type"] for b in (resp.native_blocks or [])] == ["text", "text"]
+
+    sse_chunks = [
+        {
+            "_sse_event": "message_start",
+            "message": {
+                "id": "msg_2",
+                "model": "claude-sonnet-5-5",
+                "usage": {"input_tokens": 100},
+            },
+        },
+        {
+            "_sse_event": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "server_tool_use",
+                "id": "srvtoolu_2",
+                "name": "web_search",
+                "input": {},
+            },
+        },
+        {
+            "_sse_event": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": '{"query": "Python 3.13'},
+        },
+        {
+            "_sse_event": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": ' release"}'},
+        },
+        {
+            "_sse_event": "content_block_start",
+            "index": 1,
+            "content_block": {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srvtoolu_2",
+                "content": [
+                    {
+                        "type": "web_search_result",
+                        "title": "Python 3.13.18",
+                        "url": "https://www.python.org/downloads/release/python-31318/",
+                        "encrypted_content": "CIPHER",
+                    }
+                ],
+            },
+        },
+        {
+            "_sse_event": "content_block_start",
+            "index": 2,
+            "content_block": {"type": "text", "text": ""},
+        },
+        {
+            "_sse_event": "content_block_delta",
+            "index": 2,
+            "delta": {"type": "text_delta", "text": "Latest is Python 3.13.18."},
+        },
+        {
+            "_sse_event": "content_block_delta",
+            "index": 2,
+            "delta": {
+                "type": "citations_delta",
+                "citation": {
+                    "type": "web_search_result_location",
+                    "url": "https://www.python.org/downloads/release/python-31318/",
+                    "title": "Python 3.13.18",
+                },
+            },
+        },
+        {
+            "_sse_event": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {
+                "output_tokens": 20,
+                "server_tool_use": {"web_search_requests": 1, "web_fetch_requests": 0},
+            },
+        },
+    ]
+    combined = ClaudeProviderClient._combine_stream_trace(sse_chunks, "claude-sonnet-5-5")
+    assert combined["content"][0]["input"] == {"query": "Python 3.13 release"}
+    assert combined["content"][1]["type"] == "web_search_tool_result"
+    assert len(combined["content"][2]["citations"]) == 1
+
+    stream_resp = ClaudeProviderClient._assemble_stream_response(sse_chunks, "claude-sonnet-5-5")
+    assert stream_resp.text == "Latest is Python 3.13.18."
+    assert stream_resp.web_search is not None
+    assert stream_resp.web_search.queries == ["Python 3.13 release"]
+    assert [(s.title, s.url) for s in stream_resp.web_search.sources] == [
+        ("Python 3.13.18", "https://www.python.org/downloads/release/python-31318/")
+    ]
+    assert [b["type"] for b in (stream_resp.native_blocks or [])] == ["text"]
+
+
+def test_claude_builtin_search_policy_and_config_active():
+    from quickquip.llm.config import provider_builtin_search_active
+    from quickquip.llm.search_policy import resolve_search_mode
+
+    cfg = _provider_config()
+    cfg.builtin_search = True
+    assert provider_builtin_search_active(cfg) is True
+    assert (
+        resolve_search_mode(cfg, tools_allowed=True, local_search_enabled=True)
+        == "claude_web_search"
+    )
+    assert (
+        resolve_search_mode(cfg, tools_allowed=False, local_search_enabled=False)
+        == "claude_web_search"
+    )
+
+
+def test_claude_stream_preserves_start_input_and_isolates_server_and_client_tool_calls():
+    from quickquip.llm.provider.claude import ClaudeProviderClient
+
+    chunks = [
+        {
+            "_sse_event": "message_start",
+            "message": {
+                "id": "msg_mix",
+                "model": "claude-sonnet-5-5",
+                "usage": {"input_tokens": 50},
+            },
+        },
+        # Relay provides full input directly in content_block_start without input_json_delta
+        {
+            "_sse_event": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "server_tool_use",
+                "id": "srvtoolu_direct",
+                "name": "web_search",
+                "input": {"query": "direct query"},
+            },
+        },
+        {
+            "_sse_event": "content_block_start",
+            "index": 1,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_client_1",
+                "name": "get_time",
+                "input": {},
+            },
+        },
+        {
+            "_sse_event": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": '{"tz":"Asia/Shanghai"}'},
+        },
+        {
+            "_sse_event": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 12},
+        },
+    ]
+    combined = ClaudeProviderClient._combine_stream_trace(chunks, "claude-sonnet-5-5")
+    assert combined["content"][0]["input"] == {"query": "direct query"}
+    assert combined["content"][1]["input"] == {"tz": "Asia/Shanghai"}
+
+    resp = ClaudeProviderClient._assemble_stream_response(chunks, "claude-sonnet-5-5")
+    assert [(tc.id, tc.name, tc.arguments_json) for tc in resp.tool_calls] == [
+        ("toolu_client_1", "get_time", '{"tz":"Asia/Shanghai"}')
+    ]
+    assert resp.web_search is not None
+    assert resp.web_search.queries == ["direct query"]
+    assert [b["type"] for b in (resp.native_blocks or [])] == ["tool_use"]
