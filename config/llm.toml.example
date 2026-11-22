@@ -499,6 +499,9 @@ default_model = "gpt-5.2"
 models = ["gpt-5.2", "gpt-5.1"]
 style_profile = "openai_family"
 # responses_profile：后端能力位。"openai-public"（官方 API）、
+# "responses-plaintext-reasoning"（兼容第三方 Responses 端点返回的明文
+# reasoning.content / reasoning_text 与 response.reasoning.{delta,done} 别名，
+# 不发 service_tier，档位词表 low..xhigh）、
 # "codex-http-relay"（Codex 形态中转：不发 service_tier、容忍 codex.*
 # 结构事件、终态缺省字段时以流式完整 item 为回放基准）或
 # hosted 搜索会话自动移除本地 search_web；禁用工具后历史搜索使用通用投影。

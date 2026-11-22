@@ -5,15 +5,15 @@ profile 是"有日期的兼容契约"：能力扩展须明确记录既有 profil
 首批两个（1.16 决策 2）：
 
 - ``openai-public``：官方 ``/v1/responses`` 端点。
+- ``responses-plaintext-reasoning``：兼容第三方 Responses 端点返回的明文
+  ``reasoning.content``（``type="reasoning_text"``）及 ``response.reasoning.{delta,done}``
+  SSE 别名；不发 ``service_tier``，保持 ``store: false`` 与 ``low..xhigh`` 词表。
 - ``codex-http-relay``：Codex 形态中转（HTTP+SSE）。差异点：不发
   ``service_tier``；识别 ``codex.*`` 等预期附加事件并静默忽略；终态 ``output``
   可能缺省可选字段，以流式 ``output_item.done`` 的完整 item 为回放基准。
 - ``codex-relay-hosted-tools``：在 ``codex-http-relay`` 全部能力位之上，
   由客户端显式声明 hosted 内置工具（2026-11-09 中转注入回归适配，见
   该注册项注记）。
-
-深搜/MiMo 式 stateless subset profile（无 ``store:false``、明文 reasoning）
-未随首批引入；引入时在此补注册项与能力位，序列化/解析侧按能力位分支。
 """
 from __future__ import annotations
 
@@ -56,6 +56,8 @@ class ResponsesProfile:
     # 客户端在 tools 数组显式声明的 hosted 内置工具类型集合；空 = 不声明。
     # wire 形状映射单源 request.HOSTED_TOOL_WIRE（与 wire_efforts 同构）。
     hosted_tools: frozenset[str] = frozenset()
+    # 是否接受 reasoning.content 中的合法明文 reasoning_text 及流式别名事件。
+    allow_plaintext_reasoning: bool = False
 
 
 PROFILES: dict[str, ResponsesProfile] = {
@@ -73,6 +75,14 @@ PROFILES: dict[str, ResponsesProfile] = {
         service_tier="auto",
         recognize_relay_events=False,
         reconcile_relay_items=False,
+    ),
+    "responses-plaintext-reasoning": ResponsesProfile(
+        profile_id="responses-plaintext-reasoning",
+        wire_efforts=frozenset({"low", "medium", "high", "xhigh"}),
+        service_tier=None,
+        recognize_relay_events=False,
+        reconcile_relay_items=False,
+        allow_plaintext_reasoning=True,
     ),
     "codex-http-relay": ResponsesProfile(
         profile_id="codex-http-relay",

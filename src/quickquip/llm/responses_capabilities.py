@@ -4,6 +4,7 @@ from types import MappingProxyType
 RESPONSES_HOSTED_TOOLS = MappingProxyType({
     "codex-relay-standalone-search": frozenset({"image_generation"}),
     "openai-public": frozenset(),
+    "responses-plaintext-reasoning": frozenset(),
     "codex-http-relay": frozenset(),
     "codex-relay-hosted-tools": frozenset({"image_generation", "web_search"}),
 })

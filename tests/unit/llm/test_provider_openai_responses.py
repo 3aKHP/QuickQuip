@@ -1943,3 +1943,247 @@ async def test_final_body_cannot_enable_search_through_preview_alias(alias, monk
     with pytest.raises(LLMProviderError):
         await client._build_request_parts(_request([
             LLMConversationMessage(role="user", content="hello")], allow_tool_calls=True))
+
+
+# ── responses-plaintext-reasoning（Issue #355）──────────────────────────────
+
+
+def _plaintext_reasoning_item(
+    text: str = "合成推理文本",
+    *,
+    summary: list[dict[str, object]] | None = None,
+    encrypted_content: str | None = None,
+) -> dict[str, object]:
+    item: dict[str, object] = {
+        "type": "reasoning",
+        "id": "rs_plain",
+        "summary": [] if summary is None else summary,
+        "content": [{"type": "reasoning_text", "text": text}],
+    }
+    if encrypted_content is not None:
+        item["encrypted_content"] = encrypted_content
+    return item
+
+
+def test_plaintext_reasoning_profile_contract_and_payload():
+    profile = resolve_profile("responses-plaintext-reasoning")
+    assert profile.allow_plaintext_reasoning is True
+    assert profile.service_tier is None
+    assert profile.wire_efforts == frozenset({"low", "medium", "high", "xhigh"})
+    assert profile.recognize_relay_events is False
+    assert profile.reconcile_relay_items is False
+    assert profile.hosted_tools == frozenset()
+    for other_id in (
+        "openai-public",
+        "codex-http-relay",
+        "codex-relay-hosted-tools",
+        "codex-relay-standalone-search",
+    ):
+        assert resolve_profile(other_id).allow_plaintext_reasoning is False
+
+    payload = _payload(
+        _request([LLMConversationMessage(role="user", content="hi")], reasoning_effort="max"),
+        _config(responses_profile="responses-plaintext-reasoning"),
+    )
+    assert "service_tier" not in payload
+    assert payload["store"] is False
+    assert payload["include"] == ["reasoning.encrypted_content"]
+    assert payload["reasoning"] == {"effort": "xhigh", "summary": "auto"}
+
+
+def test_plaintext_reasoning_parse_completed_incomplete_and_hybrid():
+    profile = resolve_profile("responses-plaintext-reasoning")
+    completed = _completed_body([
+        _plaintext_reasoning_item("先核对条件"),
+        {
+            "type": "message",
+            "id": "msg_1",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "正常回复正文"}],
+        },
+    ])
+    response = parse_responses_body(
+        completed, provider_id="cmdc", fallback_model="m", profile=profile
+    )
+    assert response.text == "正常回复正文"
+    assert response.finish_reason == "completed"
+    assert response.thinking_blocks == [
+        {"type": "reasoning", "reasoning_content": "先核对条件"}
+    ]
+
+    incomplete = _completed_body(
+        [_plaintext_reasoning_item("思考耗尽上限")],
+        status="incomplete",
+        incomplete_details={"reason": "max_output_tokens"},
+        usage={
+            "input_tokens": 100,
+            "output_tokens": 800,
+            "output_tokens_details": {"reasoning_tokens": 797},
+        },
+    )
+    truncated = parse_responses_body(
+        incomplete, provider_id="cmdc", fallback_model="m", profile=profile
+    )
+    assert truncated.finish_reason == "length"
+    assert truncated.text == ""
+    assert truncated.output_tokens == 800
+    assert truncated.thinking_tokens == 797
+
+    hybrid = _completed_body([
+        _plaintext_reasoning_item(
+            "详细明文推理",
+            summary=[{"type": "summary_text", "text": "简短摘要"}],
+        ),
+        {
+            "type": "message",
+            "id": "msg_2",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "正文"}],
+        },
+    ])
+    hybrid_resp = parse_responses_body(
+        hybrid, provider_id="cmdc", fallback_model="m", profile=profile
+    )
+    assert hybrid_resp.thinking_blocks == [
+        {"type": "reasoning", "reasoning_content": "简短摘要"},
+        {"type": "reasoning_text", "reasoning_content": "详细明文推理"},
+    ]
+
+
+@pytest.mark.parametrize(
+    "profile_id",
+    [
+        "openai-public",
+        "codex-http-relay",
+        "codex-relay-hosted-tools",
+        "codex-relay-standalone-search",
+    ],
+)
+def test_existing_profiles_still_reject_plaintext_reasoning(profile_id):
+    body = _completed_body([
+        _plaintext_reasoning_item(),
+        {
+            "type": "message",
+            "id": "msg_1",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "正文"}],
+        },
+    ])
+    with pytest.raises(LLMProviderError, match="reasoning content"):
+        parse_responses_body(
+            body, provider_id="fake", fallback_model="m", profile=resolve_profile(profile_id)
+        )
+
+
+@pytest.mark.parametrize(
+    "bad_content",
+    [
+        "raw-string",
+        [{"type": "output_text", "text": "wrong-type"}],
+        [{"type": "reasoning_text", "text": 123}],
+        ["not-a-dict"],
+    ],
+)
+def test_plaintext_reasoning_profile_rejects_malformed_content(bad_content):
+    body = _completed_body([
+        {"type": "reasoning", "id": "rs_bad", "summary": [], "content": bad_content},
+        {
+            "type": "message",
+            "id": "msg_1",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "正文"}],
+        },
+    ])
+    with pytest.raises(LLMProviderError, match="reasoning content"):
+        parse_responses_body(
+            body,
+            provider_id="cmdc",
+            fallback_model="m",
+            profile=resolve_profile("responses-plaintext-reasoning"),
+        )
+
+
+@pytest.mark.parametrize(
+    ("delta_event", "done_event"),
+    [
+        ("response.reasoning_text.delta", "response.reasoning_text.done"),
+        ("response.reasoning.delta", "response.reasoning.done"),
+    ],
+)
+def test_stream_plaintext_reasoning_official_and_cmd_aliases(delta_event, done_event):
+    terminal = _completed_body([
+        _plaintext_reasoning_item(
+            "第一段第二段",
+            summary=[{"type": "summary_text", "text": "摘要A"}],
+        ),
+        {
+            "type": "message",
+            "id": "msg_1",
+            "role": "assistant",
+            "content": [{"type": "output_text", "text": "最终回答"}],
+        },
+    ])
+    events = [
+        {"type": "response.created", "sequence_number": 0},
+        {"type": "response.reasoning_summary_text.delta", "sequence_number": 1, "delta": "摘要A"},
+        {"type": "response.reasoning_summary_text.done", "sequence_number": 2},
+        {"type": delta_event, "sequence_number": 3, "delta": "第一段"},
+        {"type": delta_event, "sequence_number": 4, "delta": "第二段"},
+        {"type": done_event, "sequence_number": 5},
+        {"type": "response.output_text.delta", "sequence_number": 6, "delta": "最终回答"},
+        {"type": "response.completed", "sequence_number": 7, "response": terminal},
+    ]
+    response = _fold(events, profile_id="responses-plaintext-reasoning")
+    assert response.text == "最终回答"
+    assert response.thinking_blocks == [
+        {"type": "reasoning", "reasoning_content": "摘要A"},
+        {"type": "reasoning_text", "reasoning_content": "第一段第二段"},
+    ]
+
+    tampered = deepcopy(events)
+    tampered[4]["delta"] = "被篡改"
+    with pytest.raises(LLMProviderError, match="明文 reasoning"):
+        _fold(tampered, profile_id="responses-plaintext-reasoning")
+
+
+def test_plaintext_reasoning_tool_loop_replay_and_owner_isolation():
+    from quickquip.llm.provider.openai_responses.response import blocks_replay_valid
+    from quickquip.llm.provider.owner import profile_fingerprint
+
+    plain_loop_blocks = [
+        _plaintext_reasoning_item("先查资料"),
+        {
+            "type": "function_call",
+            "call_id": "call_1",
+            "name": "get_identity",
+            "arguments": '{"query":"a"}',
+        },
+    ]
+    messages = [
+        LLMConversationMessage(role="user", content="查一下"),
+        LLMConversationMessage(role="assistant", native_content=plain_loop_blocks),
+        LLMConversationMessage(
+            role="tool", tool_call_id="call_1", tool_name="get_identity", content="ok"
+        ),
+    ]
+    payload = _payload(
+        _request(messages),
+        _config(responses_profile="responses-plaintext-reasoning"),
+    )
+    assert payload["input"][1] == plain_loop_blocks[0]
+    assert payload["input"][2] == plain_loop_blocks[1]
+
+    with pytest.raises(LLMProviderError, match="reasoning content"):
+        _payload(_request(messages), _config(responses_profile="openai-public"))
+
+    # 无 encrypted_content 的明文 reasoning 在已关闭历史不具备原生回放资格，退回通用投影。
+    assert blocks_replay_valid(plain_loop_blocks) is False
+    # 同时携带有效密文和合法 reasoning_text 时，允许同 Profile 归属下原生回放。
+    hybrid_blocks = [
+        _plaintext_reasoning_item("先查资料", encrypted_content="cipher_xyz"),
+        plain_loop_blocks[1],
+    ]
+    assert blocks_replay_valid(hybrid_blocks) is True
+    assert profile_fingerprint(_config(responses_profile="openai-public")) != (
+        profile_fingerprint(_config(responses_profile="responses-plaintext-reasoning"))
+    )

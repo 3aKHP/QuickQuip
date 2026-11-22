@@ -149,7 +149,10 @@ class OpenAIResponsesProviderClient(BaseProviderClient):
 
     def _parse_response(self, data: dict[str, Any], fallback_model: str) -> LLMResponse:
         return parse_responses_body(
-            data, provider_id=self.config.id, fallback_model=fallback_model
+            data,
+            provider_id=self.config.id,
+            fallback_model=fallback_model,
+            profile=self._profile(),
         )
 
     def _assemble_stream_response(
