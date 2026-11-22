@@ -506,6 +506,67 @@ async def test_job_publish_period_reports_only_enabled_groups(monkeypatch):
     assert sends == [("send", 10001)]
 
 
+@pytest.mark.asyncio
+async def test_job_publish_period_reports_skips_expired_and_exhausted_and_serializes(monkeypatch):
+    """周期报告同样过滤过期与达到重试上限记录，且同群串行发送。"""
+    import asyncio
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    now = datetime(2026, 11, 22, 10, 0, tzinfo=ZoneInfo("Asia/Shanghai"))
+    in_flight = 0
+    max_in_flight = 0
+    sent_keys: list[str] = []
+
+    async def fake_send(row):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        await asyncio.sleep(0.01)
+        sent_keys.append(row["period_key"])
+        in_flight -= 1
+
+    rows = [
+        {
+            "group_id": "10001", "period_key": "2026-W20", "content": "expired", "model_used": "m",
+            "generated_at": "2026-05-18T00:00:00+00:00", "publish_attempts": 0,
+        },
+        {
+            "group_id": "10001", "period_key": "2026-W45",
+            "content": "exhausted", "model_used": "m",
+            "generated_at": "2026-11-15T00:00:00+00:00", "publish_attempts": 3,
+        },
+        {
+            "group_id": "10001", "period_key": "2026-W47", "content": "new", "model_used": "m",
+            "generated_at": "2026-11-22T00:00:00+00:00", "publish_attempts": 0,
+        },
+        {
+            "group_id": "10001", "period_key": "2026-W46", "content": "prev", "model_used": "m",
+            "generated_at": "2026-11-16T00:00:00+00:00", "publish_attempts": 1,
+        },
+    ]
+    marked: list[tuple[str, str, str]] = []
+    store = types.SimpleNamespace(
+        get_unpublished=lambda pt: rows,
+        mark_published=lambda gid, pt, key: marked.append((gid, pt, key)),
+    )
+
+    await summary_jobs.publish_period_reports_job(
+        plugin.PERIOD_WEEKLY,
+        store=store,
+        enabled_groups=types.SimpleNamespace(all_groups=lambda: ["10001"]),
+        send=fake_send,
+        now=now,
+    )
+
+    assert max_in_flight == 1
+    assert sent_keys == ["2026-W46", "2026-W47"]
+    assert marked == [
+        ("10001", plugin.PERIOD_WEEKLY, "2026-W46"),
+        ("10001", plugin.PERIOD_WEEKLY, "2026-W47"),
+    ]
+
+
 def test_period_enabled_groups_rejects_unknown_type():
     """钉住：_period_enabled_groups 对未知 period_type 抛 ValueError。"""
     with pytest.raises(ValueError, match="未知 period_type"):

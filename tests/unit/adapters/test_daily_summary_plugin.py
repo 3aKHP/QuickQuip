@@ -432,6 +432,7 @@ async def test_publish_one_send_failure_keeps_store_and_files(monkeypatch):
 @pytest.mark.asyncio
 async def test_job_publish_summaries_only_publishes_enabled_groups(monkeypatch):
     """钉住：发布 job 只处理仍在启用集合里的群；已禁用群的未发布行被跳过。"""
+    monkeypatch.setattr(summary_jobs, "datetime", _FixedDateTime)
     events, fake_send = _make_publish_deps()
     rows = [
         {"group_id": "10001", "summary_date": "2026-05-03", "content": "a", "model_used": "m"},
@@ -449,6 +450,120 @@ async def test_job_publish_summaries_only_publishes_enabled_groups(monkeypatch):
 
     sends = [e for e in events if e[0] == "send"]
     assert sends == [("send", 10001)]
+
+
+@pytest.mark.asyncio
+async def test_job_publish_summaries_skips_expired_and_exhausted_rows(monkeypatch):
+    """超过补发窗口或达到重试上限的历史未发布记录会被跳过。"""
+    monkeypatch.setattr(summary_jobs, "datetime", _fixed_datetime(2026, 11, 22, 10, 0))
+    sent_dates: list[str] = []
+
+    async def fake_send(row):
+        sent_dates.append(row["summary_date"])
+
+    rows = [
+        {
+            "group_id": "10001", "summary_date": "2026-05-25",
+            "content": "old", "model_used": "m", "publish_attempts": 0,
+        },
+        {
+            "group_id": "10001", "summary_date": "2026-11-20",
+            "content": "exhausted", "model_used": "m", "publish_attempts": 3,
+        },
+        {
+            "group_id": "10001", "summary_date": "2026-11-21",
+            "content": "fresh", "model_used": "m", "publish_attempts": 1,
+        },
+    ]
+    marked: list[tuple[str, str]] = []
+    store = types.SimpleNamespace(
+        get_unpublished=lambda: rows,
+        mark_published=lambda gid, d: marked.append((gid, d)),
+    )
+
+    await summary_jobs.publish_summaries_job(
+        store=store,
+        enabled_groups=types.SimpleNamespace(all_groups=lambda: ["10001"]),
+        send=fake_send,
+    )
+
+    assert sent_dates == ["2026-11-21"]
+    assert marked == [("10001", "2026-11-21")]
+
+
+@pytest.mark.asyncio
+async def test_job_publish_summaries_serializes_same_group_and_continues_on_failure(monkeypatch):
+    """同群多条待发日报按日期升序串行发送，且单条失败记录尝试次数但不阻断后续日期。"""
+    import asyncio
+
+    monkeypatch.setattr(summary_jobs, "datetime", _fixed_datetime(2026, 11, 22, 10, 0))
+    in_flight = 0
+    max_in_flight = 0
+    order: list[str] = []
+
+    async def fake_send(row):
+        nonlocal in_flight, max_in_flight
+        in_flight += 1
+        max_in_flight = max(max_in_flight, in_flight)
+        order.append(f"start:{row['summary_date']}")
+        await asyncio.sleep(0.01)
+        order.append(f"end:{row['summary_date']}")
+        in_flight -= 1
+        if row["summary_date"] == "2026-11-20":
+            raise RuntimeError("delivery unconfirmed")
+
+    rows = [
+        {"group_id": "10001", "summary_date": "2026-11-21", "content": "new", "model_used": "m"},
+        {"group_id": "10001", "summary_date": "2026-11-20", "content": "prev", "model_used": "m"},
+    ]
+    marked: list[tuple[str, str]] = []
+    failures: list[tuple[str, str, str]] = []
+    store = types.SimpleNamespace(
+        get_unpublished=lambda: rows,
+        mark_published=lambda gid, d: marked.append((gid, d)),
+        record_publish_failure=lambda gid, d, err: (failures.append((gid, d, err)) or 1),
+    )
+
+    await summary_jobs.publish_summaries_job(
+        store=store,
+        enabled_groups=types.SimpleNamespace(all_groups=lambda: ["10001"]),
+        send=fake_send,
+    )
+
+    assert max_in_flight == 1
+    assert order == [
+        "start:2026-11-20",
+        "end:2026-11-20",
+        "start:2026-11-21",
+        "end:2026-11-21",
+    ]
+    assert failures == [("10001", "2026-11-20", "delivery unconfirmed")]
+    assert marked == [("10001", "2026-11-21")]
+
+
+def test_daily_summary_store_publish_failure_counter_and_reset(tmp_path):
+    """验证 DailySummaryStore 的失败计数递增、upsert 重置与 mark_published 清理错误。"""
+    from quickquip.chat.daily_summary import DailySummaryStore
+
+    store = DailySummaryStore(tmp_path / "daily.db")
+    store.upsert("10001", "2026-11-20", "正文", "model-a")
+
+    assert store.record_publish_failure("10001", "2026-11-20", "err-1") == 1
+    assert store.record_publish_failure("10001", "2026-11-20", "err-2") == 2
+    row = store.get("10001", "2026-11-20")
+    assert row["publish_attempts"] == 2
+    assert row["last_publish_error"] == "err-2"
+
+    store.upsert("10001", "2026-11-20", "重新生成", "model-b")
+    row = store.get("10001", "2026-11-20")
+    assert row["publish_attempts"] == 0
+    assert row["last_publish_error"] is None
+
+    store.record_publish_failure("10001", "2026-11-20", "err-3")
+    store.mark_published("10001", "2026-11-20")
+    row = store.get("10001", "2026-11-20")
+    assert row["published_at"] is not None
+    assert row["last_publish_error"] is None
 
 
 @pytest.mark.asyncio
@@ -596,6 +711,7 @@ async def test_send_daily_summary_now_raises_when_generation_returns_none(monkey
 @pytest.mark.asyncio
 async def test_job_publish_summaries_wiring_matches_signature(monkeypatch):
     """钉住生产接线（Deep-CR：旧 collector kwarg 曾逃过单测直达定时任务）。"""
+    monkeypatch.setattr(summary_jobs, "datetime", _FixedDateTime)
     sent: list[dict] = []
 
     class _Bot:

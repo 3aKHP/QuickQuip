@@ -118,24 +118,31 @@ class PeriodReportStore:
         try:
             conn.execute("""
                 CREATE TABLE IF NOT EXISTS period_reports (
-                    id           INTEGER PRIMARY KEY AUTOINCREMENT,
-                    group_id     TEXT NOT NULL,
-                    period_type  TEXT NOT NULL,
-                    period_key   TEXT NOT NULL,
-                    generated_at TEXT NOT NULL,
-                    published_at TEXT DEFAULT NULL,
-                    model_used   TEXT,
-                    run_id       TEXT,
-                    char_count   INTEGER,
-                    content      TEXT NOT NULL,
+                    id                 INTEGER PRIMARY KEY AUTOINCREMENT,
+                    group_id           TEXT NOT NULL,
+                    period_type        TEXT NOT NULL,
+                    period_key         TEXT NOT NULL,
+                    generated_at       TEXT NOT NULL,
+                    published_at       TEXT DEFAULT NULL,
+                    publish_attempts   INTEGER NOT NULL DEFAULT 0,
+                    last_publish_error TEXT DEFAULT NULL,
+                    model_used         TEXT,
+                    run_id             TEXT,
+                    char_count         INTEGER,
+                    content            TEXT NOT NULL,
                     UNIQUE(group_id, period_type, period_key)
                 )
             """)
-            # Migrate: add run_id column（1.15.3 报文生成日志关联）if this DB predates it
-            try:
-                conn.execute("ALTER TABLE period_reports ADD COLUMN run_id TEXT")
-            except sqlite3.OperationalError:
-                pass  # Column already exists
+            # Migrate: add columns if this DB predates them
+            for ddl in (
+                "ALTER TABLE period_reports ADD COLUMN run_id TEXT",
+                "ALTER TABLE period_reports ADD COLUMN publish_attempts INTEGER NOT NULL DEFAULT 0",
+                "ALTER TABLE period_reports ADD COLUMN last_publish_error TEXT DEFAULT NULL",
+            ):
+                try:
+                    conn.execute(ddl)
+                except sqlite3.OperationalError:
+                    pass  # Column already exists
             conn.commit()
         finally:
             conn.close()
@@ -163,12 +170,14 @@ class PeriodReportStore:
                      run_id, char_count, content)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(group_id, period_type, period_key) DO UPDATE SET
-                    generated_at = excluded.generated_at,
-                    model_used   = excluded.model_used,
-                    run_id       = excluded.run_id,
-                    char_count   = excluded.char_count,
-                    content      = excluded.content,
-                    published_at = NULL
+                    generated_at       = excluded.generated_at,
+                    model_used         = excluded.model_used,
+                    run_id             = excluded.run_id,
+                    char_count         = excluded.char_count,
+                    content            = excluded.content,
+                    published_at       = NULL,
+                    publish_attempts   = 0,
+                    last_publish_error = NULL
                 """,
                 (str(group_id), period_type, period_key, generated_at,
                  model_used, run_id, len(content), content),
@@ -213,11 +222,41 @@ class PeriodReportStore:
         conn = self._connect()
         try:
             conn.execute(
-                "UPDATE period_reports SET published_at = ? "
+                "UPDATE period_reports SET published_at = ?, last_publish_error = NULL "
                 "WHERE group_id = ? AND period_type = ? AND period_key = ?",
                 (published_at, str(group_id), period_type, period_key),
             )
             conn.commit()
+        finally:
+            conn.close()
+
+    def record_publish_failure(
+        self,
+        group_id: int | str,
+        period_type: str,
+        period_key: str,
+        error: str,
+    ) -> int:
+        """递增发布失败次数并记录最近一次错误，返回最新尝试次数。"""
+        if self._unavailable:
+            raise RuntimeError("周期报告数据库不可用")
+        truncated = str(error)[:500]
+        conn = self._connect()
+        try:
+            conn.execute(
+                "UPDATE period_reports "
+                "SET publish_attempts = COALESCE(publish_attempts, 0) + 1, "
+                "    last_publish_error = ? "
+                "WHERE group_id = ? AND period_type = ? AND period_key = ?",
+                (truncated, str(group_id), period_type, period_key),
+            )
+            row = conn.execute(
+                "SELECT publish_attempts FROM period_reports "
+                "WHERE group_id = ? AND period_type = ? AND period_key = ?",
+                (str(group_id), period_type, period_key),
+            ).fetchone()
+            conn.commit()
+            return int(row["publish_attempts"]) if row else 0
         finally:
             conn.close()
 
