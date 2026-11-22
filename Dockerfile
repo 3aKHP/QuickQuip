@@ -64,6 +64,7 @@ COPY --from=docker_cli /usr/local/bin/docker /usr/local/bin/docker
 
 # ── App source ────────────────────────────────────────────────────────────
 COPY bot.py web_api.py ./
+COPY LICENSE THIRD-PARTY-NOTICES.md ./
 COPY pyproject.toml ./
 COPY src/ src/
 COPY scripts/maintenance/backfill_chat_archive.py scripts/maintenance/backfill_record_identities.py scripts/maintenance/sync_preset_skills.py scripts/maintenance/reset_niuniu_lengths.py scripts/maintenance/

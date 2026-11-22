@@ -7,6 +7,10 @@ from pathlib import Path
 from urllib import error, request
 
 from quickquip.generation.asr import transcribe_audio
+from quickquip.generation.audio_transcode import (
+    DEFAULT_ASR_MAX_DECODED_BYTES,
+    normalize_audio_for_asr,
+)
 from quickquip.generation.errors import GenerationProviderError
 from quickquip.generation.service import generation_service
 
@@ -89,6 +93,7 @@ async def transcribe_message_records(bot, message) -> list[VoiceTranscription]:
                 file_ref=file_ref,
                 url=url,
                 max_audio_bytes=config.asr.max_audio_bytes,
+                max_decoded_bytes=config.asr.max_decoded_bytes,
             )
             result = await transcribe_audio(
                 resolved.model_config,
@@ -111,27 +116,39 @@ async def _load_record_audio(
     file_ref: str,
     url: str,
     max_audio_bytes: int,
+    max_decoded_bytes: int = DEFAULT_ASR_MAX_DECODED_BYTES,
 ) -> tuple[bytes, str, str]:
     if url.startswith(("http://", "https://")):
-        return await _download_audio(url, max_audio_bytes=max_audio_bytes)
-    if file_ref.startswith(("http://", "https://")):
-        return await _download_audio(file_ref, max_audio_bytes=max_audio_bytes)
+        raw_bytes, filename = await _download_audio(url, max_audio_bytes=max_audio_bytes)
+    elif file_ref.startswith(("http://", "https://")):
+        raw_bytes, filename = await _download_audio(file_ref, max_audio_bytes=max_audio_bytes)
+    else:
+        local_path = await _resolve_record_path(bot, file_ref)
+        filename = Path(local_path).name or "voice"
 
-    local_path = await _resolve_record_path(bot, file_ref)
-    filename = Path(local_path).name or "voice.wav"
+        def _read() -> bytes:
+            try:
+                with Path(local_path).open("rb") as fh:
+                    data = fh.read(max_audio_bytes + 1)
+            except OSError as exc:
+                raise GenerationProviderError(f"语音文件读取失败：{exc}") from exc
+            if len(data) > max_audio_bytes:
+                raise GenerationProviderError("语音文件过大，跳过 ASR")
+            return data
 
-    def _read() -> bytes:
-        data = Path(local_path).read_bytes()
-        if len(data) > max_audio_bytes:
-            raise GenerationProviderError("语音文件过大，跳过 ASR")
-        return data
+        raw_bytes = await asyncio.to_thread(_read)
 
-    audio_bytes = await asyncio.to_thread(_read)
-    return audio_bytes, filename, _guess_mime(filename)
+    normalized = await normalize_audio_for_asr(
+        raw_bytes,
+        filename=filename,
+        max_audio_bytes=max_audio_bytes,
+        max_decoded_bytes=max_decoded_bytes,
+    )
+    return normalized.data, normalized.filename, normalized.mime_type
 
 
 async def _resolve_record_path(bot, file_ref: str) -> str:
-    if Path(file_ref).exists():
+    if file_ref and Path(file_ref).is_file():
         return file_ref
 
     result = None
@@ -146,18 +163,22 @@ async def _resolve_record_path(bot, file_ref: str) -> str:
     raise GenerationProviderError("OneBot get_record 未返回可读取文件")
 
 
-async def _download_audio(url: str, *, max_audio_bytes: int) -> tuple[bytes, str, str]:
-    def _fetch() -> tuple[bytes, str, str]:
+async def _download_audio(url: str, *, max_audio_bytes: int) -> tuple[bytes, str]:
+    def _fetch() -> tuple[bytes, str]:
         try:
             req = request.Request(url, headers={"User-Agent": "QuickQuip/1.0"})
             with request.urlopen(req, timeout=30) as resp:
                 content_length = resp.headers.get("Content-Length")
-                if content_length and int(content_length) > max_audio_bytes:
-                    raise GenerationProviderError("语音文件过大，跳过 ASR")
+                if content_length:
+                    try:
+                        parsed_length = int(content_length)
+                    except ValueError:
+                        parsed_length = None
+                    if parsed_length is not None and parsed_length > max_audio_bytes:
+                        raise GenerationProviderError("语音文件过大，跳过 ASR")
                 data = resp.read(max_audio_bytes + 1)
                 if len(data) > max_audio_bytes:
                     raise GenerationProviderError("语音文件过大，跳过 ASR")
-                mime_type = resp.headers.get_content_type() or "application/octet-stream"
         except error.HTTPError as exc:
             raise GenerationProviderError(f"语音下载失败：HTTP {exc.code}") from exc
         except error.URLError as exc:
@@ -165,19 +186,6 @@ async def _download_audio(url: str, *, max_audio_bytes: int) -> tuple[bytes, str
         except OSError as exc:
             raise GenerationProviderError(f"语音下载失败：{exc}") from exc
         filename = Path(url.split("?", 1)[0]).name or "voice"
-        return data, filename, mime_type
+        return data, filename
 
     return await asyncio.to_thread(_fetch)
-
-
-def _guess_mime(filename: str) -> str:
-    suffix = Path(filename).suffix.lower()
-    if suffix == ".wav":
-        return "audio/wav"
-    if suffix == ".mp3":
-        return "audio/mpeg"
-    if suffix == ".amr":
-        return "audio/amr"
-    if suffix == ".silk":
-        return "audio/silk"
-    return "application/octet-stream"

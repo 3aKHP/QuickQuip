@@ -124,3 +124,5 @@ jobs:
         run: python -m pip install -r requirements.txt -r requirements-dev.txt
       - name: Validate native environment transactions and API
         run: python -m pytest --basetemp "${{ runner.temp }}/quickquip-env-tests" -q tests/unit/environment tests/unit/web/test_environment_routes.py tests/unit/common/test_env.py tests/unit/common/test_config_utils.py
+      - name: Validate Windows voice raw audio transcoding
+        run: python -m pytest --basetemp "${{ runner.temp }}/quickquip-voice-tests" -q tests/unit/generation/test_audio_transcode.py tests/unit/adapters/test_voice.py

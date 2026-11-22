@@ -73,7 +73,8 @@ LLM 维护入口按职责列在下表：
 | `src/quickquip/llm/message_segments.py` | 负责消息段叶子节点渲染、bot 身份集合归一化等共享小逻辑 |
 | `src/quickquip/llm/health.py` | 配置、渠道、数据库、资料、工具与运行时健康检查 |
 | `src/quickquip/llm/image_preprocessor.py` | 图像预处理抽象接口（`ImagePreprocessor`），预留 OCR / 多模态模型转述的钩子点 |
-| `src/quickquip/adapters/nonebot/voice.py` | 负责 OneBot V11 `record` 语音段提取、转码与 ASR 转写注入 |
+| `src/quickquip/adapters/nonebot/voice.py` | 负责 OneBot V11 `record` 语音段提取、加载与 ASR 转写注入 |
+| `src/quickquip/generation/audio_transcode.py`、`audio_worker.py` | 按字节魔数识别 SILK／AMR 与常规音频，通过受限子进程与任务级临时目录完成 WAV 转码和双大小上限校验 |
 | `src/quickquip/generation/asr.py` | 负责 ASR provider 调用，当前支持 OpenAI-compatible `/audio/transcriptions` |
 | `src/quickquip/common/recent_message_buffer.py` | 负责“触发前最近群消息”内存缓冲 |
 | `src/quickquip/llm/inputs.py` | 负责从消息段中提取文本触发、艾特触发和图片 URL |
@@ -301,7 +302,7 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 - 群聊中必须和 `/ai` 或 `@机器人` 同时出现
 - 私聊会话开启后，普通语音消息可作为 LLM 输入
 - 若 OneBot 协议端的 `record` 段已经包含 `text` / `transcript` / `transcription`，直接使用该文本
-- 否则通过 OneBot `get_record` 获取音频文件，并调用 `config/generation.toml` 中 `[asr]` 配置的 provider
+- 否则从 `record` URL 下载或读取本地／`get_record` 返回的文件，统一经 `audio_transcode.py` 按字节魔数归一化：标准与腾讯前缀 SILK 经独立子进程（`audio_worker.py`）解码为 16 kHz 单声道 WAV，真 AMR／AMR-WB 在存在系统 `ffmpeg` 时转码为 WAV，常规音频透传，非音频或超限按段跳过；最终交给 `config/generation.toml` 中 `[asr]` 配置的 provider
 - 转写结果会作为 `[语音转文字：...]` 拼入当前用户消息，并进入最近消息、日报/播报采集和词云输入
 - ASR 失败时不阻塞原消息处理；没有可用转写时按文字和图片输入逻辑继续
 

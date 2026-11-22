@@ -62,9 +62,9 @@ networks:
 | 撤回 | `notice.group_recall` 和 `notice.friend_recall`，用于清理消息上下文。 |
 | 合并转发 | `send_group_forward_msg` 支持自定义节点 `name`、`uin`，`get_forward_msg` 支持读取嵌套节点。 |
 | 图片 | 出站 `image` 使用 `base64://` 或 HTTP(S) URL，入站图片的 `data.url` 需可从 Bot 直接下载。 |
-| 语音 | 出站 `record` 支持 base64。入站可直接提供转写文本，也可提供可读取的音频 URL 或文件。`get_record(out_format="wav")` 回退需要返回 Bot 所在环境可读的 `file` 路径。ASR 渠道须接受所得音频格式。 |
+| 语音 | 出站 `record` 支持 base64。入站可直接提供转写文本，也可提供可读取的音频 URL 或文件。QuickQuip 按字节魔数自动将原始 SILK（含腾讯前缀）转为 16 kHz WAV；真 AMR／AMR-WB 在运行环境存在系统 `ffmpeg` 时转为 WAV，未安装时逐段跳过；常规 WAV／MP3 等格式透传。无可用 URL 或可读本地文件时回退 `get_record(out_format="wav")`，要求返回 Bot 所在环境可读的 `file` 路径。 |
 
-选择协议端时，按实际启用的功能核对该表。开启语音识别前用一条真实语音验证转写，QQ 原始 SILK／AMR 的应用侧兼容进度见 [Issue #354](https://github.com/3aKHP/QuickQuip/issues/354)。需要定时巡检时，按[巡检配置](../../scripts/ops/README.md)配置 HTTP API，使用 `get_status` 和 `get_login_info` 检查正向连接后的账号状态。
+选择协议端时，按实际启用的功能核对该表。开启语音识别前用一条真实语音验证转写效果和大小上限配置（见[多模态配置](configuration.md#3-asr--语音消息识别语音转文字)）。需要定时巡检时，按[巡检配置](../../scripts/ops/README.md)配置 HTTP API，使用 `get_status` 和 `get_login_info` 检查正向连接后的账号状态。
 
 ## 从随 QuickQuip 启动的 LLBot 迁移
 

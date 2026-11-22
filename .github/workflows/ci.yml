@@ -116,6 +116,7 @@ jobs:
             --build-arg PIP_TRUSTED_HOST=pypi.org .
           docker run --rm quickquip-release-maintenance-smoke python scripts/maintenance/reset_niuniu_lengths.py --help
           docker run --rm quickquip-qqsync-smoke python scripts/maintenance/reset_niuniu_lengths.py --help
+          docker run --rm quickquip-release-maintenance-smoke python -c "import asyncio, struct, pilk_nogil; from quickquip.generation.audio_transcode import normalize_audio_for_asr, validate_wav_bytes; silk = pilk_nogil.encode(struct.pack('<4800h', *([1000, -1000] * 2400)), None, pcm_rate=24000, tencent=True); res = asyncio.run(normalize_audio_for_asr(silk, filename='smoke.amr')); assert res.transcoded and validate_wav_bytes(res.data, expected_sample_rate=16000)[3] > 0; print('docker silk transcode ok')"
       - name: Verify real Compose synchronization
         env:
           QUICKQUIP_DOCKER_SMOKE: "1"
