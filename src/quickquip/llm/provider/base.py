@@ -281,7 +281,7 @@ class LLMRequest:
     model: str
     system_prompt: str
     messages: list[LLMConversationMessage]
-    temperature: float
+    temperature: float | None
     max_output_tokens: int
     # 已废弃：旧式连续预算口径，仅 gemini 2.5 序列化端保留兼容读取（主链路
     # 从不赋值）；思考档位统一走 reasoning_effort（D9）。

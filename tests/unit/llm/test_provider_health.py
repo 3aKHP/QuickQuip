@@ -214,3 +214,26 @@ def test_provider_health_as_dict():
         "latency_ms": 50.0,
         "error": "",
     }
+
+
+async def test_probe_provider_forwards_provider_temperature_and_relaxed_budget(monkeypatch):
+    from dataclasses import replace
+    from quickquip.llm.provider_health import PROBE_TIMEOUT_SECONDS, _PROBE_MAX_TOKENS
+
+    assert PROBE_TIMEOUT_SECONDS == 15.0
+    assert _PROBE_MAX_TOKENS == 16
+    monkeypatch.setenv("TEST_PROBE_KEY", "fake-key")
+    captured = []
+
+    class _CaptureClient:
+        async def complete(self, request):
+            captured.append(request)
+            return object()
+
+    _patch_client(monkeypatch, lambda provider: _CaptureClient())
+    await probe_provider(_make_provider())
+    await probe_provider(replace(_make_provider(), temperature=0.7))
+
+    assert captured[0].temperature is None
+    assert captured[0].max_output_tokens == 16
+    assert captured[1].temperature == 0.7

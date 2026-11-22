@@ -833,3 +833,11 @@ test('renaming an unsaved provider carries its prices', () => {
   assert.deepEqual(normalized(store.document.value.pricing), [{ provider_id: 'final-id', model: 'm' }])
   assert.equal(store.document.value.providers[0].id, 'final-id')
 })
+
+test('new provider protocol change pre-fills and cleans up protocol recommended params', () => {
+  assert.deepEqual(normalized(library.PROTOCOL_RECOMMENDED_PARAMS.claude), { prompt_caching: true })
+  assert.deepEqual(
+    normalized(library.PROTOCOL_RECOMMENDED_PARAMS.gemini),
+    { gemini_empty_response_recovery: true },
+  )
+})

@@ -154,9 +154,10 @@ def build_responses_payload(
         "store": STORE,
         "stream": stream,
         "include": list(INCLUDE_ENCRYPTED_REASONING),
-        "temperature": request.temperature,
         "max_output_tokens": request.max_output_tokens,
     }
+    if request.temperature is not None:
+        payload["temperature"] = request.temperature
     if request.allow_tool_calls and request.builtin_search and "web_search" in profile.hosted_tools:
         payload["include"].append("web_search_call.action.sources")
     if request.system_prompt:

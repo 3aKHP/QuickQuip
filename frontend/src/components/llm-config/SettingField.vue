@@ -129,7 +129,10 @@ function onSelect(event: Event) {
 
 function onNumber(event: Event) {
   const text = (event.target as HTMLInputElement).value
-  if (text === '') return
+  if (text === '') {
+    if (props.meta?.nullable) emit('update:modelValue', null)
+    return
+  }
   const value = Number(text)
   if (Number.isFinite(value)) emit('update:modelValue', value)
 }

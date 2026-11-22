@@ -59,7 +59,7 @@ _DEFECTIFY_SPEC = CommandSingleShotSpec(
         "或引用一条消息/图片后直接发送 /defectify。"
     ),
     invalid_reply="模型没有返回可显示的文本。",
-    temperature=0.9,
+    temperature=None,
     input_channel="defectify_input",
     output_channel="defectify_output",
     usage_scope_name="defectify",
@@ -74,7 +74,7 @@ _TURMFLUCH_SPEC = CommandSingleShotSpec(
         "或引用一条消息/图片后直接发送 /turmfluch。"
     ),
     invalid_reply="模型没有返回合法的卡牌/遗物名。",
-    temperature=0.7,
+    temperature=None,
     input_channel="turmfluch_input",
     output_channel="turmfluch_output",
     usage_scope_name="turmfluch",

@@ -260,7 +260,9 @@ def test_check_request_budget_capacity_flag_and_margin():
     assert check.capacity_unknown is False
     # 比例余量：窗口 − 输出预留 − max(1024, 10% 估算)
     margin = max(1024, int(check.estimated_input_tokens * 0.10))
-    assert check.context_window == 200_000 - 800 - 1024 - margin
+    assert check.context_window == (
+        200_000 - known_provider.max_output_tokens - 1024 - margin
+    )
 
 
 def test_enforce_rejects_over_budget_payload():

@@ -115,7 +115,7 @@ async def run_quick_judge_detailed(
         messages=[
             LLMConversationMessage(role="user", content=prompt),
         ],
-        temperature=0.0,
+        temperature=judge_provider.temperature,
         max_output_tokens=max_tokens,
         thinking_budget=None,
         tools=[],

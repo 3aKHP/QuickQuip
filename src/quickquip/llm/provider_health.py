@@ -19,8 +19,8 @@ from quickquip.llm.config import LLMConfig, ProviderConfig
 from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.usage import set_usage_scope
 
-PROBE_TIMEOUT_SECONDS = 5.0
-_PROBE_MAX_TOKENS = 1
+PROBE_TIMEOUT_SECONDS = 15.0
+_PROBE_MAX_TOKENS = 16
 _PROBE_MODEL_FALLBACK = "gpt-4o-mini"
 
 
@@ -61,7 +61,7 @@ async def probe_provider(
     model: str | None = None,
     timeout: float = PROBE_TIMEOUT_SECONDS,
 ) -> ProviderHealth:
-    """探活单个 provider：发一条 max_tokens=1 的 "hi"。
+    """探活单个 provider：发一条短文本 "hi"（max_tokens=16）。
 
     api_key 未设置的 provider 直接返回 "skipped"，不产生计费。
     传入 model 为 None 时用 provider.default_model。
@@ -81,7 +81,7 @@ async def probe_provider(
         model=probe_model,
         system_prompt="",
         messages=[LLMConversationMessage(role="user", content="hi")],
-        temperature=0.0,
+        temperature=provider.temperature,
         max_output_tokens=_PROBE_MAX_TOKENS,
     )
     # 探活要反映 provider 当前真实可用性，关闭自动重试

@@ -62,7 +62,7 @@
             </button>
           </div>
           <div v-else class="param-row__inherited">
-            <span class="param-row__inherit-chip">跟随上层</span>
+            <span class="param-row__inherit-chip">{{ props.level === 'provider' && name === 'temperature' ? '默认不发送' : '跟随上层' }}</span>
             <UiButton size="sm" variant="ghost" @click="overrideParam(name)">覆盖</UiButton>
           </div>
         </div>
@@ -85,7 +85,8 @@ const props = withDefaults(defineProps<{
   modelValue: JsonObject
   metadata?: Record<string, FieldMetadata>
   styleProfiles?: string[]
-}>(), { metadata: () => ({}), styleProfiles: () => [] })
+  level?: 'provider' | 'model'
+}>(), { metadata: () => ({}), styleProfiles: () => [], level: 'provider' })
 
 const emit = defineEmits<{ 'update:modelValue': [value: JsonObject] }>()
 
@@ -105,10 +106,11 @@ function labelFor(name: string) {
 function isNumeric(name: string) {
   return ['integer', 'number', 'float', 'int'].includes(props.metadata[name]?.type || '')
 }
-/** 覆盖时的初始值：元数据默认 → 类型兜底 */
+/** 覆盖时的初始值：元数据默认 → 字段特例 → 类型兜底 */
 function initialValue(name: string): JsonValue {
   const meta = props.metadata[name]
   if (meta?.default !== undefined && meta.default !== null) return structuredClone(meta.default)
+  if (name === 'temperature') return 1
   if (meta?.enum?.length) return meta.enum[0]!
   if (meta?.type === 'boolean') return true
   if (isNumeric(name)) return meta?.minimum ?? 0

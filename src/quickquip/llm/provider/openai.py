@@ -126,9 +126,10 @@ class OpenAIProviderClient(BaseProviderClient):
         payload: dict[str, Any] = {
             "model": request.model,
             "messages": messages,
-            "temperature": request.temperature,
             "max_tokens": request.max_output_tokens,
         }
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
         # 思考档位（顶层 reasoning_effort）：scope 覆盖优先于 provider 配置档，
         # 家族钳制表见 thinking 模块；extra_body 仍可最终覆盖。
         directive = resolve_thinking(

@@ -247,10 +247,11 @@ class GeminiProviderClient(BaseProviderClient):
             "systemInstruction": {"parts": [{"text": request.system_prompt}]},
             "contents": await self._serialize_messages(request.messages),
             "generationConfig": {
-                "temperature": request.temperature,
                 "maxOutputTokens": request.max_output_tokens,
             },
         }
+        if request.temperature is not None:
+            payload["generationConfig"]["temperature"] = request.temperature
         if request.thinking_budget is not None:
             # 已废弃的旧式连续预算（主链路从不赋值）：显式设置优先于档位映射。
             payload["generationConfig"]["thinkingConfig"] = {

@@ -77,7 +77,7 @@
           </header>
           <div class="form-grid">
             <SettingField label="渠道 ID" :model-value="String(current.id ?? '')" :hint="L.id.hint" placeholder="my-provider" @update:model-value="onIdInput" />
-            <SettingField label="协议" :model-value="String(current.protocol ?? 'openai')" :options="protocolOptions" @update:model-value="patch({ protocol: String($event) })" />
+            <SettingField label="协议" :model-value="String(current.protocol ?? 'openai')" :options="protocolOptions" @update:model-value="onProtocolChange(String($event))" />
             <SettingField label="请求指纹 Profile" :model-value="String(current.client_fingerprint ?? 'default')" :options="fingerprintOptions" hint="QuickQuip Profile 会发送品牌 UA 和专有请求头；显式 UA 设置优先生效。" @update:model-value="patch({ client_fingerprint: String($event) })" />
             <SettingField label="认证方式" :model-value="String(current.auth_method ?? 'api_key')" :options="authOptions" @update:model-value="patch({ auth_method: String($event) })" />
             <SettingField class="form-grid__wide" label="API 地址" :model-value="String(current.base_url ?? '')" :hint="L.base_url.hint" :placeholder="L.base_url.placeholder" @update:model-value="patch({ base_url: String($event) })" />
@@ -134,7 +134,7 @@
             </div>
             <details class="model-row__params">
               <summary>模型级参数覆盖 <span v-if="overrideCount(model)" class="override-count">已覆盖 {{ overrideCount(model) }} 项</span></summary>
-              <ParamsEditor :model-value="objectValue(model.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patchModel(index, { parameters: $event })" />
+              <ParamsEditor level="model" :model-value="objectValue(model.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patchModel(index, { parameters: $event })" />
             </details>
           </div>
         </UiCard>
@@ -160,7 +160,7 @@
           <header class="detail-card__head">
             <h3>渠道级默认参数覆盖 <UiInfoTip text="覆盖全局默认的请求参数；模型级覆盖优先于渠道级。" /></h3>
           </header>
-          <ParamsEditor :model-value="objectValue(current.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patch({ parameters: $event })" />
+          <ParamsEditor level="provider" :model-value="objectValue(current.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patch({ parameters: $event })" />
         </UiCard>
 
         <UiCard v-show="activeTab === 'all' || activeTab === 'params'" padding="lg" class="detail-card">
@@ -230,7 +230,7 @@ import ParamsEditor from './ParamsEditor.vue'
 import * as api from '../../api/llmConfiguration'
 import { injectLlmConfigStore } from '../../composables/useLlmConfigStore'
 import { toast } from '../../toast'
-import { PARAM_LABELS, PARAM_SOURCE_LABELS, PROTOCOL_LABELS, fieldTemplate, isObject, providerEnvVars, type JsonObject, type JsonValue } from '../../lib/llmConfig'
+import { PARAM_LABELS, PARAM_SOURCE_LABELS, PROTOCOL_LABELS, PROTOCOL_RECOMMENDED_PARAMS, fieldTemplate, isObject, providerEnvVars, type JsonObject, type JsonValue } from '../../lib/llmConfig'
 
 const store = injectLlmConfigStore()
 const L = { id: { hint: '全局唯一，创建后不可修改。只允许字母、数字、_ . -' }, base_url: { hint: '禁止在 URL 里直接写账号密码。', placeholder: 'https://api.example.com/v1' }, api_key_env: { hint: '只填写根目录 .env 里的变量名，不是密钥本身。', placeholder: 'EXAMPLE_API_KEY' }, default_model: { hint: '未指定模型时的兜底选择，必须在模型列表中。' }, proxy: { placeholder: 'http://127.0.0.1:7890' }, fallback_urls: { hint: '主地址失败时依次尝试。' }, headers: { hint: '涉及密钥的值必须写成 ${变量名} 引用。' } }
@@ -295,6 +295,24 @@ const keyEnvState = computed(() => {
 
 function commit(next: JsonObject[]) { store.updateSection('providers', next) }
 function patch(fields: JsonObject) { if (current.value) commit(providers.value.map((provider, i) => i === selected.value ? { ...provider, ...fields } : provider)) }
+function onProtocolChange(protocol: string) {
+  if (!current.value) return
+  const fields: JsonObject = { protocol }
+  if (store.canEditProviderId(current.value)) {
+    const prevProtocol = String(current.value.protocol ?? '')
+    const prevRec = PROTOCOL_RECOMMENDED_PARAMS[prevProtocol] || {}
+    const nextRec = PROTOCOL_RECOMMENDED_PARAMS[protocol] || {}
+    const nextParams: JsonObject = { ...objectValue(current.value.parameters) }
+    for (const [k, v] of Object.entries(prevRec)) {
+      if (!(k in nextRec) && nextParams[k] === v) delete nextParams[k]
+    }
+    for (const [k, v] of Object.entries(nextRec)) {
+      if (nextParams[k] === null || nextParams[k] === undefined) nextParams[k] = v
+    }
+    fields.parameters = nextParams
+  }
+  patch(fields)
+}
 function onIdInput(event: JsonValue) {
   if (!current.value) return
   const id = String(event)

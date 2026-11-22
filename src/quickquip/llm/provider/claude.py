@@ -211,9 +211,10 @@ class ClaudeProviderClient(BaseProviderClient):
             "model": request.model,
             "system": system,
             "messages": messages,
-            "temperature": request.temperature,
             "max_tokens": request.max_output_tokens,
         }
+        if request.temperature is not None:
+            payload["temperature"] = request.temperature
         # 思考档位：4.7+ adaptive + output_config.effort；4.6 钳 xhigh→high；
         # 4.5 及更早旧式 budget_tokens 固定值表；非 Claude 家族与不可解析代际
         # 同走 adaptive（映射见 thinking 模块）。
@@ -237,8 +238,8 @@ class ClaudeProviderClient(BaseProviderClient):
             else:
                 # 未知 kind：未注入任何思考参数，温度不下掉
                 thinking_enabled = False
-            if thinking_enabled and request.temperature != 1.0:
-                del payload["temperature"]
+            if thinking_enabled and request.temperature is not None and request.temperature != 1.0:
+                payload.pop("temperature", None)
                 log_once(
                     logging.INFO,
                     ("claude-temp-drop", self.config.id, request.model),

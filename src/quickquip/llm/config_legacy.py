@@ -239,9 +239,11 @@ def _parse_single_provider(
         non_vision_models=[
             str(item).strip() for item in entry.get("non_vision_models", []) if str(item).strip()
         ],
-        timeout_seconds=float(entry.get("timeout_seconds", 45)),
-        temperature=float(entry.get("temperature", 0.8)),
-        max_output_tokens=int(entry.get("max_output_tokens", 800)),
+        timeout_seconds=float(entry.get("timeout_seconds", 180.0)),
+        temperature=(
+            float(entry["temperature"]) if entry.get("temperature") is not None else None
+        ),
+        max_output_tokens=int(entry.get("max_output_tokens", 16384)),
         style_overrides=style_text,
         stream_enabled=as_bool(entry.get("stream_enabled", True), default=True),
         headers={str(k): str(v) for k, v in raw_headers.items()},
@@ -684,7 +686,7 @@ def _load_llm_config(path: str | Path) -> LLMConfig:
             provider_id=str(quick_judge_raw.get("provider_id", "")).strip(),
             model=str(quick_judge_raw.get("model", "")).strip(),
             timeout=max(0.5, float(quick_judge_raw.get("timeout", 2.0))),
-            max_tokens=max(8, int(quick_judge_raw.get("max_tokens", 64))),
+            max_tokens=max(8, int(quick_judge_raw.get("max_tokens", 256))),
         ),
         tools=ToolsConfig(
             enabled=_enabled_tools,
@@ -835,7 +837,11 @@ def _load_llm_config(path: str | Path) -> LLMConfig:
                     MAX_IMAGE_PREPROCESSING_TOKENS,
                 ),
             ),
-            temperature=float(image_preprocessing_raw.get("temperature", 0.3)),
+            temperature=(
+                float(image_preprocessing_raw["temperature"])
+                if image_preprocessing_raw.get("temperature") is not None
+                else None
+            ),
             prompt=str(image_preprocessing_raw.get("prompt", "")).strip(),
         ),
         style_profiles=style_profiles,

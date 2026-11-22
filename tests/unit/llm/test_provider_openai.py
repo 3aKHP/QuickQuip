@@ -168,3 +168,27 @@ async def test_openai_request_scope_effort_overrides_provider_config():
     client = FakeOpenAIClient(config, _text_body())
     await client.complete(_simple_request("gpt-test", effort="max"))
     assert client.last_payload["reasoning_effort"] == "max"
+
+
+async def test_openai_optional_temperature_omitted_when_none():
+    client = FakeOpenAIClient(_provider_config(), _text_body())
+    req = LLMRequest(
+        model="gpt-test",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi", image_urls=[])],
+        temperature=None,
+        max_output_tokens=128,
+    )
+    await client.complete(req)
+    assert "temperature" not in client.last_payload
+
+    client2 = FakeOpenAIClient(_provider_config(), _text_body())
+    req_zero = LLMRequest(
+        model="gpt-test",
+        system_prompt="系统提示",
+        messages=[LLMConversationMessage(role="user", content="hi", image_urls=[])],
+        temperature=0.0,
+        max_output_tokens=128,
+    )
+    await client2.complete(req_zero)
+    assert client2.last_payload["temperature"] == 0.0

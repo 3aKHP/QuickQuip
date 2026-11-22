@@ -722,7 +722,11 @@ class ToolMixin(McpLifecycleMixin):
             provider_client=vis_client,
             model=vision_model,
             max_tokens=img_cfg.max_tokens,
-            temperature=img_cfg.temperature,
+            temperature=(
+                img_cfg.temperature
+                if img_cfg.temperature is not None
+                else vis_provider_cfg.temperature
+            ),
             prompt=img_cfg.prompt,
         )
 
