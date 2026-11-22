@@ -254,8 +254,8 @@ async def build_health_report(
         local_search_enabled=config.auto_search.enabled,
     ) if provider is not None and provider.enabled else "none")
     builtin_covered = search_mode in {
-            "gemini_grounding", "responses_hosted", "responses_standalone",
-        }
+        "gemini_grounding", "claude_web_search", "responses_hosted", "responses_standalone",
+    }
     search_needed = config.auto_search.enabled or "search_web" in tool_names
     if search_mode == "responses_standalone":
         search_status = "warn"

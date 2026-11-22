@@ -557,7 +557,10 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 LLM 侧的联网搜索有两条互斥路径：
 
 - **`search_web` 工具**（默认）：客户端执行，走项目内 SearXNG，受 `auto_search` 提示词引导与每轮调用上限约束。
-- **provider 内置搜索**：gemini provider 配置 `builtin_search = true` 后启用。请求在 `tools` 中追加独立的 `{"google_search": {}}` 声明（不依赖 `tool_calling_enabled`），检索由 provider 侧 grounding 完成；响应解析 `groundingMetadata` 提取检索词与来源，保存正文以「标题 — 域名」形式附至多 3 条来源，完整 grounding 来源另存元数据，QQ 显示层隐藏来源尾块。该 provider 的会话移除 `search_web` 工具并切换提示词引导，检索成本在 provider 侧计费，本地轮次上限不覆盖。模型约束：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型上两者并存的请求会被 API 拒绝，需关闭该 provider 的 `builtin_search` 或全局工具调用。
+- **provider 内置搜索**：`gemini` 或 `claude` provider 配置 `builtin_search = true` 后启用（均不依赖 `tool_calling_enabled`）。
+  - `gemini`：请求在 `tools` 中追加独立的 `{"google_search": {}}` 声明，检索由 provider 侧 grounding 完成；响应解析 `groundingMetadata` 提取检索词与来源，保存正文以「标题 — 域名」形式附至多 3 条来源，完整 grounding 来源另存元数据，QQ 显示层隐藏来源尾块。模型约束：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型上两者并存的请求会被 API 拒绝，需关闭该 provider 的 `builtin_search` 或全局工具调用。
+  - `claude`：请求在 `tools` 中追加 `{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}`（可与客户端 `tools` 共存）；非流式与流式 SSE 统一从 `server_tool_use`、`web_search_tool_result` 与 `citations` / `citations_delta` 提取 `LLMWebSearchReport`（优先保留被引用来源，设置 `link_urls=True`，元数据不保存 `encrypted_content` 密文），`native_blocks` 不落盘服务端搜索块以避免历史上下文膨胀，完整流式响应仍保留在 HTTP trace 中。
+  - 开启后该 provider 的会话移除 `search_web` 工具并切换提示词引导，检索成本在 provider 侧计费，本地轮次上限不覆盖。
 
 权限规则：
 
@@ -579,7 +582,7 @@ LLM 侧的联网搜索有两条互斥路径：
 - `data/` 需要持久化
 - 镜像构建时通过 `COPY src/` + `pip install --no-deps .` 安装项目包
 - API key 通过环境变量注入
-- 使用 `/search` 或 `search_web` 时需提供可访问的 SearXNG；开启 `builtin_search` 的 gemini provider 不依赖 SearXNG；Tavily 等外部搜索能力通过 MCP 工具接入
+- 使用 `/search` 或 `search_web` 时需提供可访问的 SearXNG；开启 `builtin_search` 的 gemini / claude provider 不依赖 SearXNG；Tavily 等外部搜索能力通过 MCP 工具接入
 
 根目录 `.dockerignore` 已经做了收紧，避免把以下内容送进 Docker build 上下文：
 

@@ -307,7 +307,7 @@ class ToolMixin(McpLifecycleMixin):
         return provider is not None and resolve_search_mode(
             provider, tools_allowed=self.config.runtime.tool_calling_enabled,
             local_search_enabled=self.config.auto_search.enabled,
-        ) in {"gemini_grounding", "responses_hosted", "responses_standalone"}
+        ) in {"gemini_grounding", "claude_web_search", "responses_hosted", "responses_standalone"}
 
     def _get_enabled_tool_names(
         self,

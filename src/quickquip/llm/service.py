@@ -1289,7 +1289,7 @@ class LLMService(
             local_search_enabled=self.config.auto_search.enabled,
         )
         builtin_search_active = search_mode in {
-            "gemini_grounding", "responses_hosted", "responses_standalone",
+            "gemini_grounding", "claude_web_search", "responses_hosted", "responses_standalone",
         }
         history_enabled = self._effective_history_enabled(
             request.chat_id, request.chat_type

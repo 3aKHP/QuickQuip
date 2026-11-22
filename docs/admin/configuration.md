@@ -66,9 +66,9 @@
 | `SEARXNG_BIND_PORT` | Compose 暴露 SearXNG 时绑定的宿主机端口（仅 `docker-compose.example.yml` 使用） | `8888` |
 | `SEARXNG_SECRET` | SearXNG 实例密钥（用于 SearXNG 容器环境变量） | — |
 
-> **搜索路由与 Gemini 原生搜索补充说明**：
+> **搜索路由与原生搜索补充说明**：
 > - 内置工具 `search_web` 与群命令 `/search` 固定调用项目配置的 SearXNG（本地源码直跑读取 `SEARXNG_BASE_URL`；而 `docker-compose.example.yml` 和 `prod.example/docker-compose.yml` 会优先将 `QUICKQUIP_SEARXNG_BASE_URL` 映射注入为容器内的 `SEARXNG_BASE_URL`。Tavily 等外部搜索建议通过 MCP sidecar 暴露为扩展工具）。
-> - **Gemini 原生联网特例**：开启了 `builtin_search = true` 的 Gemini 渠道不依赖 SearXNG（联网检索由 Google 服务端 Grounding 直接完成；此时若未配 SearXNG，`/llm health` 中的搜索健康项仍会按内置搜索覆盖判定为 `ok`）。
+> - **原生联网特例**：开启了 `builtin_search = true` 的 Gemini 或 Claude 渠道不依赖 SearXNG（联网检索由上游服务端直接完成；此时若未配 SearXNG，`/llm health` 中的搜索健康项仍会按内置搜索覆盖判定为 `ok`）。
 
 ### LLM 调试与 Trace
 
@@ -324,7 +324,7 @@ LLM 按需检索本群归档历史的只读能力；默认关闭，群级开关�
 | `extra_body` | 注入到每次请求 JSON Body 中的额外自定义键值对象（模型层覆盖时整块替换） | — |
 | `prompt_caching` | 是否启用 Anthropic Prompt Caching 断点打点（**仅 `claude` 协议生效**，需上游或中转站支持 CLI 缓存格式） | `false` |
 | `cache_ttl` | Claude Prompt Cache 的生存期：留空 `""` 默认为 5 分钟，填 `"1h"` 使用 1 小时扩展缓存（**仅 `claude` 协议生效**） | `""` |
-| `builtin_search` | 是否启用服务商原生联网搜索（**仅 `gemini` 协议生效**）：开启后请求会携带 `google_search` 声明，保存 Grounding 来源供追溯，QQ 显示层隐藏来源引用及自动来源尾块；同时该渠道会话会自动移除本地 `search_web` 工具并切换提示词引导（其他协议配置此项无效并会记录 warning；检索在 Google 侧执行并计费，不计入本地轮次与 Token 看板）。<br>⚠️ **Gemini 版本兼容性警告**：将 `google_search` 与工具调用（Function Calling）放在同一次请求中混用，**仅 Gemini 3 系列模型支持**！如果你使用的是 Gemini 2.x 模型，必须关闭 `builtin_search` 或关闭全局 `tool_calling_enabled`，否则请求会被 Google API 直接拒绝 | `false` |
+| `builtin_search` | 是否启用服务商原生联网搜索（**仅 `gemini` 与 `claude` 协议生效**）：<br>• `gemini`：请求携带 `google_search` 声明，保存 Grounding 来源供追溯；<br>• `claude`：请求在 `tools` 中声明 `{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}`，从 `server_tool_use` / `web_search_tool_result` / `citations` 提取检索词与引用来源；<br>开启后该渠道会话自动移除本地 `search_web` 工具并切换提示词引导，QQ 显示层隐藏来源引用及自动来源尾块（其他协议配置此项无效并会记录 warning；检索在服务端执行并计费，不计入本地轮次与 Token 看板）。<br>⚠️ **Gemini 版本兼容性警告**：将 `google_search` 与工具调用（Function Calling）放在同一次请求中混用，**仅 Gemini 3 系列模型支持**！如果你使用的是 Gemini 2.x 模型，必须关闭 `builtin_search` 或关闭全局 `tool_calling_enabled`，否则请求会被 Google API 直接拒绝 | `false` |
 | `gemini_empty_response_recovery` | Gemini GenerateContent 空回复补正开关，触发条件与额度规则见[空回复补正](#gemini-空回复补正) | `false` |
 | `gemini_empty_response_recovery_max_output_tokens` | 补正请求的输出额度上限，包含推理与回答；可设为 `1`–`1048576` | `65536` |
 | `responses_profile` | **`openai_responses` 协议专属后端能力档位**：<br>• `openai-public`（默认）：对接官方 `/v1/responses` 接口；<br>• `responses-plaintext-reasoning`：对接返回明文 `reasoning.content`（`type="reasoning_text"`）及 `response.reasoning.{delta,done}` 别名事件的兼容 Responses 端点（不发送 `service_tier`，保留 `store: false` 与 `low`–`xhigh` 档位）；<br>• `codex-http-relay`：对接 Codex 形态的第三方中转网关（不发送 `service_tier`、容忍 `codex.*` 扩展事件、当终态事件缺省字段时以流式完整收集的 item 作为历史回放基准）；<br>• `codex-relay-hosted-tools`：`codex-http-relay` 的全部行为，并在开启工具调用时由请求侧显式声明 `image_generation` 生图与 `web_search` 搜索工具；普通工具对话优先使用该原生搜索路径并移除本地 `search_web`，无 function 工具时也可使用；禁用工具后不声明搜索，相关历史使用通用投影；模型可自主搜索并产生额外费用，渠道不支持时切回 `codex-http-relay`；<br>• `codex-relay-standalone-search`：保留 relay 档位、事件对账与 `image_generation`，通过原生 `web.run` 与 `/alpha/search` 执行独立搜索 | `openai-public` |
