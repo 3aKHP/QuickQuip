@@ -105,7 +105,7 @@ jobs:
 
           Copy-Item -Recurse config staging\
           Copy-Item -Recurse skills.example staging\
-          Copy-Item bot.py, web_api.py, webview_launcher.py, start.bat, .env.example staging\
+          Copy-Item bot.py, web_api.py, webview_launcher.py, start.bat, .env.example, LICENSE, THIRD-PARTY-NOTICES.md staging\
           New-Item -ItemType Directory -Force staging\scripts\maintenance | Out-Null
           Copy-Item scripts\maintenance\backfill_chat_archive.py, scripts\maintenance\backfill_record_identities.py, scripts\maintenance\sync_preset_skills.py, scripts\maintenance\reset_niuniu_lengths.py staging\scripts\maintenance\
           New-Item -ItemType Directory -Force staging\data | Out-Null
@@ -171,6 +171,8 @@ jobs:
             if ($LASTEXITCODE -ne 0) { throw "Configuration JSON example validation failed" }
             .\python\python.exe -c "import quickquip, plugins, web_api; from importlib.metadata import version; from quickquip.llm.client_fingerprints.identity import client_version; assert client_version() == version('quickquip'); print('app import and client version ok')"
             if ($LASTEXITCODE -ne 0) { throw "Application import and client version smoke test failed" }
+            .\python\python.exe -c "import asyncio, struct, pilk_nogil; from quickquip.generation.audio_transcode import normalize_audio_for_asr, validate_wav_bytes; silk = pilk_nogil.encode(struct.pack('<4800h', *([1000, -1000] * 2400)), None, pcm_rate=24000, tencent=True); res = asyncio.run(normalize_audio_for_asr(silk, filename='smoke.amr')); assert res.transcoded and validate_wav_bytes(res.data, expected_sample_rate=16000)[3] > 0; print('embedded silk transcode ok')"
+            if ($LASTEXITCODE -ne 0) { throw "Embedded Python SILK transcode smoke test failed" }
             .\python\python.exe scripts\maintenance\sync_preset_skills.py --apply --skills-dir data\preset-sync-smoke
             if ($LASTEXITCODE -ne 0) { throw "Preset Skill sync startup smoke test failed" }
             .\python\python.exe scripts\maintenance\sync_preset_skills.py --check --skills-dir data\preset-sync-smoke
