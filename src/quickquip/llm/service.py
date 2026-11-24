@@ -63,7 +63,9 @@ from quickquip.llm.image_routing import (
 )
 from quickquip.llm.mcp import MCPClientManager
 from quickquip.llm.persona_compiler import (
+    PersonaV3Compiled,
     compile_persona_v3,
+    is_persona_v3,
     should_inject_dialogue_examples,
 )
 from quickquip.llm.prompting import (
@@ -412,6 +414,7 @@ class LLMService(
         builtin_search_active: bool = False,
         search_mode: str | None = None,
         skills_catalog_block: str = "",
+        compiled_persona: PersonaV3Compiled | None = None,
     ) -> str:
         return build_system_prompt(
             persona=persona,
@@ -437,6 +440,7 @@ class LLMService(
             provider_style_overrides=provider_style_overrides,
             session_preset=session_preset,
             skills_catalog_block=skills_catalog_block,
+            compiled_persona=compiled_persona,
         )
 
     def _build_turn_envelope(
@@ -1312,6 +1316,11 @@ class LLMService(
         session_preset = (
             self.get_session_preset(scope_key) if request.chat_type == "private" else ""
         )
+        compiled_persona = (
+            compile_persona_v3(persona, chat_type=request.chat_type)
+            if is_persona_v3(persona)
+            else None
+        )
         system_prompt = self._build_system_prompt(
             persona,
             request.chat_id,
@@ -1324,13 +1333,16 @@ class LLMService(
             search_mode={"gemini_grounding": "builtin", "local": "searxng"}.get(
                 search_mode, search_mode),
             skills_catalog_block=skills_catalog_block,
+            compiled_persona=compiled_persona,
         )
         compiled_examples = (
-            compile_persona_v3(persona, chat_type=request.chat_type).dialogue_examples
-            if should_inject_dialogue_examples(
+            compiled_persona.dialogue_examples
+            if compiled_persona is not None
+            and should_inject_dialogue_examples(
                 persona,
                 provider_protocol=provider.protocol,
                 policy=getattr(provider, "persona_few_shot", "auto"),
+                compiled=compiled_persona,
             )
             else ()
         )
@@ -1377,6 +1389,7 @@ class LLMService(
             builtin_search_active=builtin_search_active,
             system_prompt=system_prompt,
             persona=persona,
+            compiled_persona=compiled_persona,
             dialogue_examples=compiled_examples,
         )
 

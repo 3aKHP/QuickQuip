@@ -287,6 +287,7 @@ def match_persona_lore(
     *,
     max_entries: int = DEFAULT_LORE_MAX_ENTRIES,
     max_chars: int = DEFAULT_LORE_MAX_CHARS,
+    compiled: PersonaV3Compiled | None = None,
 ) -> list[PersonaLoreEntry]:
     """Match on-demand ``[[lore]]`` entries against turn text within budget."""
     if not is_persona_v3(persona) or not text.strip():
@@ -294,7 +295,8 @@ def match_persona_lore(
     if max_entries <= 0 or max_chars <= 0:
         return []
 
-    lore_entries = compile_persona_v3(persona).lore_entries
+    target = compiled if compiled is not None else compile_persona_v3(persona)
+    lore_entries = target.lore_entries
     if not lore_entries:
         return []
 
@@ -346,11 +348,13 @@ def should_inject_dialogue_examples(
     *,
     provider_protocol: str,
     policy: str = "auto",
+    compiled: PersonaV3Compiled | None = None,
 ) -> bool:
     """Decide whether Persona v3 ``[[dialogue_examples]]`` should be injected."""
     if not is_persona_v3(persona):
         return False
-    if not compile_persona_v3(persona).dialogue_examples:
+    target = compiled if compiled is not None else compile_persona_v3(persona)
+    if not target.dialogue_examples:
         return False
     normalized = (policy or "auto").strip().lower()
     if normalized == "off":

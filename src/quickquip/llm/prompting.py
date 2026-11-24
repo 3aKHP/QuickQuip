@@ -17,6 +17,7 @@ from quickquip.llm.tools import (
 )
 
 if TYPE_CHECKING:
+    from quickquip.llm.persona_compiler import PersonaV3Compiled
     from quickquip.llm.vocab import VocabIndex
 
 # Upper bound on how many images from the recent-message buffer are attached
@@ -359,8 +360,13 @@ def _build_v3_system_prompt(
     provider_style_overrides: str,
     session_preset: str,
     skills_catalog_block: str,
+    compiled_persona: PersonaV3Compiled | None = None,
 ) -> str:
-    compiled = compile_persona_v3(persona, chat_type=chat_type)
+    compiled = (
+        compiled_persona
+        if compiled_persona is not None
+        else compile_persona_v3(persona, chat_type=chat_type)
+    )
     sections: list[str] = []
 
     if compiled.core_block:
@@ -441,6 +447,7 @@ def build_system_prompt(
     provider_style_overrides: str = "",
     session_preset: str = "",
     skills_catalog_block: str = "",
+    compiled_persona: PersonaV3Compiled | None = None,
 ) -> str:
     """组装 system prompt。只含跨轮、跨日稳定的段落（前缀缓存字节稳定契约）；
     时间/节日/participants/memories/词表命中等逐轮变化的内容一律走
@@ -461,6 +468,7 @@ def build_system_prompt(
             provider_style_overrides=provider_style_overrides,
             session_preset=session_preset,
             skills_catalog_block=skills_catalog_block,
+            compiled_persona=compiled_persona,
         )
 
     lines: list[str] = []
@@ -970,6 +978,8 @@ def build_messages(
                 content=a_text,
             ))
 
+    few_shot_count = len(messages)
+
     # Group pending human messages into a scene, flush when we hit an
     # assistant message.  history 行是纯文本（图片已图注化），scene 不带图。
     pending_speakers: list[dict[str, str]] = []
@@ -1006,8 +1016,12 @@ def build_messages(
 
         if item["role"] == "assistant":
             _flush_pending()
-            if messages and messages[-1].role == "assistant":
-                # 仅在 dialogue_examples 后历史首条即孤立 assistant 时出现：补中性分隔轮保持交替契约
+            if (
+                few_shot_count
+                and len(messages) == few_shot_count
+                and messages[-1].role == "assistant"
+            ):
+                # 仅在 dialogue_examples 后历史首条即孤立 assistant 时补中性分隔轮保持交替契约
                 messages.append(LLMConversationMessage(
                     role="user",
                     content="【以下为当前会话记录】",

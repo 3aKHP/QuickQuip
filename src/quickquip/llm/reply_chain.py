@@ -27,6 +27,7 @@ from quickquip.llm.session import SessionIdentity
 if TYPE_CHECKING:
     from quickquip.llm.config import PersonaConfig, ProviderConfig
     from quickquip.llm.epoch import EpochKey, EpochParams
+    from quickquip.llm.persona_compiler import PersonaV3Compiled
     from quickquip.llm.provider import LLMResponse
     from quickquip.llm.settings import ResolvedGroupSettings
     from quickquip.llm.tools import LLMConversationMessage, LLMToolSpec
@@ -285,6 +286,7 @@ class TurnRequestAssembler:
     # #72：本请求的群历史双开关裁决结果（信封公告按它过滤延迟名单）。
     history_enabled: bool = False
     persona: "PersonaConfig | None" = None
+    compiled_persona: "PersonaV3Compiled | None" = None
     dialogue_examples: tuple[Any, ...] = ()
 
     def assemble(self) -> LLMRequest:
@@ -323,7 +325,11 @@ class TurnRequestAssembler:
         if self.scene_patch:
             lore_scan_parts.extend(str(item.get("text", "")) for item in self.scene_patch[-2:])
         matched_lore = (
-            match_persona_lore(self.persona, "\n".join(part for part in lore_scan_parts if part))
+            match_persona_lore(
+                self.persona,
+                "\n".join(part for part in lore_scan_parts if part),
+                compiled=self.compiled_persona,
+            )
             if self.persona is not None
             else []
         )

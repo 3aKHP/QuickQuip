@@ -300,3 +300,111 @@ style_prompt = "二版风格"
     assert g2.shared_style_rules == ""
     assert "二版风格" in g2.style_prompt
     assert "群聊专用风格规则" in g2.style_prompt
+
+
+def test_config_legacy_delegates_v3_shared_and_preserves_env(tmp_path: Path, monkeypatch):
+    from quickquip.llm import config_legacy
+
+    personas_dir = tmp_path / "personas"
+    personas_dir.mkdir()
+    (personas_dir / "_shared.toml").write_text(
+        '''
+shared_group_system_prompt = """
+---
+群聊规则 ${QQ_SHARED_RULE:-fallback_rule}
+"""
+shared_group_style_prompt = "群聊风格锚点"
+'''.lstrip(),
+        encoding="utf-8",
+    )
+    (personas_dir / "v3.toml").write_text(
+        '''
+id = "v3"
+display_name = "测试角色"
+scope = ["group"]
+schema_version = 3
+
+[identity]
+name = "角色 ${QQ_CHAR_TAG:-raw_tag}"
+role = "值班员"
+'''.lstrip(),
+        encoding="utf-8",
+    )
+    llm_toml = tmp_path / "llm.toml"
+    llm_toml.write_text(
+        '''
+[runtime]
+default_provider = "openai-main"
+default_persona = "v3"
+
+[[providers]]
+id = "openai-main"
+protocol = "openai"
+base_url = "https://example.test/v1"
+api_key_env = "OPENAI_API_KEY"
+default_model = "gpt-test"
+models = ["gpt-test"]
+'''.lstrip(),
+        encoding="utf-8",
+    )
+
+    monkeypatch.setenv("QQ_SHARED_RULE", "live_rule")
+    monkeypatch.setenv("QQ_CHAR_TAG", "expanded_tag")
+
+    canonical = load_personas(personas_dir)
+    only_personas = config_legacy.load_personas_only(llm_toml)
+    full_legacy = config_legacy.load_llm_config(llm_toml)
+
+    assert full_legacy.load_error is None
+    assert only_personas["v3"] == canonical["v3"]
+    assert full_legacy.personas["v3"] == canonical["v3"]
+    assert full_legacy.personas["v3"].system_prompt == ""
+    assert full_legacy.personas["v3"].shared_host_rules == "群聊规则 live_rule"
+    assert full_legacy.personas["v3"].shared_style_rules == "群聊风格锚点"
+    assert full_legacy.personas["v3"].extras["identity"]["name"] == "角色 expanded_tag"
+
+    preserved = config_legacy.load_llm_config(llm_toml, preserve_env=True)
+    assert preserved.personas["v3"].extras["identity"]["name"] == "角色 ${QQ_CHAR_TAG:-raw_tag}"
+    assert (
+        preserved.personas["v3"].shared_host_rules
+        == "群聊规则 ${QQ_SHARED_RULE:-fallback_rule}"
+    )
+
+
+def test_precompiled_persona_v3_avoids_duplicate_compilations(monkeypatch):
+    from quickquip.llm import persona_compiler as compiler_mod
+    from quickquip.llm import prompting as prompting_mod
+    from quickquip.llm.prompting import build_system_prompt
+
+    persona = _make_v3_persona()
+    real_compile = compiler_mod.compile_persona_v3
+    calls = 0
+
+    def _counting_compile(target, *, chat_type: str = "group"):
+        nonlocal calls
+        calls += 1
+        return real_compile(target, chat_type=chat_type)
+
+    monkeypatch.setattr(compiler_mod, "compile_persona_v3", _counting_compile)
+    monkeypatch.setattr(prompting_mod, "compile_persona_v3", _counting_compile)
+
+    compiled = compiler_mod.compile_persona_v3(persona, chat_type="group")
+    assert calls == 1
+
+    prompt = build_system_prompt(
+        persona=persona,
+        group_id=12345,
+        tool_specs=[],
+        search_tool_name="search_web",
+        compiled_persona=compiled,
+    )
+    assert "<persona_core>" in prompt
+    assert should_inject_dialogue_examples(
+        persona,
+        provider_protocol="openai",
+        policy="auto",
+        compiled=compiled,
+    )
+    matched = match_persona_lore(persona, "电台今天好像坏了", compiled=compiled)
+    assert matched
+    assert calls == 1

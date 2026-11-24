@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import tomllib
+from collections.abc import Callable
 from pathlib import Path
 from typing import Any
 from quickquip.common.config_utils import expand_env_value
@@ -98,10 +99,14 @@ def _apply_shared_to_entry(entry: dict[str, Any], shared_data: dict[str, str]) -
     return entry
 
 
-def _read_personas(raw_personas: list[dict[str, Any]]) -> dict[str, PersonaConfig]:
+def _read_personas(
+    raw_personas: list[dict[str, Any]],
+    *,
+    expand_fn: Callable[[Any], Any] = expand_env_value,
+) -> dict[str, PersonaConfig]:
     personas: dict[str, PersonaConfig] = {}
     for entry in raw_personas:
-        entry = expand_env_value(entry)
+        entry = expand_fn(entry)
         persona_id = str(entry.get("id", "")).strip()
         if not persona_id:
             continue

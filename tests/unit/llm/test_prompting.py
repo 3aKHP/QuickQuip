@@ -1229,3 +1229,78 @@ def test_turn_envelope_segments_include_lore_between_vocab_and_tools(frozen_now)
         deferred_tool_names=["draw_svg"],
     )
     assert envelope == "\n".join(parts.values())
+
+
+def test_build_messages_consecutive_assistant_history_without_examples():
+    msgs_no_examples = build_messages(
+        prompt="继续聊聊",
+        image_urls=[],
+        history=[
+            {"role": "assistant", "content": "历史第一条"},
+            {"role": "assistant", "content": "历史第二条"},
+        ],
+        recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="甲",
+        current_user_id="1",
+        dialogue_examples=None,
+    )
+    assert all("【以下为当前会话记录】" not in str(m.content) for m in msgs_no_examples)
+    assert [m.content for m in msgs_no_examples if m.role == "assistant"] == [
+        "历史第一条",
+        "历史第二条",
+    ]
+
+    msgs_blank_examples = build_messages(
+        prompt="继续聊聊",
+        image_urls=[],
+        history=[{"role": "assistant", "content": "历史第一条"}],
+        recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="甲",
+        current_user_id="1",
+        dialogue_examples=[{"user": " ", "assistant": ""}],
+    )
+    assert all("【以下为当前会话记录】" not in str(m.content) for m in msgs_blank_examples)
+
+    msgs_mid_consecutive = build_messages(
+        prompt="继续聊聊",
+        image_urls=[],
+        history=[
+            {
+                "role": "user",
+                "user_id": "1",
+                "sender_name": "甲",
+                "content": "开场",
+                "raw_content": "开场",
+            },
+            {"role": "assistant", "content": "回复一"},
+            {"role": "assistant", "content": "回复二"},
+        ],
+        recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="甲",
+        current_user_id="1",
+        dialogue_examples=[{"user": "晚安", "assistant": "晚安。"}],
+    )
+    assert all("【以下为当前会话记录】" not in str(m.content) for m in msgs_mid_consecutive)
+
+    msgs_leading_orphan = build_messages(
+        prompt="继续聊聊",
+        image_urls=[],
+        history=[
+            {"role": "assistant", "content": "回复一"},
+            {"role": "assistant", "content": "回复二"},
+        ],
+        recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="甲",
+        current_user_id="1",
+        dialogue_examples=[{"user": "晚安", "assistant": "晚安。"}],
+    )
+    dividers = [
+        idx
+        for idx, msg in enumerate(msgs_leading_orphan)
+        if "【以下为当前会话记录】" in str(msg.content)
+    ]
+    assert dividers == [2]
