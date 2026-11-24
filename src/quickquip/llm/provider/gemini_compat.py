@@ -120,11 +120,14 @@ def downgrade_thought_signatures(payload: dict[str, Any]) -> tuple[dict[str, Any
       it replaced with ``SKIP_THOUGHT_SIGNATURE`` (or, if a model turn has
       ``functionCall`` parts with no signature at all, the first call receives
       ``SKIP_THOUGHT_SIGNATURE``).
+    - Server-side ``toolCall`` / ``toolResponse`` parts are dropped as a unit
+      so cross-upstream retry never leaves unverified or signatureless server
+      tool shells from a previous upstream.
     - Other model parts have ``thoughtSignature`` stripped; if stripping leaves
       an empty text/thought carrier, that part is dropped.
     - Model turns whose parts become empty after stripping pure signature
-      carriers are replaced with ``[{"text": " "}]`` so user/model role
-      alternation is preserved.
+      carriers or server tool blocks are replaced with ``[{"text": " "}]`` so
+      user/model role alternation is preserved.
     """
     contents = payload.get("contents")
     if not isinstance(contents, list):
@@ -146,6 +149,9 @@ def downgrade_thought_signatures(payload: dict[str, Any]) -> tuple[dict[str, Any
         for part in original_parts:
             if not isinstance(part, dict):
                 kept_parts.append(part)
+                continue
+            if isinstance(part.get("toolCall"), dict) or isinstance(part.get("toolResponse"), dict):
+                changed += 1
                 continue
             signature = part.get("thoughtSignature")
             if isinstance(part.get("functionCall"), dict):

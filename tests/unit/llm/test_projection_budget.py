@@ -212,6 +212,99 @@ def test_native_thinking_stripped_gemini_thought_parts():
     assert any("functionCall" in block for block in assistant.native_content)
 
 
+def test_gemini_large_search_signatures_fit_default_replay_budget():
+    from dataclasses import replace
+
+    gemini_owner = replace(OWNER, protocol="gemini")
+    blocks = [
+        {"text": "需要多次检索。", "thought": True},
+        {
+            "thoughtSignature": "A" * 1_000,
+            "toolCall": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB", "args": {"queries": ["q1"]}},
+        },
+        {
+            "thoughtSignature": "B" * 32_000,
+            "toolResponse": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB"},
+        },
+        {
+            "thoughtSignature": "C" * 1_000,
+            "toolCall": {"id": "c2", "toolType": "GOOGLE_SEARCH_WEB", "args": {"queries": ["q2"]}},
+        },
+        {
+            "thoughtSignature": "D" * 35_000,
+            "toolResponse": {"id": "c2", "toolType": "GOOGLE_SEARCH_WEB"},
+        },
+        {
+            "thoughtSignature": "E" * 1_000,
+            "toolCall": {"id": "c3", "toolType": "GOOGLE_SEARCH_WEB", "args": {"queries": ["q3"]}},
+        },
+        {
+            "thoughtSignature": "F" * 38_000,
+            "toolResponse": {"id": "c3", "toolType": "GOOGLE_SEARCH_WEB"},
+        },
+        {"functionCall": {"id": "fc_1", "name": "get_identity", "args": {"query": "镜子"}}},
+    ]
+    loop = _loop(
+        "loop_gsig_budget",
+        (
+            _turn(
+                "turn_0",
+                tools=(_tool_exec("exec_0", provider_call_id="fc_1"),),
+                native_state=_native_state(gemini_owner, blocks),
+                owner=_owner_dict(gemini_owner),
+            ),
+        ),
+    )
+    result = project_loops_with_budget(
+        [loop], target=gemini_owner, protocol="gemini", budget_tokens=16384
+    )
+    assert result.decisions[0].path == PATH_NATIVE
+    assert result.decisions[0].reason is None
+    assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert assistant.native_content == blocks
+
+
+def test_native_thinking_stripped_preserves_gemini_server_tool_parts():
+    from dataclasses import replace
+
+    gemini_owner = replace(OWNER, protocol="gemini")
+    blocks = [
+        {"text": "想" * 4000, "thought": True},
+        {
+            "thought": True,
+            "thoughtSignature": "s1",
+            "toolCall": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB", "args": {"queries": ["q"]}},
+        },
+        {
+            "thought": True,
+            "thoughtSignature": "s2",
+            "toolResponse": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB"},
+        },
+        {"functionCall": {"id": "fc_1", "name": "get_identity", "args": {}}},
+    ]
+    loop = _loop(
+        "loop_gserver_strip",
+        (
+            _turn(
+                "turn_0",
+                tools=(_tool_exec("exec_0", provider_call_id="fc_1"),),
+                native_state=_native_state(gemini_owner, blocks),
+                owner=_owner_dict(gemini_owner),
+            ),
+        ),
+    )
+    full = project_loops_with_budget(
+        [loop], target=gemini_owner, protocol="gemini", budget_tokens=10**9
+    )
+    full_estimate = _native_estimate(full.messages)
+    result = project_loops_with_budget(
+        [loop], target=gemini_owner, protocol="gemini", budget_tokens=full_estimate - 200
+    )
+    assert result.decisions[0].reason == "reduced:native_thinking_stripped"
+    assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert assistant.native_content == blocks[1:]
+
+
 def test_native_thinking_stripped_responses_reasoning_items():
     # Responses 跨轮回放超预算：tier-0 剥 reasoning items（密文旧轮非必需），
     # message/function_call 原样保留即配对完整（PR-B 跨轮裁剪规则）。

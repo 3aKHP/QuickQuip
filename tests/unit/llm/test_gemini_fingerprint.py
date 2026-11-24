@@ -276,3 +276,37 @@ async def test_local_template_override_and_ua_override_preserve_precedence(tmp_p
     assert [r.headers["user-agent"] for r in capture] == [
         "GeminiCLI-tui/9.0.0/gemini-a (linux; x64; terminal)", "Header/1", "Explicit/1",
     ]
+
+
+async def test_gemini_cli_preserves_tool_config_and_orders_server_tool_parts(tmp_path, capture):
+    schema = {"type": "object", "properties": {"value": {"type": "string"}}}
+    native = [
+        {
+            "thoughtSignature": "sig-tc",
+            "toolCall": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB", "args": {"queries": ["q"]}},
+        },
+        {
+            "thoughtSignature": "sig-tr",
+            "toolResponse": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB"},
+        },
+    ]
+    req = request(
+        tools=[LLMToolSpec("lookup", "description", schema)],
+        allow_tool_calls=True,
+        builtin_search=True,
+        messages=[
+            LLMConversationMessage("user", "中文"),
+            LLMConversationMessage("assistant", "", native_content=native),
+            LLMConversationMessage("user", "继续"),
+        ],
+    )
+    response = await build_provider_client(config(tmp_path, "gemini-cli")).complete(req)
+    assert response.text == "成功"
+    body = json.loads(capture[0].content)
+    assert list(body) == [
+        "contents", "systemInstruction", "tools", "toolConfig", "generationConfig",
+    ]
+    assert body["toolConfig"] == {"includeServerSideToolInvocations": True}
+    parts = body["contents"][1]["parts"]
+    assert list(parts[0]) == ["thoughtSignature", "toolCall"]
+    assert list(parts[1]) == ["thoughtSignature", "toolResponse"]

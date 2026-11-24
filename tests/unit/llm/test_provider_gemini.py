@@ -1,7 +1,10 @@
 from __future__ import annotations
 
 import base64
+from copy import deepcopy
 from dataclasses import replace
+
+import pytest
 
 from plugins.llm_config import ProviderConfig
 from plugins.llm_provider import GeminiProviderClient, LLMRequest
@@ -215,6 +218,7 @@ async def test_gemini_builtin_search_declared_alongside_function_tools():
 
     assert client.last_payload["tools"][0]["functionDeclarations"][0]["name"] == "get_identity"
     assert client.last_payload["tools"][1] == {"google_search": {}}
+    assert client.last_payload["toolConfig"] == {"includeServerSideToolInvocations": True}
 
 
 async def test_gemini_builtin_search_declared_without_client_tools():
@@ -231,6 +235,7 @@ async def test_gemini_builtin_search_declared_without_client_tools():
 
     # 声明独立于客户端工具：即使工具调用整体关闭也生效
     assert client.last_payload["tools"] == [{"google_search": {}}]
+    assert "toolConfig" not in client.last_payload
 
 
 async def test_gemini_builtin_search_off_keeps_payload_unchanged():
@@ -242,6 +247,59 @@ async def test_gemini_builtin_search_off_keeps_payload_unchanged():
     await client.complete(_tool_call_request())
 
     assert "google_search" not in str(client.last_payload)
+    assert "toolConfig" not in client.last_payload
+
+
+async def test_gemini_extra_body_merges_tool_config_without_mutating():
+    extra = {"toolConfig": {"functionCallingConfig": {"mode": "AUTO"}}}
+    cfg = replace(_provider_config(), extra_body=extra)
+    client = FakeGeminiClient(cfg, _text_body())
+    request = _tool_call_request()
+    request.builtin_search = True
+
+    await client.complete(request)
+
+    assert client.last_payload["toolConfig"] == {
+        "includeServerSideToolInvocations": True,
+        "functionCallingConfig": {"mode": "AUTO"},
+    }
+    assert extra == {"toolConfig": {"functionCallingConfig": {"mode": "AUTO"}}}
+
+    # Explicit camelCase override wins
+    override_cfg = replace(
+        _provider_config(),
+        extra_body={"toolConfig": {"includeServerSideToolInvocations": False}},
+    )
+    override_client = FakeGeminiClient(override_cfg, _text_body())
+    await override_client.complete(deepcopy(request))
+    assert override_client.last_payload["toolConfig"] == {
+        "includeServerSideToolInvocations": False,
+    }
+
+    # Explicit snake_case override removes auto camelCase spelling
+    snake_cfg = replace(
+        _provider_config(),
+        extra_body={"toolConfig": {"include_server_side_tool_invocations": False}},
+    )
+    snake_client = FakeGeminiClient(snake_cfg, _text_body())
+    await snake_client.complete(deepcopy(request))
+    assert snake_client.last_payload["toolConfig"] == {
+        "include_server_side_tool_invocations": False,
+    }
+    assert "includeServerSideToolInvocations" not in snake_client.last_payload["toolConfig"]
+
+    # Top-level tool_config alias merges into toolConfig cleanly
+    alias_cfg = replace(
+        _provider_config(),
+        extra_body={"tool_config": {"functionCallingConfig": {"mode": "ANY"}}},
+    )
+    alias_client = FakeGeminiClient(alias_cfg, _text_body())
+    await alias_client.complete(deepcopy(request))
+    assert alias_client.last_payload["toolConfig"] == {
+        "includeServerSideToolInvocations": True,
+        "functionCallingConfig": {"mode": "ANY"},
+    }
+    assert "tool_config" not in alias_client.last_payload
 
 
 async def test_gemini_parses_grounding_metadata_non_stream():
@@ -934,3 +992,106 @@ async def test_gemini_optional_temperature_omitted_when_none():
     )
     await client_zero.complete(req_zero)
     assert client_zero.last_payload["generationConfig"]["temperature"] == 0.0
+
+
+@pytest.mark.parametrize("stream", [False, True])
+def test_gemini_parses_and_replays_server_side_tool_parts(stream):
+    parts = [
+        {"thought": True, "text": "先联网查一下"},
+        {
+            "thoughtSignature": "sig-tc-1",
+            "toolCall": {
+                "id": "call_srv_1",
+                "toolType": "GOOGLE_SEARCH_WEB",
+                "args": {"queries": ["quickquip"]},
+            },
+        },
+        {
+            "thoughtSignature": "sig-tr-1",
+            "toolResponse": {
+                "id": "call_srv_1",
+                "toolType": "GOOGLE_SEARCH_WEB",
+            },
+        },
+        {"text": "搜索后总结"},
+        {"text": "", "thoughtSignature": "sig-tail"},
+    ]
+    if stream:
+        chunks = [
+            {"candidates": [{"content": {"role": "model", "parts": [part]}}]}
+            for part in parts
+        ]
+        response = GeminiProviderClient._assemble_stream_response(chunks, "gemini-3.7-flash")
+    else:
+        body = {
+            "candidates": [
+                {"finishReason": "STOP", "content": {"role": "model", "parts": parts}}
+            ]
+        }
+        response = GeminiProviderClient._parse_response(body, "gemini-3.7-flash")
+
+    assert response.tool_calls == []
+    assert response.text == "搜索后总结"
+    assert response.native_blocks == parts
+    assert GeminiProviderClient._replay_parts(response.thinking_blocks) == parts
+
+
+async def test_gemini_unsigned_server_tool_plus_client_call_roundtrips_via_thinking_blocks():
+    from quickquip.llm.provider.gemini_compat import SKIP_THOUGHT_SIGNATURE
+
+    parts = [
+        {
+            "toolCall": {
+                "id": "call_srv_1",
+                "toolType": "GOOGLE_SEARCH_WEB",
+                "args": {"queries": ["weather"]},
+            }
+        },
+        {
+            "toolResponse": {
+                "id": "call_srv_1",
+                "toolType": "GOOGLE_SEARCH_WEB",
+            }
+        },
+        {
+            "functionCall": {
+                "id": "fc_1",
+                "name": "get_identity",
+                "args": {"query": "镜子"},
+            }
+        },
+    ]
+    response = GeminiProviderClient._parse_response(
+        {"candidates": [{"finishReason": "STOP", "content": {"role": "model", "parts": parts}}]},
+        "gemini-2.5-flash",
+    )
+    assert len(response.tool_calls) == 1
+    assert response.tool_calls[0].name == "get_identity"
+    assert GeminiProviderClient._replay_parts(response.thinking_blocks) == parts
+
+    client = FakeGeminiClient(_provider_config(), _text_body())
+    turn2_req = _tool_call_request()
+    turn2_req.builtin_search = True
+    turn2_req.messages = [
+        LLMConversationMessage(role="user", content="查一下"),
+        LLMConversationMessage(
+            role="assistant",
+            content=response.text,
+            tool_calls=response.tool_calls,
+            thinking_blocks=response.thinking_blocks,
+        ),
+        LLMConversationMessage(
+            role="tool",
+            content="镜子信息",
+            tool_call_id="fc_1",
+            tool_name="get_identity",
+        ),
+    ]
+    await client.complete(turn2_req)
+    model_parts = client.last_payload["contents"][1]["parts"]
+    assert model_parts[0] == parts[0]
+    assert model_parts[1] == parts[1]
+    assert model_parts[2] == {
+        "functionCall": {"id": "fc_1", "name": "get_identity", "args": {"query": "镜子"}},
+        "thoughtSignature": SKIP_THOUGHT_SIGNATURE,
+    }

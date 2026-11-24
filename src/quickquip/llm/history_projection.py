@@ -126,6 +126,19 @@ def _turn_native_effort(turn: LoadedTurn) -> str | None:
     return effort if isinstance(effort, str) and effort else None
 
 
+def _valid_gemini_server_tool_part(payload: Any) -> bool:
+    """校验 Gemini 服务端 toolCall / toolResponse 块：须带有效 toolType 或 id。"""
+    if not isinstance(payload, dict):
+        return False
+    has_tool_type = isinstance(payload.get("toolType"), str) and bool(payload["toolType"].strip())
+    has_id = isinstance(payload.get("id"), str) and bool(payload["id"].strip())
+    if "toolType" in payload and not has_tool_type:
+        return False
+    if "id" in payload and not has_id:
+        return False
+    return has_tool_type or has_id
+
+
 def _native_blocks_valid(protocol: str, blocks: Sequence[dict[str, Any]]) -> bool:
     """协议结构校验（§7.2）：签名缺失/损坏、未知块形态都判无效并降级。"""
     if protocol == "openai_responses":
@@ -154,10 +167,17 @@ def _native_blocks_valid(protocol: str, blocks: Sequence[dict[str, Any]]) -> boo
             else:
                 return False
         elif protocol == "gemini":
-            # parts 形态：text / functionCall（thought 与 thoughtSignature 可选）。
+            # parts 形态：text / functionCall / toolCall / toolResponse /
+            # inlineData / fileData（thought 与 thoughtSignature 可选）。
             if "functionCall" in block:
                 call = block.get("functionCall")
                 if not isinstance(call, dict) or not str(call.get("name", "")).strip():
+                    return False
+            elif "toolCall" in block:
+                if not _valid_gemini_server_tool_part(block.get("toolCall")):
+                    return False
+            elif "toolResponse" in block:
+                if not _valid_gemini_server_tool_part(block.get("toolResponse")):
                     return False
             elif "text" not in block and "inlineData" not in block and "fileData" not in block:
                 return False
@@ -612,13 +632,15 @@ def _project_loop_minimal(loop: LoadedLoop) -> list[LLMConversationMessage]:
 def _strip_native_thinking(
     messages: list[LLMConversationMessage], protocol: str
 ) -> list[LLMConversationMessage]:
-    """阶梯首档：原生块剥 thinking/thought 部分，保 tool_use/functionCall 配对。
+    """阶梯首档：原生块剥 thinking/thought 部分，保工具块与配对完整。
 
     签名回传要求只约束活跃工具循环内的最近 assistant 轮；已关闭 Loop 的
     历史轮剥 thinking 属协议合法的保真降级。块剥空（纯 thinking 轮）退
     通用正文表达并补占位（空 text 块会被 Claude 拒 400），该轮无工具
-    声明，配对不受影响。Responses 剥 ``reasoning`` items（旧轮密文非
-    必需，message/function_call 原样保留即配对完整）。
+    声明，配对不受影响。Gemini 首档保留 ``functionCall`` 与服务端
+    ``toolCall`` / ``toolResponse`` 块，仍超限由下一档整档降级；Responses
+    剥 ``reasoning`` items（旧轮密文非必需，message/function_call 原样保留
+    即配对完整）。
     """
     stripped: list[LLMConversationMessage] = []
     changed = False
@@ -635,7 +657,15 @@ def _strip_native_thinking(
         elif protocol == "openai_responses":
             kept = [block for block in blocks if block.get("type") != "reasoning"]
         else:
-            kept = [block for block in blocks if not block.get("thought")]
+            kept = [
+                block for block in blocks
+                if (
+                    not block.get("thought")
+                    or "functionCall" in block
+                    or "toolCall" in block
+                    or "toolResponse" in block
+                )
+            ]
         if len(kept) == len(blocks):
             stripped.append(message)
             continue

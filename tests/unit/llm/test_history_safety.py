@@ -305,3 +305,48 @@ def test_hosted_search_hidden_text_is_filtered_before_native_replay(tmp_path, ac
     assert MARKER not in json.dumps(after)
     assert not any(message.native_content for message in projection.messages)
     assert loop == original
+
+
+@pytest.mark.parametrize("location", ["tool_call_args", "tool_response", "thought_signature"])
+def test_gemini_server_tool_readable_fields_filtered_while_signature_stays_opaque(
+    tmp_path, location
+):
+    loop, owner = _loop("gemini")
+    blocks = [
+        {
+            "thoughtSignature": MARKER if location == "thought_signature" else "opaque-sig-1",
+            "toolCall": {
+                "id": "call_srv_1",
+                "toolType": "GOOGLE_SEARCH_WEB",
+                "args": {"queries": [MARKER if location == "tool_call_args" else "safe query"]},
+            },
+        },
+        {
+            "thoughtSignature": "opaque-sig-2",
+            "toolResponse": {
+                "id": "call_srv_1",
+                "toolType": "GOOGLE_SEARCH_WEB",
+                "response": {"snippet": MARKER if location == "tool_response" else "safe snippet"},
+            },
+        },
+        {
+            "functionCall": {"id": "call_0", "name": "lookup", "args": {"query": "safe"}},
+        },
+    ]
+    turn = replace(loop.turns[0], text="safe answer", native_state={"blocks": blocks})
+    loop = replace(loop, turns=(turn,))
+    safe, archived = prepare_safe_history([loop], make_sensitive_filter(tmp_path, "block"))
+    if location == "thought_signature":
+        assert not archived
+        assert safe[0] is loop
+        projection = project_loops_with_budget(
+            safe, target=owner, protocol="gemini", budget_tokens=10000, archive_loop_ids=archived,
+        )
+        assert projection.messages[1].native_content == blocks
+    else:
+        assert archived == {loop.loop_id}
+        projection = project_loops_with_budget(
+            safe, target=owner, protocol="gemini", budget_tokens=10000, archive_loop_ids=archived,
+        )
+        assert MARKER not in json.dumps([asdict(m) for m in projection.messages])
+        assert not any(m.native_content for m in projection.messages)

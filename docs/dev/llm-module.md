@@ -88,7 +88,7 @@ LLM 维护入口按职责列在下表：
 
 协议客户端的 `complete()` 对 429、5xx 和网络错误执行指数退避，策略由 `retry.py` 提供；探活和诊断使用 `RetryPolicy.disabled()` 禁用自动重试。基类、四协议实现、工厂、重试和追踪分别由相应子模块维护。
 
-Gemini GenerateContent 适配器支持默认关闭的空回复补正，配置见[管理员参考](../admin/configuration.md#gemini-空回复补正)。仅单候选 `MAX_TOKENS`、无正文或工具及多模态产出、存在 `continuationToken` 时，在实际成功端点发送一次补正请求。原始消息、工具声明和思考参数完整保留，输出额度翻倍并受补正上限约束；补正使用独立的总等待时限，失败转换为不可重试的协议错误。上层一次 `complete()` 仍获得一个响应，两段完整 parts 按序拼接并保留签名块边界，各 HTTP 请求上报的用量合并；HTTP Trace 分别保留两次请求。补正失败或被取消时，两段已上报的用量单独汇总落库，终态记录错误或取消。`single_dispatch` 调用跳过补正。
+Gemini GenerateContent 适配器支持默认关闭的空回复补正，配置见[管理员参考](../admin/configuration.md#gemini-空回复补正)。仅单候选 `MAX_TOKENS`、无正文及客户端工具或多模态产出（含仅产出服务端 `toolCall`/`toolResponse` 搜索块而未输出最终回复的中间状态）、存在 `continuationToken` 时，在实际成功端点发送一次补正请求。原始消息、工具声明和思考参数完整保留，输出额度翻倍并受补正上限约束；补正使用独立的总等待时限，失败转换为不可重试的协议错误。上层一次 `complete()` 仍获得一个响应，两段完整 parts 按序拼接并保留签名块边界与既有 `groundingMetadata`，各 HTTP 请求上报的用量合并；HTTP Trace 分别保留两次请求。补正失败或被取消时，两段已上报的用量单独汇总落库，终态记录错误或取消。`single_dispatch` 调用跳过补正。
 
 Gemini 在原生工具回合保存并按顺序回放含 `thoughtSignature` 的 parts。Claude 当前工具循环通过通用重建回传签名 thinking 块，已关闭且包含工具的 Loop 在归属匹配和签名有效时跨轮原生回放。Responses 使用 `store:false` 全量回放，当前工具循环回传原生 items，并检查 call_id 记账、冲突和结果配对；已关闭历史经归属校验回放 reasoning 密文，上游返回 HTTP 400 时剥离历史 reasoning 重试一次。当前工具循环内容保留。历史投影规则见第 4.2 节。
 
@@ -556,7 +556,7 @@ LLM 侧的联网搜索有两条互斥路径：
 
 - **`search_web` 工具**（默认）：客户端执行，走项目内 SearXNG，受 `auto_search` 提示词引导与每轮调用上限约束。
 - **provider 内置搜索**：`gemini` 或 `claude` provider 配置 `builtin_search = true` 后启用（均不依赖 `tool_calling_enabled`）。
-  - `gemini`：请求在 `tools` 中追加独立的 `{"google_search": {}}` 声明，检索由 provider 侧 grounding 完成；响应解析 `groundingMetadata` 提取检索词与来源，保存正文以「标题 — 域名」形式附至多 3 条来源，完整 grounding 来源另存元数据，QQ 显示层隐藏来源尾块。模型约束：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型上两者并存的请求会被 API 拒绝，需关闭该 provider 的 `builtin_search` 或全局工具调用。
+  - `gemini`：请求在 `tools` 中追加独立的 `{"google_search": {}}` 声明；当同次请求同时携带客户端 `functionDeclarations` 时，自动注入 `toolConfig.includeServerSideToolInvocations = true`（若 `extra_body` 另行配置了字典型 `toolConfig`，对其做深度合并而非浅覆盖）。服务端产生的 `toolCall` / `toolResponse` 块在当前工具循环及同 owner 跨轮原生回放中按序保留，预算首档剥离 `thought` 块时予以保留，`thoughtSignature` 在 token 预算估算中按单块上限封顶；跨上游验签失败降级重试时移除历史服务端工具块并为其客户端 `functionCall` 补齐跳过哨兵。检索由 provider 侧 grounding 完成；响应解析 `groundingMetadata` 提取检索词与来源，保存正文以「标题 — 域名」形式附至多 3 条来源，完整 grounding 来源另存元数据，QQ 显示层隐藏来源尾块。模型约束：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型上两者并存的请求会被 API 拒绝，需关闭该 provider 的 `builtin_search` 或全局工具调用。
   - `claude`：请求在 `tools` 中追加 `{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}`（可与客户端 `tools` 共存）；非流式与流式 SSE 统一从 `server_tool_use`、`web_search_tool_result` 与 `citations` / `citations_delta` 提取 `LLMWebSearchReport`（优先保留被引用来源，设置 `link_urls=True`，元数据不保存 `encrypted_content` 密文），`native_blocks` 不落盘服务端搜索块以避免历史上下文膨胀，完整流式响应仍保留在 HTTP trace 中。
   - 开启后该 provider 的会话移除 `search_web` 工具并切换提示词引导，检索成本在 provider 侧计费，本地轮次上限不覆盖。
 

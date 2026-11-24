@@ -43,6 +43,14 @@ def _native_text(turn: LoadedTurn) -> Iterator[str]:
         if isinstance(call, dict):
             yield from _strings(call.get("args"))
             yield str(call.get("name") or "")
+        server_call = block.get("toolCall")
+        if isinstance(server_call, dict):
+            yield from _strings(server_call.get("args"))
+            yield str(server_call.get("toolType") or "")
+        server_resp = block.get("toolResponse")
+        if isinstance(server_resp, dict):
+            yield from _strings(server_resp.get("response"))
+            yield str(server_resp.get("toolType") or "")
         # OpenAI Responses output items：可读载荷嵌在 message content 与
         # reasoning summary 的 parts 里（含 output_text 携带的 url_citation
         # 等 annotations 的 url/title）；function_call 的 name/arguments 在

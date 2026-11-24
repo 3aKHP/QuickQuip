@@ -211,3 +211,89 @@ def test_downgrade_thought_signatures_preserves_calls_and_drops_empty_carriers()
     second, second_changed = downgrade_thought_signatures(downgraded)
     assert second_changed == 0
     assert second is downgraded
+
+
+def test_sanitize_model_parts_preserves_server_tool_parts_and_signatures():
+    raw_parts = [
+        {
+            "toolCall": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB", "args": {"queries": ["q"]}},
+            "thoughtSignature": "sig-srv-call",
+        },
+        {
+            "toolResponse": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB"},
+            "thoughtSignature": "sig-srv-resp",
+        },
+        {"functionCall": {"id": "fc1", "name": "lookup", "args": {}}},
+    ]
+    sanitized = sanitize_model_parts(raw_parts)
+    assert sanitized == [
+        raw_parts[0],
+        raw_parts[1],
+        {
+            "functionCall": {"id": "fc1", "name": "lookup", "args": {}},
+            "thoughtSignature": SKIP_THOUGHT_SIGNATURE,
+        },
+    ]
+
+
+def test_downgrade_thought_signatures_drops_server_tool_parts_cleanly():
+    payload = {
+        "contents": [
+            {"role": "user", "parts": [{"text": "search and answer"}]},
+            {
+                "role": "model",
+                "parts": [
+                    {
+                        "toolCall": {
+                            "id": "c1",
+                            "toolType": "GOOGLE_SEARCH_WEB",
+                            "args": {"queries": ["q"]},
+                        },
+                        "thoughtSignature": "sig-srv-1",
+                    },
+                    {
+                        "toolResponse": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB"},
+                        "thoughtSignature": "sig-srv-2",
+                    },
+                    {
+                        "functionCall": {"id": "fc1", "name": "lookup", "args": {}},
+                        "thoughtSignature": "sig-fc-1",
+                    },
+                    {"text": "总结", "thoughtSignature": "sig-text-1"},
+                ],
+            },
+            {
+                "role": "user",
+                "parts": [
+                    {
+                        "functionResponse": {
+                            "id": "fc1",
+                            "name": "lookup",
+                            "response": {"content": "ok"},
+                        }
+                    }
+                ],
+            },
+            {
+                "role": "model",
+                "parts": [
+                    {"toolCall": {"id": "c2", "toolType": "GOOGLE_SEARCH_WEB"}},
+                    {"toolResponse": {"id": "c2", "toolType": "GOOGLE_SEARCH_WEB"}},
+                ],
+            },
+        ]
+    }
+    downgraded, changed = downgrade_thought_signatures(payload)
+    assert changed == 6
+    assert downgraded["contents"][1]["parts"] == [
+        {
+            "functionCall": {"id": "fc1", "name": "lookup", "args": {}},
+            "thoughtSignature": SKIP_THOUGHT_SIGNATURE,
+        },
+        {"text": "总结"},
+    ]
+    assert downgraded["contents"][3]["parts"] == [{"text": " "}]
+
+    second, second_changed = downgrade_thought_signatures(downgraded)
+    assert second_changed == 0
+    assert second is downgraded

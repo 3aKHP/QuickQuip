@@ -6,10 +6,12 @@ from quickquip.llm.token_estimate import (
     CJK_TOKEN_RATIO,
     NATIVE_ENCRYPTED_TOKENS_BY_EFFORT,
     NATIVE_MEDIA_FLAT_TOKENS,
+    NATIVE_THOUGHT_SIGNATURE_MAX_TOKENS,
     encrypted_payload_flat_tokens,
     estimate_native_block_tokens,
     estimate_native_blocks_tokens,
     estimate_tokens,
+    thought_signature_tokens,
 )
 
 
@@ -105,3 +107,57 @@ def test_encrypted_payload_flat_tokens_byte_floor():
     # 超出档位值：字符下限生效
     assert encrypted_payload_flat_tokens("low", 100_000) == 100_000 // 4
     assert encrypted_payload_flat_tokens("max", 100_000) == 100_000 // 4
+
+
+def test_thought_signature_tokens_bounded_for_large_search_signatures():
+    assert thought_signature_tokens("") == 0
+    assert thought_signature_tokens("sig-short") == estimate_tokens("sig-short")
+    assert thought_signature_tokens("A" * 38_000) == NATIVE_THOUGHT_SIGNATURE_MAX_TOKENS
+
+    for field in ("thoughtSignature", "thought_signature"):
+        direct = {
+            field: "A" * 38_000,
+            "toolResponse": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB"},
+        }
+        small = {field: "A", "toolResponse": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB"}}
+        assert estimate_native_block_tokens(direct) - estimate_native_block_tokens(small) <= (
+            NATIVE_THOUGHT_SIGNATURE_MAX_TOKENS
+        )
+        wrapped = {"type": "gemini_part", "part": direct}
+        wrapped_small = {"type": "gemini_part", "part": small}
+        assert (
+            estimate_native_block_tokens(wrapped) - estimate_native_block_tokens(wrapped_small)
+            <= NATIVE_THOUGHT_SIGNATURE_MAX_TOKENS
+        )
+
+    # 模拟 11-part 3 轮搜索响应（~103 KB Base64 thoughtSignature 分布）
+    eleven_parts = [
+        {"thought": True, "text": "分析检索结果。"},
+        {
+            "thoughtSignature": "A" * 1_200,
+            "toolCall": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB", "args": {"queries": ["q1"]}},
+        },
+        {
+            "thoughtSignature": "B" * 28_000,
+            "toolResponse": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB"},
+        },
+        {
+            "thoughtSignature": "C" * 1_200,
+            "toolCall": {"id": "c2", "toolType": "GOOGLE_SEARCH_WEB", "args": {"queries": ["q2"]}},
+        },
+        {
+            "thoughtSignature": "D" * 35_000,
+            "toolResponse": {"id": "c2", "toolType": "GOOGLE_SEARCH_WEB"},
+        },
+        {
+            "thoughtSignature": "E" * 1_200,
+            "toolCall": {"id": "c3", "toolType": "GOOGLE_SEARCH_WEB", "args": {"queries": ["q3"]}},
+        },
+        {
+            "thoughtSignature": "F" * 35_000,
+            "toolResponse": {"id": "c3", "toolType": "GOOGLE_SEARCH_WEB"},
+        },
+        {"text": "综合答案正文。"},
+        {"text": "", "thoughtSignature": "G" * 1_400},
+    ]
+    assert estimate_native_blocks_tokens(eleven_parts) < 3000
