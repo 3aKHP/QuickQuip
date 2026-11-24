@@ -171,6 +171,7 @@ async def test_builtin_search_gemini_flow(tmp_path, monkeypatch, patch_provider_
     assert {"google_search": {}} in tool_entries
     declarations = tool_entries[0]["functionDeclarations"]
     assert "search_web" not in [item["name"] for item in declarations]
+    assert payload["toolConfig"] == {"includeServerSideToolInvocations": True}
     # 2. 提示词引导切换为 grounding 块，SearXNG 引导被压制
     # 3. 显示隐藏来源尾块，完整 grounding 元数据仍可提取。
     assert result["reply"] == "QuickQuip 是一个 QQ 群聊机器人项目。"
@@ -207,6 +208,7 @@ async def test_builtin_search_works_with_tool_calling_disabled(
 
     client = stub_holder["client"]
     assert client.last_payload["tools"] == [{"google_search": {}}]
+    assert "toolConfig" not in client.last_payload
     assert result["reply"] == "QuickQuip 是一个 QQ 群聊机器人项目。"
     turn = service.store.load_closed_loops("1001")[0].turns[-1]
     assert "QuickQuip README" in turn.text

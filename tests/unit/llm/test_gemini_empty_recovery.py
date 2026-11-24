@@ -274,3 +274,50 @@ async def test_correction_has_a_total_timeout_without_restarting(transport, mete
     assert len(sent) == 2
     assert [state for state, _ in metering] == ["ok", "error"]
     assert metering[0][1].thinking_tokens == 15
+
+
+@pytest.mark.parametrize("stream", [False, True])
+async def test_recovery_continues_after_server_side_search_when_max_tokens_hits(
+    transport, metering, stream,
+):
+    install, sent = transport
+    search_parts = [
+        {"text": "thinking", "thought": True, "thoughtSignature": "s1"},
+        {
+            "toolCall": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB", "args": {"queries": ["q"]}},
+            "thoughtSignature": "s2",
+        },
+        {
+            "toolResponse": {"id": "c1", "toolType": "GOOGLE_SEARCH_WEB"},
+            "thoughtSignature": "s3",
+        },
+    ]
+    grounding = {
+        "webSearchQueries": ["q"],
+        "groundingChunks": [{"web": {"uri": "https://example.test/ref", "title": "Ref"}}],
+    }
+    first = {
+        "candidates": [
+            {
+                "content": {"role": "model", "parts": search_parts},
+                "finishReason": "MAX_TOKENS",
+                "continuationToken": "tok-search",
+                "groundingMetadata": grounding,
+            }
+        ],
+        "usageMetadata": {"promptTokenCount": 30, "candidatesTokenCount": 5},
+    }
+    second = {
+        "candidates": [{"finishReason": "STOP", "content": {"parts": [{"text": "最终结果"}]}}],
+        "usageMetadata": {"promptTokenCount": 40, "candidatesTokenCount": 6},
+    }
+    client = install([first, second], stream=stream)
+    response = await client.complete(_request())
+
+    assert len(sent) == 2
+    assert sent[1][1]["continuationToken"] == "tok-search"
+    assert response.text == "最终结果"
+    assert response.native_blocks == [*search_parts, {"text": "最终结果"}]
+    assert response.web_search is not None
+    assert response.web_search.queries == ["q"]
+    assert response.web_search.sources[0].url == "https://example.test/ref"

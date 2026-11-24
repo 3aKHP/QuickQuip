@@ -7,6 +7,10 @@ from typing import Any
 from quickquip.llm.config import ProviderConfig
 from quickquip.llm.provider.base import LLMProviderError, LLMResponse
 
+_RECOVERY_INTERMEDIATE_PART_KEYS = frozenset(
+    {"text", "thought", "thoughtSignature", "toolCall", "toolResponse"}
+)
+
 
 def empty_response_recovery_payload(
     config: ProviderConfig,
@@ -39,7 +43,7 @@ def empty_response_recovery_payload(
     if not isinstance(content, dict) or not isinstance(content.get("parts", []), list):
         return None
     for part in content.get("parts", []):
-        if not isinstance(part, dict) or set(part) - {"text", "thought", "thoughtSignature"}:
+        if not isinstance(part, dict) or set(part) - _RECOVERY_INTERMEDIATE_PART_KEYS:
             return None
     generation = payload.get("generationConfig")
     limit = generation.get("maxOutputTokens") if isinstance(generation, dict) else None
@@ -57,7 +61,8 @@ def empty_response_recovery_payload(
 def merge_recovery_response(initial: dict[str, Any], recovered: dict[str, Any]) -> dict[str, Any]:
     """Concatenate complete parts without coalescing signature-bearing boundaries."""
     merged = deepcopy(recovered)
-    first_content = initial["candidates"][0].get("content") or {}
+    first_candidate = initial["candidates"][0]
+    first_content = first_candidate.get("content") or {}
     candidate = merged["candidates"][0]
     content = candidate.get("content") or {}
     if not isinstance(content, dict) or not isinstance(content.get("parts", []), list):
@@ -65,6 +70,16 @@ def merge_recovery_response(initial: dict[str, Any], recovered: dict[str, Any]) 
     content["parts"] = deepcopy(first_content.get("parts", [])) + content.get("parts", [])
     content.setdefault("role", first_content.get("role", "model"))
     candidate["content"] = content
+    first_grounding = first_candidate.get("groundingMetadata")
+    if (
+        isinstance(first_grounding, dict)
+        and first_grounding
+        and not (
+            isinstance(candidate.get("groundingMetadata"), dict)
+            and candidate["groundingMetadata"]
+        )
+    ):
+        candidate["groundingMetadata"] = deepcopy(first_grounding)
     return merged
 
 

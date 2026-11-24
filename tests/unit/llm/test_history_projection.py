@@ -463,6 +463,122 @@ def test_gemini_owner_mismatch_uses_structured_without_signed_parts():
     assert assistant.tool_calls[0].name == "get_identity"
 
 
+async def test_gemini_same_owner_replays_server_tool_parts_end_to_end():
+    from quickquip.llm.config import ProviderConfig
+    from quickquip.llm.provider.gemini import GeminiProviderClient
+    from quickquip.llm.provider.base import LLMRequest
+    from quickquip.llm.tools import LLMConversationMessage, LLMToolSpec
+    from tests.fixtures.client_fingerprints import protocol_only_config
+
+    gemini_owner = replace(OWNER, protocol="gemini")
+    parts = [
+        {"thought": True, "text": "需要先搜索。"},
+        {
+            "thoughtSignature": "sig-tc",
+            "toolCall": {
+                "id": "call_srv_1",
+                "toolType": "GOOGLE_SEARCH_WEB",
+                "args": {"queries": ["quickquip"]},
+            },
+        },
+        {
+            "thoughtSignature": "sig-tr",
+            "toolResponse": {
+                "id": "call_srv_1",
+                "toolType": "GOOGLE_SEARCH_WEB",
+            },
+        },
+        {
+            "functionCall": {
+                "id": "call_exec_0",
+                "name": "get_identity",
+                "args": {"query": "镜子"},
+            },
+            "thoughtSignature": "sig-fc",
+        },
+    ]
+    loop = _loop(
+        "loop_srv",
+        (
+            _turn(
+                "turn_0",
+                tools=(_tool_exec("exec_0", provider_call_id="call_exec_0"),),
+                native_state=_native_state(gemini_owner, parts),
+                owner=_owner_dict(gemini_owner),
+            ),
+        ),
+    )
+    result = project_loops([loop], target=gemini_owner, protocol="gemini")
+    assert result.decisions[0].path == PATH_NATIVE
+    assert result.decisions[0].reason is None
+    assistant = [m for m in result.messages if m.role == "assistant"][0]
+    assert assistant.native_content == parts
+
+    cfg = protocol_only_config(
+        ProviderConfig(
+            id="p1",
+            protocol="gemini",
+            base_url="https://example.test/v1beta",
+            api_key_env="GEMINI_API_KEY",
+            default_model="gemini-3.7-flash",
+            models=["gemini-3.7-flash"],
+            builtin_search=True,
+        )
+    )
+    client = GeminiProviderClient(cfg)
+    client._get_api_key = lambda: "test-key"  # type: ignore[method-assign]
+    req = LLMRequest(
+        model="gemini-3.7-flash",
+        system_prompt="系统提示",
+        messages=[*result.messages, LLMConversationMessage(role="user", content="继续")],
+        temperature=0.2,
+        tools=[
+            LLMToolSpec(
+                name="get_identity",
+                description="身份查询",
+                input_schema={"type": "object", "properties": {"query": {"type": "string"}}},
+            )
+        ],
+        allow_tool_calls=True,
+        builtin_search=True,
+        max_output_tokens=128,
+    )
+    _url, _headers, payload = await client._build_request_parts(req)
+    assert payload["contents"][1]["parts"] == parts
+    assert payload["contents"][2]["parts"][0]["functionResponse"]["id"] == "call_exec_0"
+    assert payload["toolConfig"] == {"includeServerSideToolInvocations": True}
+
+
+@pytest.mark.parametrize(
+    "bad_part",
+    [
+        {"toolCall": "not-a-dict"},
+        {"toolCall": {}},
+        {"toolCall": {"toolType": "   "}},
+        {"toolCall": {"id": " ", "toolType": "GOOGLE_SEARCH_WEB"}},
+        {"toolResponse": {}},
+        {"toolResponse": {"id": "call_srv_1", "toolType": ""}},
+        {"toolResponse": {"toolType": 123}},
+    ],
+)
+def test_gemini_invalid_server_tool_part_demotes_to_archive(bad_part):
+    gemini_owner = replace(OWNER, protocol="gemini")
+    loop = _loop(
+        "loop_bad_srv",
+        (
+            _turn(
+                "turn_0",
+                tools=(_tool_exec("exec_0"),),
+                native_state=_native_state(gemini_owner, [bad_part]),
+                owner=_owner_dict(gemini_owner),
+            ),
+        ),
+    )
+    result = project_loops([loop], target=gemini_owner, protocol="gemini")
+    assert result.decisions[0].path == PATH_ARCHIVE
+    assert result.decisions[0].reason == "native_structure_invalid"
+
+
 def test_openai_owner_match_keeps_reasoning_cross_owner_drops():
     openai_owner = replace(OWNER, protocol="openai")
     blocks = [{"type": "reasoning", "reasoning_content": "解题思路。"}]

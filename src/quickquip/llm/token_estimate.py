@@ -35,10 +35,18 @@ NATIVE_ENCRYPTED_TOKENS_BY_EFFORT = {
     "max": 8192,
     "ultra": 8192,
 }
+# Gemini 原生块内 thoughtSignature 的单块封顶估算：实测启用服务端搜索
+# （includeServerSideToolInvocations）的 3 轮搜索 11-part 响应中，全部
+# thoughtSignature 累计约 103 KB Base64（toolResponse 单块 25–38 KB），
+# 原样回放 Turn 2 时上游实际 promptTokenCount 仅增约 888 tokens；按普通
+# ASCII 字符全量折算会高估 ~30×，击穿默认重放预算。小签名按字符估，大
+# 签名按单块上限封顶，保持 ~2–3× 保守余量而不触发误精简。
+NATIVE_THOUGHT_SIGNATURE_MAX_TOKENS = 256
 # 每个原生块的结构开销（块类型、id、字段名的 wire 折算下界）。
 _NATIVE_BLOCK_STRUCTURE_TOKENS = 8
 # 按字段名固定档计量的载荷（媒体 base64），避免全量字符折算；密文
-# encrypted_content 走 encrypted_payload_flat_tokens 的 per-effort 口径。
+# encrypted_content 走 encrypted_payload_flat_tokens 的 per-effort 口径，
+# thoughtSignature / thought_signature 走 thought_signature_tokens 上限口径。
 _FLAT_FIELD_TOKENS = {
     "inlineData": NATIVE_MEDIA_FLAT_TOKENS,
     "fileData": NATIVE_MEDIA_FLAT_TOKENS,
@@ -54,6 +62,13 @@ def encrypted_payload_flat_tokens(effort: str | None, payload_chars: int) -> int
         (effort or "").strip().lower(), NATIVE_ENCRYPTED_TOKENS_DEFAULT
     )
     return max(tier, payload_chars // 4)
+
+
+def thought_signature_tokens(signature: str) -> int:
+    """单条 Gemini thoughtSignature 的有界估算（小签名按字符估，大签名封顶）。"""
+    if not signature:
+        return 0
+    return min(NATIVE_THOUGHT_SIGNATURE_MAX_TOKENS, estimate_tokens(signature))
 
 
 def estimate_tokens(text: str) -> int:
@@ -84,7 +99,9 @@ def estimate_native_block_tokens(block: Any, *, effort: str | None = None) -> in
     媒体载荷（inlineData/fileData）按固定档，避免 base64 全量高估；
     密文载荷（encrypted_content）按 effort 分档 + 字节下限（effort 为
     生成该密文的思考档位：切档不断回放，调用方逐消息传密文来源档，
-    未标注的来源回落当前请求档）。
+    未标注的来源回落当前请求档）；
+    Gemini 签名（thoughtSignature/thought_signature）按单块上限封顶，
+    避免服务端搜索载体 Base64 体积触发数十倍虚占。
     """
     if not isinstance(block, dict):
         return estimate_tokens(str(block)) + _NATIVE_BLOCK_STRUCTURE_TOKENS
@@ -93,6 +110,13 @@ def estimate_native_block_tokens(block: Any, *, effort: str | None = None) -> in
         if key == "encrypted_content":
             chars = len(value) if isinstance(value, str) else 0
             total += encrypted_payload_flat_tokens(effort, chars)
+            continue
+        if key in ("thoughtSignature", "thought_signature"):
+            total += (
+                thought_signature_tokens(value)
+                if isinstance(value, str)
+                else _estimate_block_value(value, effort)
+            )
             continue
         if key in _FLAT_FIELD_TOKENS:
             total += _FLAT_FIELD_TOKENS[key]

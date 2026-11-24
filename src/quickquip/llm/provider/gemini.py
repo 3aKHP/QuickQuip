@@ -88,6 +88,32 @@ def _extract_inline_images(
     return images, remaining
 
 
+def _merge_extra_body(payload: dict[str, Any], extra_body: dict[str, Any]) -> None:
+    """Merge extra_body overrides into payload without mutating extra_body.
+
+    When the request auto-injected ``toolConfig`` (for mixed client tools and
+    ``google_search``), a dict-valued ``toolConfig`` / ``tool_config`` override
+    merges into ``payload["toolConfig"]`` instead of shallow-replacing it.
+    """
+    for key, value in extra_body.items():
+        if (
+            key in ("toolConfig", "tool_config")
+            and isinstance(value, dict)
+            and isinstance(payload.get("toolConfig"), dict)
+        ):
+            merged = deepcopy(payload["toolConfig"])
+            user_tool_config = deepcopy(value)
+            if (
+                "include_server_side_tool_invocations" in user_tool_config
+                and "includeServerSideToolInvocations" not in user_tool_config
+            ):
+                merged.pop("includeServerSideToolInvocations", None)
+            merged.update(user_tool_config)
+            payload["toolConfig"] = merged
+            continue
+        payload[key] = deepcopy(value)
+
+
 class GeminiProviderClient(BaseProviderClient):
     def _serialize_user_parts(
         self, message: LLMConversationMessage, image_inputs: list[LLMImageInput]
@@ -273,7 +299,8 @@ class GeminiProviderClient(BaseProviderClient):
                 payload["generationConfig"]["thinkingConfig"] = {
                     "thinkingBudget": directive.budget_tokens,
                 }
-        if request.allow_tool_calls and request.tools:
+        has_client_tools = bool(request.allow_tool_calls and request.tools)
+        if has_client_tools:
             payload["tools"] = [
                 {
                     "functionDeclarations": [
@@ -296,9 +323,15 @@ class GeminiProviderClient(BaseProviderClient):
             # google_search 是服务端执行的工具声明，与客户端 functionDeclarations
             # 并列成独立 tools 条目；不依赖 allow_tool_calls / 客户端工具列表。
             payload.setdefault("tools", []).append({"google_search": {}})
+        if has_client_tools and request.builtin_search:
+            # Google 原生校验要求 functionDeclarations 与 google_search 混用时
+            # 显式开启 toolConfig.includeServerSideToolInvocations。
+            payload["toolConfig"] = {
+                "includeServerSideToolInvocations": True,
+            }
         headers = self._assemble_headers(request, headers)
         if self.config.extra_body:
-            payload.update(self.config.extra_body)
+            _merge_extra_body(payload, self.config.extra_body)
         return url, headers, self._project_body(request, payload)
 
     @staticmethod
@@ -318,7 +351,10 @@ class GeminiProviderClient(BaseProviderClient):
         text_parts: list[str] = []
         tool_calls: list[LLMToolCall] = []
         replay_required = any(
-            item.get("thought") is True or isinstance(item.get("thoughtSignature"), str)
+            item.get("thought") is True
+            or isinstance(item.get("thoughtSignature"), str)
+            or isinstance(item.get("toolCall"), dict)
+            or isinstance(item.get("toolResponse"), dict)
             for item in normalized_parts
         )
         thinking_blocks: list[dict[str, Any]] = []
