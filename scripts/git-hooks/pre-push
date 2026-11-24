@@ -14,6 +14,13 @@ if [ -n "$(git config core.hooksPath || true)" ]; then
     exit 1
 fi
 
+# Clear git hook env vars (e.g. GIT_DIR in linked worktrees) so child
+# checks and pytest git fixtures never mutate the repository being pushed.
+while IFS= read -r git_env_var; do
+    git_env_var=${git_env_var%$'\r'}
+    [ -n "$git_env_var" ] && unset "$git_env_var"
+done < <(git rev-parse --local-env-vars)
+
 command -v uv >/dev/null 2>&1 || { echo "[pre-push] uv 未安装（见 CONTRIBUTING.md「环境搭建」）"; exit 1; }
 command -v pnpm >/dev/null 2>&1 || { echo "[pre-push] pnpm 未安装（见 CONTRIBUTING.md「环境搭建」）"; exit 1; }
 
