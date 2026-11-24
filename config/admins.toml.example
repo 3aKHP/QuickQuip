@@ -1,6 +1,0 @@
-# 全局管理员注册表：按 QQ 号授权，跨群生效。
-# 复制为 admins.toml（已 gitignore）并填入真实 QQ 号，改动热重载（约 5s 内生效）。
-# 已登记账号可以使用群管理命令。权限与维护方式见 docs/admin/global-admins.md。
-global_admins = [
-    # "1000000000",
-]
