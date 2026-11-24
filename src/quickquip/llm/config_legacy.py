@@ -256,6 +256,7 @@ def _parse_single_provider(
         proxy=str(entry.get("proxy", "")).strip(),
         prompt_caching=as_bool(entry.get("prompt_caching"), default=False),
         cache_ttl=str(entry.get("cache_ttl", "")).strip(),
+        persona_few_shot=str(entry.get("persona_few_shot", "auto")).strip().lower() or "auto",
         auth_method=str(entry.get("auth_method", "api_key")).strip().lower() or "api_key",
         builtin_search=as_bool(entry.get("builtin_search"), default=False),
         gemini_empty_response_recovery=as_bool(

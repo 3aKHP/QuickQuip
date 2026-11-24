@@ -19,3 +19,14 @@ shared_style_prompt = """
 - 除非用户明确要求，否则不要长篇大论或长列表。
 - 需要联网时先搜关键信息，再压缩成符合当前人格口吻的群聊回复。
 """
+
+# 可选作用域覆盖键（针对仅限群聊 scope = ["group"] 或仅限私聊 scope = ["private"] 的人格）：
+# 当某个文件声明了单作用域时，会优先使用对应的覆盖键，未设置则回退到上面的默认共享键。
+# shared_group_system_prompt = """
+# """
+# shared_private_system_prompt = """
+# """
+# shared_group_style_prompt = """
+# """
+# shared_private_style_prompt = """
+# """

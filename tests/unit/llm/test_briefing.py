@@ -201,3 +201,40 @@ async def test_daily_briefing_usage_scope_carries_persona(monkeypatch):
     assert kwargs["group_id"] == "1001"
     assert kwargs["persona_id"] == "nightwatch"
     assert kwargs["run_id"]  # 每次简报生成携带非空 run_id
+
+
+@pytest.mark.asyncio
+async def test_daily_briefing_renders_v3_persona_portrait_and_voice(monkeypatch):
+    stub = _StubClient(LLMResponse(text="早安播报", model="m1", finish_reason="stop"))
+    monkeypatch.setattr("quickquip.llm.briefing.build_provider_client", lambda p: stub)
+
+    v3_persona = PersonaConfig(
+        id="v3",
+        display_name="三版播报员",
+        system_prompt="",
+        style_prompt="",
+        shared_style_rules="不堆长列表。",
+        extras={
+            "schema_version": 3,
+            "identity": {"name": "三版播报员", "role": "早班咖啡师"},
+            "portrait": {"appearance": "褐色麻花辫", "attire": "深绿围裙"},
+            "mind": {"core_drive": "让大家精神醒过来"},
+            "voice": {"register": "明快利落口吻"},
+            "appearance": {"variants": {"hidden": {"description": "BRIEFING_HIDDEN_ARCHIVE"}}},
+        },
+    )
+    await generate_daily_briefing(
+        context=_context(),
+        persona=v3_persona,
+        group_id="1001",
+        briefing_config=_llm_config().daily_briefing,
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+    )
+    sys_prompt = stub.requests[0].system_prompt
+    assert "褐色麻花辫" in sys_prompt
+    assert "深绿围裙" in sys_prompt
+    assert "明快利落口吻" in sys_prompt
+    assert "不堆长列表。" in sys_prompt
+    assert "BRIEFING_HIDDEN_ARCHIVE" not in sys_prompt

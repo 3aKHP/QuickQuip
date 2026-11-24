@@ -82,7 +82,7 @@ export interface EpochEnvelopeSnapshot {
   scope_key: string
   provider_id: string
   model: string
-  /** 分段分解（键序 time/festival/participants/mentions/memories/vocab/tools） */
+  /** 分段分解（键序 time/festival/participants/mentions/memories/vocab/lore/tools） */
   parts: Record<string, number>
   total_tokens: number
   recorded_at: number
@@ -99,6 +99,7 @@ export const ENVELOPE_SEGMENTS: ReadonlyArray<{ key: string; name: string }> = [
   { key: 'mentions', name: '艾特档案' },
   { key: 'memories', name: '持久记忆' },
   { key: 'vocab', name: '词表命中' },
+  { key: 'lore', name: '角色百科' },
   { key: 'tools', name: '工具公告' },
 ]
 

@@ -478,3 +478,63 @@ async def test_daily_summary_uses_compact_serializer(monkeypatch):
     assert "【09-08 周二】" in user_content
     assert "[08:12] 张三：早 / 都起了没" in user_content
     assert "QuickQuip(bot)：我来了" in user_content
+
+
+@pytest.mark.asyncio
+async def test_period_report_and_daily_summary_render_v3_persona(monkeypatch):
+    from datetime import datetime
+    from quickquip.llm.config import DailySummaryConfig
+    from quickquip.llm.summarize import generate_daily_summary
+
+    stub = _StubClient(LLMResponse(text="总结正文", model="m1", finish_reason="stop"))
+    monkeypatch.setattr("quickquip.llm.summarize.build_provider_client", lambda p: stub)
+
+    v3_persona = PersonaConfig(
+        id="v3",
+        display_name="三版记录员",
+        system_prompt="",
+        style_prompt="",
+        extras={
+            "schema_version": 3,
+            "identity": {"name": "三版记录员", "role": "档案整理员"},
+            "portrait": {"appearance": "银白长发", "attire": "深蓝风衣"},
+            "mind": {"core_drive": "认真记下真实发生过的事"},
+            "voice": {"register": "清静直白短句"},
+            "appearance": {"variants": {"hidden": {"description": "SUMMARY_HIDDEN_ARCHIVE"}}},
+        },
+    )
+    base = datetime(2026, 9, 8, 8, 12, 0, tzinfo=LOCAL_TZ).timestamp()
+    msgs = [{"ts": base, "sender": "张三", "text": "早", "user_id": "1001"}]
+
+    await generate_daily_summary(
+        msgs,
+        v3_persona,
+        "10001",
+        date_label="2026-09-08",
+        name_table={},
+        summary_config=DailySummaryConfig(),
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+        local_tz=LOCAL_TZ,
+    )
+    await generate_period_report(
+        _sample_messages(),
+        v3_persona,
+        "10001",
+        period_label="2026 年第 24 周",
+        period_kind="weekly",
+        name_table={},
+        length_hint=2000,
+        model_cascade=["a/m1"],
+        llm_config=_llm_config(),
+        default_provider_id="a",
+        default_model="m1",
+        local_tz=LOCAL_TZ,
+    )
+
+    for req in stub.requests:
+        assert "银白长发" in req.system_prompt
+        assert "深蓝风衣" in req.system_prompt
+        assert "清静直白短句" in req.system_prompt
+        assert "SUMMARY_HIDDEN_ARCHIVE" not in req.system_prompt

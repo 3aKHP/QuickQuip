@@ -343,6 +343,18 @@
                               "null"
                             ]
                           },
+                          "persona_few_shot": {
+                            "enum": [
+                              "auto",
+                              "on",
+                              "off",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "prompt_caching": {
                             "type": [
                               "boolean",
@@ -564,6 +576,18 @@
                       "minimum": 1,
                       "type": [
                         "integer",
+                        "null"
+                      ]
+                    },
+                    "persona_few_shot": {
+                      "enum": [
+                        "auto",
+                        "on",
+                        "off",
+                        null
+                      ],
+                      "type": [
+                        "string",
                         "null"
                       ]
                     },
@@ -1804,6 +1828,18 @@
                             "null"
                           ]
                         },
+                        "persona_few_shot": {
+                          "enum": [
+                            "auto",
+                            "on",
+                            "off",
+                            null
+                          ],
+                          "type": [
+                            "string",
+                            "null"
+                          ]
+                        },
                         "prompt_caching": {
                           "type": [
                             "boolean",
@@ -2025,6 +2061,18 @@
                     "minimum": 1,
                     "type": [
                       "integer",
+                      "null"
+                    ]
+                  },
+                  "persona_few_shot": {
+                    "enum": [
+                      "auto",
+                      "on",
+                      "off",
+                      null
+                    ],
+                    "type": [
+                      "string",
                       "null"
                     ]
                   },
@@ -2352,6 +2400,18 @@
                               "null"
                             ]
                           },
+                          "persona_few_shot": {
+                            "enum": [
+                              "auto",
+                              "on",
+                              "off",
+                              null
+                            ],
+                            "type": [
+                              "string",
+                              "null"
+                            ]
+                          },
                           "prompt_caching": {
                             "type": [
                               "boolean",
@@ -2573,6 +2633,18 @@
                       "minimum": 1,
                       "type": [
                         "integer",
+                        "null"
+                      ]
+                    },
+                    "persona_few_shot": {
+                      "enum": [
+                        "auto",
+                        "on",
+                        "off",
+                        null
+                      ],
+                      "type": [
+                        "string",
                         "null"
                       ]
                     },

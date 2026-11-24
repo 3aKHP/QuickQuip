@@ -103,6 +103,7 @@ defineExpose({ total })
 .seg-mentions { background: var(--qq-env-mentions); }
 .seg-memories { background: var(--qq-env-memories); }
 .seg-vocab { background: var(--qq-env-vocab); }
+.seg-lore { background: var(--qq-env-lore); }
 .seg-tools { background: var(--qq-env-tools); }
 .envseg-enter-active { transition: opacity 0.5s ease, transform 0.5s ease; }
 .envseg-enter-from { opacity: 0; transform: translateY(6px); }

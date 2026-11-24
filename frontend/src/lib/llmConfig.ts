@@ -68,6 +68,7 @@ export const PARAM_LABELS: Record<string, FieldLabel> = {
   max_output_tokens: { label: '最大输出 token', hint: '单次回复允许生成的 token 上限（推理模型包含思考 token，默认 16384）。' },
   style_profile: { label: '风格档案', hint: '引用「回复风格」中定义的风格名。' },
   style_overrides: { label: '风格附加文本', hint: '拼接在风格档案之后的补充指令。' },
+  persona_few_shot: { label: '人格少样本示例', hint: '控制 Persona v3 的多轮语感示例注入：auto 仅对非 Gemini 协议开启，on 强制开启，off 关闭。' },
   reasoning_effort: { label: '思考档位', hint: '留空表示不发送思考参数。' },
   timeout_seconds: { label: '请求超时', unit: '秒', hint: '单次 API 请求的超时时间（默认 180 秒）。' },
   stream_enabled: { label: '流式输出', hint: '开启后边生成边返回。' },
@@ -98,7 +99,7 @@ export const PARAM_GROUP_LABELS: Record<string, string> = {
 }
 
 export const PARAM_GROUPS: Record<string, string[]> = {
-  generation: ['temperature', 'max_output_tokens', 'style_profile', 'style_overrides', 'reasoning_effort', 'prompt_caching', 'cache_ttl', 'builtin_search', 'gemini_empty_response_recovery', 'gemini_empty_response_recovery_max_output_tokens', 'responses_profile'],
+  generation: ['temperature', 'max_output_tokens', 'style_profile', 'style_overrides', 'persona_few_shot', 'reasoning_effort', 'prompt_caching', 'cache_ttl', 'builtin_search', 'gemini_empty_response_recovery', 'gemini_empty_response_recovery_max_output_tokens', 'responses_profile'],
   connection: ['timeout_seconds', 'stream_enabled', 'user_agent', 'extra_body'],
   retry: ['retry_max_attempts', 'retry_base_delay', 'retry_jitter'],
   epoch: ['epoch_context_tokens', 'epoch_cold_idle_seconds', 'epoch_cold_target_tokens', 'epoch_cold_trigger_tokens', 'epoch_hot_target_tokens', 'epoch_cap_tokens'],

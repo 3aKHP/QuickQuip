@@ -9,6 +9,7 @@ from dataclasses import replace
 from quickquip.chat.daily_briefing import DailyBriefingContext
 from quickquip.llm.config import DailyBriefingConfig, LLMConfig, PersonaConfig
 from quickquip.llm.config_document import resolve_model_provider
+from quickquip.llm.persona_compiler import render_persona_for_task
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
 from quickquip.llm.provider import strip_leading_reasoning_content
 from quickquip.llm.response_acceptance import is_response_accepted
@@ -32,10 +33,9 @@ def _build_system_prompt(
     briefing_config: DailyBriefingConfig,
 ) -> str:
     parts: list[str] = []
-    if persona.system_prompt:
-        parts.append(persona.system_prompt)
-    if persona.style_prompt:
-        parts.append(persona.style_prompt)
+    rendered_persona = render_persona_for_task(persona, chat_type="group")
+    if rendered_persona:
+        parts.append(rendered_persona)
 
     parts.append(
         _PERIOD_INSTRUCTIONS[context.period]
