@@ -34,7 +34,9 @@ DOCUMENT_ONLY_SETTINGS = {
 # Adapter recovery policy is owned by the configuration document; it has no
 # relational lookup requirement. Keep the existing schema-4 parameter columns.
 DOCUMENT_ONLY_PARAMETERS = frozenset({
-    "gemini_empty_response_recovery", "gemini_empty_response_recovery_max_output_tokens",
+    "gemini_empty_response_recovery",
+    "gemini_empty_response_recovery_max_output_tokens",
+    "persona_few_shot",
 })
 
 _SCHEMA = """

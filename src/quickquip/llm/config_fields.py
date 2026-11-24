@@ -112,6 +112,7 @@ ENUMS = {
     "reasoning_effort": ("", *c.REASONING_EFFORT_CHOICES),
     "responses_profile": tuple(sorted(c.RESPONSES_PROFILE_IDS)),
     "cache_ttl": ("", "5m", "1h"),
+    "persona_few_shot": ("auto", "on", "off"),
     "tools.enabled_mode": ("append", "replace"),
     "tools.discovery_mode": ("off", "on", "auto"),
     "mcp.transport": ("stdio", "http", "sse", "docker"),

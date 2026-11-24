@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from quickquip.common.sensitive_filter import (
     DEFAULT_OUTPUT_FALLBACK,
@@ -18,14 +18,16 @@ from quickquip.common.sensitive_filter import (
     log_hits as _log_sensitive_hits,
 )
 from quickquip.llm.image_preprocessor import ImageDescription
+from quickquip.llm.persona_compiler import match_persona_lore
 from quickquip.llm.reply_presentation import PreparedReply, plain_reply, prepare_reply
 from quickquip.llm.reply_types import ChatTurnRequest, ReplyResult
 from quickquip.llm.provider import LLMRequest
 from quickquip.llm.session import SessionIdentity
 
 if TYPE_CHECKING:
-    from quickquip.llm.config import ProviderConfig
+    from quickquip.llm.config import PersonaConfig, ProviderConfig
     from quickquip.llm.epoch import EpochKey, EpochParams
+    from quickquip.llm.persona_compiler import PersonaV3Compiled
     from quickquip.llm.provider import LLMResponse
     from quickquip.llm.settings import ResolvedGroupSettings
     from quickquip.llm.tools import LLMConversationMessage, LLMToolSpec
@@ -225,7 +227,7 @@ class TurnRequestAssembler:
         dict[str, list["LLMConversationMessage"]],
     ]]
     collect_mention_profiles: Callable[..., list[dict[str, str]]]
-    # 返回六段分解（键序即拼接序）；join 由本类统一执行，字节口径单点。
+    # 返回分段分解（键序即拼接序）；join 由本类统一执行，字节口径单点。
     build_turn_envelope: Callable[..., dict[str, str]]
     build_messages: Callable[..., list["LLMConversationMessage"]]
 
@@ -283,6 +285,9 @@ class TurnRequestAssembler:
     replay_budget: int | None = None
     # #72：本请求的群历史双开关裁决结果（信封公告按它过滤延迟名单）。
     history_enabled: bool = False
+    persona: "PersonaConfig | None" = None
+    compiled_persona: "PersonaV3Compiled | None" = None
+    dialogue_examples: tuple[Any, ...] = ()
 
     def assemble(self) -> LLMRequest:
         """首轮和预算重建复用已消费的补丁，按最新历史重新去重。"""
@@ -316,45 +321,65 @@ class TurnRequestAssembler:
             current_user_id=str(self.user_id),
             quoted_user_id=self.quoted_user_id,
         )
+        lore_scan_parts = [self.analysis_prompt or self.trimmed_prompt, self.quoted_prompt]
+        if self.scene_patch:
+            lore_scan_parts.extend(str(item.get("text", "")) for item in self.scene_patch[-2:])
+        matched_lore = (
+            match_persona_lore(
+                self.persona,
+                "\n".join(part for part in lore_scan_parts if part),
+                compiled=self.compiled_persona,
+            )
+            if self.persona is not None
+            else []
+        )
+        envelope_kwargs: dict[str, Any] = {
+            "participants": self.participants,
+            "mention_profiles": mention_profiles,
+            "provider_id": self.provider.id,
+            "history_enabled": self.history_enabled,
+        }
+        if matched_lore:
+            envelope_kwargs["persona_lore"] = matched_lore
         self.envelope_parts = self.build_turn_envelope(
             self.chat_id,
             self.chat_type,
             self.analysis_prompt or self.trimmed_prompt,
             self.memories,
-            participants=self.participants,
-            mention_profiles=mention_profiles,
-            provider_id=self.provider.id,
-            history_enabled=self.history_enabled,
+            **envelope_kwargs,
         )
         self.envelope_parts['participants'] = (
             self.envelope_parts.get('participants', '')
             + f"\n当前发言者 QQ={self.user_id}，角色={self.sender_role}，"
             f"消息 ID={self.message_id or '未知'}")
         self.turn_envelope = "\n".join(self.envelope_parts.values())
-        self.messages = self.build_messages(
-            prompt=self.trimmed_prompt,
-            image_urls=self.effective_image_urls,
-            history=self.history,
-            recent_messages=self.scene_patch,
-            recent_images_messages=self.recent_images_source,
-            chat_type=self.chat_type,
-            group_id=str(self.chat_id),
-            current_sender_name=self.sender_name,
-            current_user_id=str(self.user_id),
-            current_sender_role=self.sender_role,
-            current_message_id=self.message_id or "",
-            quoted_text=self.quoted_prompt,
-            quoted_sender_name=self.quoted_sender_name,
-            quoted_user_id=self.quoted_user_id,
-            quoted_image_urls=self.request_quoted_image_urls,
-            quoted_is_bot_self=self.quoted_is_bot_self,
-            forward_text=self.forward_text,
-            forward_image_urls=self.request_forward_image_urls,
-            image_descriptions=self.image_descriptions or None,
-            include_recent_images=self.include_recent_images and not self.is_non_vision,
-            turn_envelope=self.turn_envelope,
-            projected_history_segments=self.projected_segments,
-        )
+        message_kwargs: dict[str, Any] = {
+            "prompt": self.trimmed_prompt,
+            "image_urls": self.effective_image_urls,
+            "history": self.history,
+            "recent_messages": self.scene_patch,
+            "recent_images_messages": self.recent_images_source,
+            "chat_type": self.chat_type,
+            "group_id": str(self.chat_id),
+            "current_sender_name": self.sender_name,
+            "current_user_id": str(self.user_id),
+            "current_sender_role": self.sender_role,
+            "current_message_id": self.message_id or "",
+            "quoted_text": self.quoted_prompt,
+            "quoted_sender_name": self.quoted_sender_name,
+            "quoted_user_id": self.quoted_user_id,
+            "quoted_image_urls": self.request_quoted_image_urls,
+            "quoted_is_bot_self": self.quoted_is_bot_self,
+            "forward_text": self.forward_text,
+            "forward_image_urls": self.request_forward_image_urls,
+            "image_descriptions": self.image_descriptions or None,
+            "include_recent_images": self.include_recent_images and not self.is_non_vision,
+            "turn_envelope": self.turn_envelope,
+            "projected_history_segments": self.projected_segments,
+        }
+        if self.dialogue_examples:
+            message_kwargs["dialogue_examples"] = self.dialogue_examples
+        self.messages = self.build_messages(**message_kwargs)
         return LLMRequest(
             session=self.session,
             epoch_id=self.get_epoch_id(),

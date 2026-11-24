@@ -26,6 +26,7 @@ from quickquip.app.message_pipeline import (
     stats_tracker,
 )
 from quickquip.chat.group_quotes import resolve_quote_display_name
+from quickquip.llm.persona_compiler import render_persona_for_task
 from quickquip.llm.profile import generate_profile
 from quickquip.llm.config_document import resolve_model_provider
 from quickquip.llm.runtime_snapshot import leased_service
@@ -124,10 +125,9 @@ def register_history_commands(on_command, Message, MessageSegment) -> None:
         persona = svc.config.personas.get(persona_id) if persona_id else None
         system_parts = []
         if persona:
-            if persona.system_prompt:
-                system_parts.append(persona.system_prompt)
-            if persona.style_prompt:
-                system_parts.append(persona.style_prompt)
+            rendered_persona = render_persona_for_task(persona, chat_type="group")
+            if rendered_persona:
+                system_parts.append(rendered_persona)
         if provider.style_overrides:
             system_parts.append(provider.style_overrides)
         system_prompt = "\n\n".join(system_parts)

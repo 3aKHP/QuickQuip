@@ -320,11 +320,19 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 
 ## 5. 人格注入设计
 
-当前人格注入分成多层：
+当前人格注入按人格声明版本（`schema_version`）兼容两条路径：
 
-### 5.1 基础人格
+### 5.1 基础人格与三段式架构（Persona v3）
 
-由 `config/personas/` 目录下的 TOML 文件定义，每个 `.toml` 一个人格，`_shared.toml` 提取所有人格共享的行为准则。
+由 `config/personas/` 目录下的 TOML 文件定义，每个 `.toml` 一个人格，`_shared.toml` 提取共享行为准则（支持 `shared_group_*` 与 `shared_private_*` 按单作用域区分群聊与私聊规则）。
+
+- **Persona v1 / v2（`schema_version < 3`）**：按既定拼接顺序渲染结构化表、`system_prompt`、`style_prompt`、`style_overrides` 与宿主协议规则，保持向后字节一致。
+- **Persona v3（`schema_version = 3`，编译入口 `quickquip/llm/persona_compiler.py`）**：将 System Prompt 组织为三段三明治结构，兼顾首尾注意力分布与前缀缓存稳定性：
+  1. **首部 `<persona_core>`**：包含 `[identity]`、常驻精简视觉锚点 `[portrait]`（`appearance` 容貌身材 + `attire` 穿着打扮）、`[mind]` 与行为拓扑 `[topology]`。详尽的 `[appearance]` 档案表与 `[audit]` 审计备注保留在 TOML 中，不随每轮常驻加载。
+  2. **中部 `<host_contract>`**：写明运行环境与“检索/工具调用与角色口吻分离”原则，汇入 `_shared.toml` 规则、`session_preset`，以及认人规则、引用判定、消息格式说明、联网说明与工具定义。
+  3. **尾部 `<voice_anchor>`**：紧邻输入前放置 `[voice]`（核心声腔、节奏、语气切换、低频词库、语言禁区）、共享风格规则以及 `style_overrides`，强化模型对角色语感与禁区的遵从度。Skill 目录（`skills_catalog_block`）仍保留在 System Prompt 静态尾部，维持前缀缓存契约。
+- **少样本语感示例（`[[dialogue_examples]]`）**：最多取 4 组不带虚拟 QQ 号的中性 `user` / `assistant` 对话示例，置于 `messages` 数组的 `history` 之前（静态可缓存）。受 provider 参数 `persona_few_shot`（`auto | on | off`，默认 `auto`）控制；`auto` 对 `gemini` 协议默认关闭，对其余协议开启。输入预算超限降级时，继 `memories` 之后可卸除示例以保主链路可用。
+- **非对话任务一致性**：每日播报、日报／周报／月报及群友人物志统一通过 `render_persona_for_task()` 渲染完整人格核心与声腔。
 
 当前默认人格强调：
 
@@ -345,19 +353,19 @@ MCP 工具也可返回经过校验的内联图片。它们不写入对话数据�
 - 黑话和夸张称呼常见
 - 但认真场景要正常说话
 
-### 5.3 词表按需注入
+### 5.3 词表与角色百科按需注入
 
-当输入命中 `vocab.yaml` 中的别名或黑话时，运行时在当轮 user 消息头部的【轮次上下文】信封追加对应的消歧说明。例如某个昵称指向群成员或物品时，只注入相关解释。system prompt 保持稳定，词表按实际命中参与当轮理解。
+当输入命中 `vocab.yaml` 中的别名或黑话时，运行时在当轮 user 消息头部的【轮次上下文】信封追加 `vocab` 消歧说明。对于 Persona v3，系统还会扫描当前消息、引用正文及最近 2 条现场消息，命中 `[[lore]]` 的 `triggers` 时按优先级和命中次数选取最多 3 条、总长不超过 800 字符的条目注入 `lore` 段（位于 `vocab` 与 `tools` 之间），并由 `envelope_cache.SEGMENT_KEYS` 同步暴露至 Web Admin 纪元看板。system prompt 保持静态稳定，按需知识仅随当前话题触发。
 
 ### 5.4 Provider 风格覆盖
 
-渠道的 `providers[].parameters.style_overrides` 支持多行字符串；模型的 `models[].parameters.style_overrides` 可覆盖该值。共享风格段通过同一 `parameters` 对象中的 `style_profile` 引用。
+渠道的 `providers[].parameters.style_overrides` 支持多行字符串；模型的 `models[].parameters.style_overrides` 可覆盖该值。共享风格段通过同一 `parameters` 对象中的 `style_profile` 引用，Persona v3 的少样本注入开关由 `persona_few_shot`（`auto | on | off`）控制。
 
-此字段的内容会在每次调用该 provider 时，追加到 persona 的 `style_prompt` 之后，用于修正特定模型的口癖。
+此字段的内容在 v1/v2 中拼接在 `style_prompt` 之后，在 v3 中放入 `<voice_anchor>` 末尾，用于补充模型谱系约束。
 
 典型用途：
 
-- GPT 系：禁止句尾反问句、禁止 emoji
+- GPT 系：禁止句尾反问句、禁止 emoji、禁止三段式模板
 - DeepSeek：禁止分点列举
 - Claude / Gemini：禁止旁白括号、禁止过于简略的回复
 

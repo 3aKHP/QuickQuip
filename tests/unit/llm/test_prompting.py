@@ -1080,3 +1080,227 @@ def test_hosted_search_guidance_is_available_without_function_specs():
     assert "web_search" in prompt
     assert "SearXNG" not in prompt
     assert "服务端自动完成" not in prompt
+
+
+def test_v3_sandwich_system_prompt_layout_and_static_tail():
+    from quickquip.llm.config import PersonaConfig
+    from quickquip.llm.tools import LLMToolSpec
+
+    persona = PersonaConfig(
+        id="p3",
+        display_name="三版测试",
+        system_prompt="",
+        style_prompt="",
+        shared_host_rules="不编造群成员私交。",
+        shared_style_rules="不输出大段列举。",
+        extras={
+            "schema_version": 3,
+            "identity": {"name": "三版测试", "role": "毒舌值班员"},
+            "portrait": {"appearance": "深灰短发", "attire": "浅灰卫衣"},
+            "mind": {"core_drive": "直来直去接住话头"},
+            "voice": {"register": "短句吐槽风", "anti_patterns": ["禁止括号旁白"]},
+            "appearance": {"variants": {"hidden": {"description": "HIDDEN_VARIANT_SECRET"}}},
+        },
+    )
+
+    tool = LLMToolSpec(name="search_web", description="联网搜索", input_schema={"type": "object"})
+    base = build_system_prompt(
+        persona=persona,
+        group_id=1001,
+        tool_specs=[tool],
+        search_tool_name="search_web",
+        search_mode="searxng",
+        provider_style_overrides="禁用句尾反问。",
+        session_preset="只在测试通道生效的预设。",
+    )
+    catalog = "<available_skills>\n- demo: demo\n</available_skills>"
+    with_catalog = build_system_prompt(
+        persona=persona,
+        group_id=1001,
+        tool_specs=[tool],
+        search_tool_name="search_web",
+        search_mode="searxng",
+        provider_style_overrides="禁用句尾反问。",
+        session_preset="只在测试通道生效的预设。",
+        skills_catalog_block=catalog,
+    )
+
+    assert base.index("<persona_core>") < base.index("</persona_core>")
+    assert base.index("</persona_core>") < base.index("<host_contract>")
+    assert base.index("<host_contract>") < base.index("</host_contract>")
+    assert base.index("</host_contract>") < base.index("<voice_anchor>")
+    assert base.index("<voice_anchor>") < base.index("</voice_anchor>")
+    assert "深灰短发" in base and "浅灰卫衣" in base
+    assert "工具与口吻分离原则" in base
+    assert "不编造群成员私交。" in base
+    assert "只在测试通道生效的预设。" in base
+    assert "不输出大段列举。" in base
+    assert "禁用句尾反问。" in base
+    assert "HIDDEN_VARIANT_SECRET" not in base
+    assert with_catalog == f"{base}\n\n{catalog}"
+
+    # v2 prompt must not use v3 XML sandwich wrappers
+    v2 = PersonaConfig(
+        id="v2", display_name="二版", system_prompt="原样系统", style_prompt="原样风格"
+    )
+    v2_prompt = build_system_prompt(
+        persona=v2, group_id=1001, tool_specs=[], search_tool_name="search_web"
+    )
+    assert "<persona_core>" not in v2_prompt
+    assert "<host_contract>" not in v2_prompt
+    assert "<voice_anchor>" not in v2_prompt
+
+
+def test_build_messages_with_dialogue_examples_neutral_and_alternating():
+    from quickquip.llm.persona_compiler import PersonaDialogueExample
+
+    examples = [
+        PersonaDialogueExample(user="今晚吃啥", assistant="先煮碗热汤面吧。"),
+        PersonaDialogueExample(user="好累", assistant="歇二十分钟再动。"),
+    ]
+    # Normal alternation: examples end with assistant, history starts with user
+    msgs = build_messages(
+        prompt="明天还上班",
+        image_urls=[],
+        history=[
+            {
+                "role": "user",
+                "user_id": "1",
+                "sender_name": "甲",
+                "content": "hi",
+                "raw_content": "hi",
+            },
+            {"role": "assistant", "content": "在呢"},
+        ],
+        recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="甲",
+        current_user_id="1",
+        dialogue_examples=examples,
+    )
+    _assert_user_assistant_alternation(msgs)
+    assert msgs[0].role == "user" and msgs[0].content == "【语感示例】群友：今晚吃啥"
+    assert msgs[1].role == "assistant" and msgs[1].content == "先煮碗热汤面吧。"
+    assert "QQ " not in msgs[0].content
+
+    # Orphan leading assistant in history after examples must still keep strict alternation
+    orphan_msgs = build_messages(
+        prompt="继续",
+        image_urls=[],
+        history=[{"role": "assistant", "content": "历史孤立回复"}],
+        recent_messages=None,
+        max_trigger_context_messages=5,
+        chat_type="private",
+        current_sender_name="甲",
+        current_user_id="1",
+        dialogue_examples=examples[:1],
+    )
+    _assert_user_assistant_alternation(orphan_msgs)
+    assert orphan_msgs[0].content == "【语感示例】对方：今晚吃啥"
+    assert "历史孤立回复" in [m.content for m in orphan_msgs if m.role == "assistant"]
+
+
+def test_turn_envelope_segments_include_lore_between_vocab_and_tools(frozen_now):
+    from quickquip.llm.envelope_cache import SEGMENT_KEYS
+    from quickquip.llm.persona_compiler import PersonaLoreEntry
+
+    parts = build_turn_envelope_segments(
+        now=frozen_now,
+        prompt="哈基镜是谁",
+        memories=[{"id": 1, "title": "t", "content": "c", "version": 1}],
+        vocab=_vocab_stub(matches=[SimpleNamespace(alias="哈基镜", name="镜子", note=None)]),
+        participants=[{"canonical_name": "阿桃", "sender_name": "桃", "user_id": "20002"}],
+        mention_profiles=[{"canonical_name": "镜子", "user_id": "20003"}],
+        persona_lore=[PersonaLoreEntry(id="l1", triggers=("哈基镜",), content="测试百科内容")],
+        deferred_tool_names=["draw_svg"],
+    )
+    assert list(parts.keys()) == [key for key in SEGMENT_KEYS if key in parts]
+    assert "lore" in parts
+    keys = list(parts.keys())
+    assert keys.index("vocab") < keys.index("lore") < keys.index("tools")
+    envelope = build_turn_envelope(
+        now=frozen_now,
+        prompt="哈基镜是谁",
+        memories=[{"id": 1, "title": "t", "content": "c", "version": 1}],
+        vocab=_vocab_stub(matches=[SimpleNamespace(alias="哈基镜", name="镜子", note=None)]),
+        participants=[{"canonical_name": "阿桃", "sender_name": "桃", "user_id": "20002"}],
+        mention_profiles=[{"canonical_name": "镜子", "user_id": "20003"}],
+        persona_lore=[PersonaLoreEntry(id="l1", triggers=("哈基镜",), content="测试百科内容")],
+        deferred_tool_names=["draw_svg"],
+    )
+    assert envelope == "\n".join(parts.values())
+
+
+def test_build_messages_consecutive_assistant_history_without_examples():
+    msgs_no_examples = build_messages(
+        prompt="继续聊聊",
+        image_urls=[],
+        history=[
+            {"role": "assistant", "content": "历史第一条"},
+            {"role": "assistant", "content": "历史第二条"},
+        ],
+        recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="甲",
+        current_user_id="1",
+        dialogue_examples=None,
+    )
+    assert all("【以下为当前会话记录】" not in str(m.content) for m in msgs_no_examples)
+    assert [m.content for m in msgs_no_examples if m.role == "assistant"] == [
+        "历史第一条",
+        "历史第二条",
+    ]
+
+    msgs_blank_examples = build_messages(
+        prompt="继续聊聊",
+        image_urls=[],
+        history=[{"role": "assistant", "content": "历史第一条"}],
+        recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="甲",
+        current_user_id="1",
+        dialogue_examples=[{"user": " ", "assistant": ""}],
+    )
+    assert all("【以下为当前会话记录】" not in str(m.content) for m in msgs_blank_examples)
+
+    msgs_mid_consecutive = build_messages(
+        prompt="继续聊聊",
+        image_urls=[],
+        history=[
+            {
+                "role": "user",
+                "user_id": "1",
+                "sender_name": "甲",
+                "content": "开场",
+                "raw_content": "开场",
+            },
+            {"role": "assistant", "content": "回复一"},
+            {"role": "assistant", "content": "回复二"},
+        ],
+        recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="甲",
+        current_user_id="1",
+        dialogue_examples=[{"user": "晚安", "assistant": "晚安。"}],
+    )
+    assert all("【以下为当前会话记录】" not in str(m.content) for m in msgs_mid_consecutive)
+
+    msgs_leading_orphan = build_messages(
+        prompt="继续聊聊",
+        image_urls=[],
+        history=[
+            {"role": "assistant", "content": "回复一"},
+            {"role": "assistant", "content": "回复二"},
+        ],
+        recent_messages=None,
+        max_trigger_context_messages=5,
+        current_sender_name="甲",
+        current_user_id="1",
+        dialogue_examples=[{"user": "晚安", "assistant": "晚安。"}],
+    )
+    dividers = [
+        idx
+        for idx, msg in enumerate(msgs_leading_orphan)
+        if "【以下为当前会话记录】" in str(msg.content)
+    ]
+    assert dividers == [2]

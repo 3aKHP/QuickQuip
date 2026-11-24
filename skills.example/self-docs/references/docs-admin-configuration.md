@@ -319,8 +319,9 @@ LLM 按需检索本群归档历史的只读能力；默认关闭，群级开关�
 | `timeout_seconds` | 单次 HTTP 请求超时时间（秒） | `180` |
 | `temperature` | 采样温度参数（`null` 表示不下发，采用模型自身默认温度） | `null` |
 | `max_output_tokens` | 单次回答最大输出 Token 数 | `16384` |
-| `style_overrides` | 可选的多行字符串，会直接追加到每次调用的 System Prompt 最末尾 | — |
+| `style_overrides` | 可选的多行字符串，会直接追加到每次调用的 System Prompt 风格段末尾 | — |
 | `style_profile` | 可选，引用 `style_profiles` 中预定义的共享风格段名称（与 `style_overrides` 拼接生效） | — |
+| `persona_few_shot` | 控制 Persona v3 `[[dialogue_examples]]` 少样本语感示例注入：`auto` 对非 `gemini` 协议启用、`gemini` 协议跳过；`on` 与 `off` 可按渠道或模型强制覆盖 | `"auto"` |
 | `stream_enabled` | 是否启用 SSE 流式响应 | `true` |
 | `user_agent` | 最高优先级的自定义 `User-Agent` 请求头 | — |
 | `extra_body` | 注入到每次请求 JSON Body 中的额外自定义键值对象（模型层覆盖时整块替换） | — |
@@ -442,7 +443,8 @@ Gemini 和 Responses 需要完整的工具调用与结果配对。工具批次�
 }
 ```
 
-- **拼接顺序**：`style_profile` 共享段落排在前面，`style_overrides` 专属追加段落排在后面，两者合并后附加到每次调用的 System Prompt 最末尾。
+- **拼接顺序**：`style_profile` 共享段落排在前面，`style_overrides` 专属追加段落排在后面，两者合并后在 v1/v2 人格中拼于风格段后，在 v3 人格中放入 `<voice_anchor>` 段内（`skills` 目录仍保持在 System Prompt 静态末尾）。
+- **定位分工**：`style_profiles` 用于约束格式与模型共性偏好（禁用 AI 助手腔、Markdown、括号动作旁白等）；对话节奏与声腔由各人格卡自身定义。
 - **空字符串占位**：将某个 `style_profile` 的内容设为空字符串 `""` 是完全合法的（相当于声明一个空占位符，不注入任何额外文本，方便日后统一调校）。
 - **引用完整性**：引用不存在的 `style_profile` 名称，或者直接删除仍被渠道/模型引用的 `style_profile`，在保存时都会返回依赖冲突报错。`config/llm.json.example` 随附了按模型谱系命名的四个内置示例家族（`openai_family` / `gemini_family` / `claude_family` / `general`），可直接复用或修改。
 
@@ -857,7 +859,14 @@ style_prompt  = '''
 scope         = ['group']  # 可选限制适用范围：'group' / 'private'，省略则群聊与私聊均可用
 ```
 
-- **支持 Structured v2 结构化扩展表**：除了上述扁平字段外，人格文件还支持自由扩展表及 `structured v2` 规范（示例见 `config/personas.example/structured.toml`），其中的 `[identity]`、`[biography]`、`[cognition]`、`[instinct]`、`[voice]` 等扩展表会被运行时自动组装渲染进最终的 System Prompt 中。
+- **作用域继承键（`_shared.toml`）**：除通用的 `shared_system_prompt` 与 `shared_style_prompt` 外，还支持 `shared_group_system_prompt`、`shared_private_system_prompt`、`shared_group_style_prompt`、`shared_private_style_prompt`，为单作用域人格（`scope = ["group"]` 或 `scope = ["private"]`）提供独立共享准则。
+- **Structured v2 结构化扩展表**：除了上述扁平字段外，人格文件还支持 `structured v2` 规范（示例见 `config/personas.example/structured.toml`），其中的 `[identity]`、`[biography]`、`[cognition]`、`[instinct]`、`[voice]`、`[boundaries]`、`[world]` 等扩展表会被运行时自动组装渲染进最终的 System Prompt 中。
+- **Persona v3 拓扑与按需百科（`schema_version = 3`）**：当人格文件声明 `schema_version = 3` 时，编译层按「`<persona_core>` → `<host_contract>` → `<voice_anchor>`」三段结构组装，支持以下字段（示例见 `config/personas.example/v3-topology.toml`）：
+  - `[portrait]`：常驻精简视觉锚点，通过 `appearance`（容貌身材）与 `attire`（穿着打扮）保持跨轮外貌与衣着一致性；详尽多再临变体的 `[appearance]` 档案表与 `[audit]` 备忘保留在文件中作参考，不进入每轮常驻 System Prompt。
+  - `[mind]` 与 `[topology]`：定义核心驱动、判断逻辑、盲点、压力反应、行为向量及情境切换（`phase_shifts`）。
+  - `[voice]`：定义声腔 `register`、节奏 `rhythm`、语气切换 `tone_shift`、低频自然词库 `lexical_palette` 与语言禁区 `anti_patterns`。
+  - `[[dialogue_examples]]`：最多 4 组中性的短对话示例；按渠道 `persona_few_shot` 策略（默认 `auto`）在支持的协议上置于 `messages` 历史头部。
+  - `[[lore]]`：带 `triggers` 的角色百科卡片；仅在当前消息、引用文本或最近 2 条现场发言命中触发词时注入当轮【轮次上下文】信封的 `lore` 段，单轮上限 3 条 / 800 字符。
 
 ### 4. SearXNG 容器配置（`docker/searxng/settings.yml`）
 项目内置的 `docker-compose.example.yml` 包含开箱即用的 `searxng` 服务，其配置文件位于 `docker/searxng/settings.yml`（默认绑定在 `http://127.0.0.1:8888`，并已开启 `json` 格式输出接口供 Bot 直接调用）：

@@ -216,6 +216,8 @@ class PersonaConfig:
     style_prompt: str = ""
     scope: list[str] = field(default_factory=list)  # empty = both group and private
     extras: dict[str, Any] = field(default_factory=dict)
+    shared_host_rules: str = ""
+    shared_style_rules: str = ""
 
 
 @dataclass(slots=True)
@@ -310,6 +312,7 @@ class ProviderConfig:
     model_enabled: dict[str, bool] = field(default_factory=dict)
     style_profile: str = ""
     style_append: str | None = None
+    persona_few_shot: str = "auto"  # "auto" | "on" | "off"
 
 
 def provider_builtin_search_active(provider: ProviderConfig) -> bool:

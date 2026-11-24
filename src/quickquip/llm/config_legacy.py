@@ -9,6 +9,10 @@ import tomllib
 
 from quickquip.common.config_utils import as_bool, as_dict, expand_env_value as _expand_env_value
 from contextvars import ContextVar
+from quickquip.llm.personas import (
+    _load_personas_from_dir,
+    _read_personas as _personas_read,
+)
 from quickquip.llm.skills import MAX_SCRIPT_TIMEOUT_MS
 from quickquip.llm.config import (
     TriggerConfig,
@@ -43,32 +47,9 @@ from quickquip.llm.config import (
 
 logger = logging.getLogger(__name__)
 
-_KNOWN_PERSONA_KEYS = {"id", "display_name", "system_prompt", "style_prompt", "scope"}
-
 
 def _read_personas(raw_personas: list[dict[str, Any]]) -> dict[str, PersonaConfig]:
-    personas: dict[str, PersonaConfig] = {}
-    for entry in raw_personas:
-        entry = expand_env_value(entry)
-        persona_id = str(entry.get("id", "")).strip()
-        if not persona_id:
-            continue
-        raw_scope = entry.get("scope", [])
-        if isinstance(raw_scope, str):
-            raw_scope = [raw_scope]
-        parsed_scope = [
-            s for s in (str(s).strip().lower() for s in raw_scope) if s in {"group", "private"}
-        ]
-        extras = {k: v for k, v in entry.items() if k not in _KNOWN_PERSONA_KEYS}
-        personas[persona_id] = PersonaConfig(
-            id=persona_id,
-            display_name=str(entry.get("display_name", persona_id)).strip() or persona_id,
-            system_prompt=str(entry.get("system_prompt", "")).strip(),
-            style_prompt=str(entry.get("style_prompt", "")).strip(),
-            scope=parsed_scope,
-            extras=extras,
-        )
-    return personas
+    return _personas_read(raw_personas, expand_fn=expand_env_value)
 
 
 def _optional_float(value: object) -> float | None:
@@ -97,80 +78,6 @@ def _read_pricing(raw: dict[str, Any]) -> dict[str, PricingRates]:
             confidence=str(entry.get("confidence", "configured")).strip() or "configured",
         )
     return pricing
-
-
-def _load_personas_from_dir(personas_dir: Path) -> list[dict[str, Any]]:
-    """Load personas from a directory of TOML files.
-
-    Each file may define a persona using flat top-level keys (id, display_name,
-    system_prompt, style_prompt, plus any extras), or via a [[personas]] array
-    for compatibility.
-
-    A special file ``_shared.toml`` may define:
-    - ``shared_system_prompt``: appended to every persona's system_prompt
-    - ``shared_style_prompt``: appended to every persona's style_prompt
-
-    Files are loaded in lexicographic order. ``_shared.toml`` is processed
-    first and never treated as a persona definition itself.
-    """
-    if not personas_dir.is_dir():
-        return []
-
-    # Load shared rules first
-    shared_system = ""
-    shared_style = ""
-    shared_path = personas_dir / "_shared.toml"
-    if shared_path.exists():
-        try:
-            with shared_path.open("rb") as fh:
-                shared_data = tomllib.load(fh)
-            shared_system = str(shared_data.get("shared_system_prompt", "")).strip()
-            shared_style = str(shared_data.get("shared_style_prompt", "")).strip()
-        except tomllib.TOMLDecodeError as exc:
-            logger.warning("跳过损坏的 _shared.toml：%s", exc)
-
-    personas: list[dict[str, Any]] = []
-    for toml_file in sorted(personas_dir.glob("*.toml")):
-        if toml_file.name.startswith("_"):
-            continue  # skip _shared.toml and other reserved files
-        try:
-            with toml_file.open("rb") as fh:
-                data = tomllib.load(fh)
-        except tomllib.TOMLDecodeError as exc:
-            logger.warning("跳过损坏的人格文件 %s：%s", toml_file.name, exc)
-            continue
-
-        # Support flat top-level keys (preferred) or [[personas]] array
-        if "id" in data:
-            entry = dict(data)
-            # Inject shared content
-            if shared_system:
-                existing = str(entry.get("system_prompt", "")).rstrip()
-                entry["system_prompt"] = (
-                    (existing + "\n\n" + shared_system).lstrip() if existing else shared_system
-                )
-            if shared_style:
-                existing = str(entry.get("style_prompt", "")).rstrip()
-                entry["style_prompt"] = (
-                    (existing + "\n\n" + shared_style).lstrip() if existing else shared_style
-                )
-            personas.append(entry)
-        elif "personas" in data:
-            for entry in data["personas"]:
-                entry = dict(entry)
-                if shared_system:
-                    existing = str(entry.get("system_prompt", "")).rstrip()
-                    entry["system_prompt"] = (
-                        (existing + "\n\n" + shared_system).lstrip() if existing else shared_system
-                    )
-                if shared_style:
-                    existing = str(entry.get("style_prompt", "")).rstrip()
-                    entry["style_prompt"] = (
-                        (existing + "\n\n" + shared_style).lstrip() if existing else shared_style
-                    )
-                personas.append(entry)
-
-    return personas
 
 
 def _read_providers(
@@ -256,6 +163,7 @@ def _parse_single_provider(
         proxy=str(entry.get("proxy", "")).strip(),
         prompt_caching=as_bool(entry.get("prompt_caching"), default=False),
         cache_ttl=str(entry.get("cache_ttl", "")).strip(),
+        persona_few_shot=str(entry.get("persona_few_shot", "auto")).strip().lower() or "auto",
         auth_method=str(entry.get("auth_method", "api_key")).strip().lower() or "api_key",
         builtin_search=as_bool(entry.get("builtin_search"), default=False),
         gemini_empty_response_recovery=as_bool(

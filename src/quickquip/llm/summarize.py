@@ -21,6 +21,7 @@ from quickquip.llm.config import (
 )
 from quickquip.llm.context_windows import resolve_context_window
 from quickquip.llm.config_document import resolve_model_provider
+from quickquip.llm.persona_compiler import render_persona_for_task
 from quickquip.llm.provider import LLMProviderError, LLMRequest, build_provider_client
 from quickquip.llm.response_acceptance import is_response_accepted
 from quickquip.llm.tools import LLMConversationMessage
@@ -84,10 +85,9 @@ def _build_system_prompt(
 ) -> str:
     parts: list[str] = []
 
-    if persona.system_prompt:
-        parts.append(persona.system_prompt)
-    if persona.style_prompt:
-        parts.append(persona.style_prompt)
+    rendered_persona = render_persona_for_task(persona, chat_type="group")
+    if rendered_persona:
+        parts.append(rendered_persona)
 
     parts.append(
         f"你现在的任务是撰写一篇群聊日报，字数目标约 {length_hint} 字。"
@@ -360,10 +360,9 @@ def _build_period_system_prompt(
 ) -> str:
     parts: list[str] = []
 
-    if persona.system_prompt:
-        parts.append(persona.system_prompt)
-    if persona.style_prompt:
-        parts.append(persona.style_prompt)
+    rendered_persona = render_persona_for_task(persona, chat_type="group")
+    if rendered_persona:
+        parts.append(rendered_persona)
 
     kind_word = "周报" if period_kind == "weekly" else "月报"
     unit = "周" if period_kind == "weekly" else "月"

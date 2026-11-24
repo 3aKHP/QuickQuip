@@ -86,3 +86,6 @@ def test_parameters_scalar_annotations_unchanged() -> None:
     assert _meta["settings"]["image_preprocessing"]["temperature"]["default"] is None
     assert _meta["parameters"]["stream_enabled"]["type"] == "boolean"
     assert _meta["parameters"]["reasoning_effort"]["enum"]
+    assert _meta["parameters"]["persona_few_shot"]["type"] == "string"
+    assert _meta["parameters"]["persona_few_shot"]["default"] == "auto"
+    assert tuple(_meta["parameters"]["persona_few_shot"]["enum"]) == ("auto", "on", "off")

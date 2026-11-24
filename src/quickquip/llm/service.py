@@ -62,6 +62,12 @@ from quickquip.llm.image_routing import (
     RECENT_IMAGE_CONTEXT_PREFIX,
 )
 from quickquip.llm.mcp import MCPClientManager
+from quickquip.llm.persona_compiler import (
+    PersonaV3Compiled,
+    compile_persona_v3,
+    is_persona_v3,
+    should_inject_dialogue_examples,
+)
 from quickquip.llm.prompting import (
     build_messages,
     build_system_prompt,
@@ -408,6 +414,7 @@ class LLMService(
         builtin_search_active: bool = False,
         search_mode: str | None = None,
         skills_catalog_block: str = "",
+        compiled_persona: PersonaV3Compiled | None = None,
     ) -> str:
         return build_system_prompt(
             persona=persona,
@@ -433,6 +440,7 @@ class LLMService(
             provider_style_overrides=provider_style_overrides,
             session_preset=session_preset,
             skills_catalog_block=skills_catalog_block,
+            compiled_persona=compiled_persona,
         )
 
     def _build_turn_envelope(
@@ -443,6 +451,7 @@ class LLMService(
         memories: list[dict[str, object]],
         participants: list[dict[str, str]] | None = None,
         mention_profiles: list[dict[str, str]] | None = None,
+        persona_lore: list[object] | tuple[object, ...] | None = None,
         provider_id: str | None = None,
         history_enabled: bool = False,
     ) -> dict[str, str]:
@@ -456,6 +465,7 @@ class LLMService(
             chat_type=chat_type,
             participants=participants,
             mention_profiles=mention_profiles,
+            persona_lore=persona_lore,
             deferred_tool_names=self._get_deferred_tool_names(
                 chat_type, provider_id=provider_id, history_enabled=history_enabled
             ),
@@ -614,6 +624,7 @@ class LLMService(
         recent_images_messages: list[dict[str, str]] | None = None,
         turn_envelope: str = "",
         projected_history_segments: dict[str, list[LLMConversationMessage]] | None = None,
+        dialogue_examples: list[object] | tuple[object, ...] | None = None,
     ) -> list[LLMConversationMessage]:
         return build_messages(
             prompt=prompt,
@@ -639,6 +650,7 @@ class LLMService(
             include_recent_images=include_recent_images,
             turn_envelope=turn_envelope,
             projected_history_segments=projected_history_segments,
+            dialogue_examples=dialogue_examples,
         )
 
     def _collect_known_participants(
@@ -1304,6 +1316,11 @@ class LLMService(
         session_preset = (
             self.get_session_preset(scope_key) if request.chat_type == "private" else ""
         )
+        compiled_persona = (
+            compile_persona_v3(persona, chat_type=request.chat_type)
+            if is_persona_v3(persona)
+            else None
+        )
         system_prompt = self._build_system_prompt(
             persona,
             request.chat_id,
@@ -1316,6 +1333,18 @@ class LLMService(
             search_mode={"gemini_grounding": "builtin", "local": "searxng"}.get(
                 search_mode, search_mode),
             skills_catalog_block=skills_catalog_block,
+            compiled_persona=compiled_persona,
+        )
+        compiled_examples = (
+            compiled_persona.dialogue_examples
+            if compiled_persona is not None
+            and should_inject_dialogue_examples(
+                persona,
+                provider_protocol=provider.protocol,
+                policy=getattr(provider, "persona_few_shot", "auto"),
+                compiled=compiled_persona,
+            )
+            else ()
         )
         # 装配对象持有当轮上下文；账本 meter 消费 assemble() 后的最终值。
         assembler = TurnRequestAssembler(
@@ -1359,6 +1388,9 @@ class LLMService(
             tools_allowed=self.config.runtime.tool_calling_enabled,
             builtin_search_active=builtin_search_active,
             system_prompt=system_prompt,
+            persona=persona,
+            compiled_persona=compiled_persona,
+            dialogue_examples=compiled_examples,
         )
 
         # §8.3 先降级再拒绝：超限时锚点强制缩到热水位（付费 miss 一次），
@@ -1376,6 +1408,10 @@ class LLMService(
                 )
                 if assembler.memories:
                     assembler.memories = []
+                    llm_request = assembler.assemble()
+                    continue
+                if assembler.dialogue_examples:
+                    assembler.dialogue_examples = ()
                     llm_request = assembler.assemble()
                     continue
                 if budget_retry_used:
