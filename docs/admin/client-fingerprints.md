@@ -63,9 +63,9 @@ Profile 定义了 QuickQuip 向模型上游 API 发送请求时的**客户端名
 
 ### 3. 备份与复制安装身份
 
-`data/client_identity.json` 随数据目录备份、恢复。复制数据目录建立独立机器人时，在停止新实例并保留备份后移走新实例的这个文件，首次使用会生成新的自动身份。若全局配置填写了手动身份，也应为新实例调整相应值。
+`data/client_identity.json` 随 `data/` 数据目录一起备份和恢复。如果通过复制数据目录搭建另一台独立机器人，请先停止新实例并留好备份，再删除新实例目录下的 `data/client_identity.json`；新实例首次发起请求时会自动生成新的安装身份。若全局配置中手工填写了设备或安装标识，也请为新实例改用独立的值。
 
-业务 Session 表示持续对话，纪元表示当前上下文窗口。冷场缩窗会改变纪元，业务 Session 可以继续保留；不同 Profile 使用的身份类型见下文。身份派生和请求重试中的复用规则见[实现说明](../dev/client-fingerprints.md#安装身份与纪元复用)。
+在身份绑定中，业务 Session 对应整段持续对话，而纪元（Epoch）对应当前的上下文窗口：冷场缩窗会推进纪元，但只要未新建或清空会话，业务 Session 就会继续保留。各内置 Profile 采用的身份类型见下文排障说明，完整的派生与重试复用规则见[实现说明](../dev/client-fingerprints.md#安装身份与纪元复用)。
 
 ---
 
@@ -124,7 +124,7 @@ accept = "application/json"
   - **升级本地旧副本提示**：如果你之前在本地自定义过 `opencode2.toml` 或 `codex.toml`，升级后请将它们顶层的 `user_agent` 移入各自 `protocols.<协议>.headers` 下的 `user-agent` 字段中，以满足作为 `default` 引用目标的局部约束（修改重启后，`default` 与显式选择该客户端将共享同一份策略快照）。
 - **解析器安全与禁填字段**：
   - **`authorization`、`x-api-key`、`x-goog-api-key`、`content-type`** 这四个头由底层协议适配器全权管理，严禁在 Profile 的静态 `headers` 或动态 `bindings` 中声明，否则加载校验会直接失败。
-  - 解析器会严格拒绝未知字段、非法绑定源、重复头名称与不支持的协议。Profile 文件仅作为纯静态结构声明，不存储任何密钥（渠道认证继续使用根 `.env` 变量引用），也不执行任何动态表达式或脚本。
+  - 解析器会校验并拒绝未知字段、非法绑定源、重复请求头名称以及不支持的协议。Profile 文件只声明静态请求结构与字段绑定关系；渠道鉴权凭据统一通过根目录 `.env` 中的环境变量引用。
 
 ---
 
@@ -137,39 +137,39 @@ accept = "application/json"
 
 ### OpenCode 2：请求字段不兼容时怎么查？
 
-`opencode2` 是 Chat 协议的默认模板，UA 为 `opencode/latest/2.0.27/cli`。它按本次请求实际使用的 URL 主机及渠道 ID 选择兼容规则；中转地址按中转自身匹配，模型别名不会让系统自动采用另一家服务的规则。
+`opencode2` 是 OpenAI Chat 协议的默认模板，默认 UA 为 `opencode/latest/2.0.27/cli`。模板根据当次请求实际发往的 URL 主机名和渠道 ID 匹配兼容规则；接入中转站时按中转站自身的地址与渠道 ID 匹配，不会因填写了其他厂商的模型别名而套用别家规则。
 
-在 Trace 中查看最终请求字段，重点核对上游要求的输出 token 字段、`store` 和工具声明。渠道或模型的 `extra_body` 可覆盖模板默认值，但同时出现 `max_tokens` 与 `max_completion_tokens` 会报错。自动绑定的 Session、project 和追踪头禁止在渠道 `headers` 中覆盖；需要调整这些绑定时编辑本地 Profile 并重启。
+遇到上游报字段不兼容时，可在后台“LLM Trace”页查看实际发出的请求体，重点核对输出 token 上限字段、`store` 以及工具声明。你可以通过渠道或模型的 `extra_body` 覆盖模板默认字段，但注意避免 `max_tokens` 与 `max_completion_tokens` 同时出现。由模板自动绑定的 Session、`project` 与分布式追踪头不可在渠道 `headers` 中手工覆盖；如需改动这些绑定，请复制并编辑本地 Profile 文件后重启服务。
 
 <a id="claude-code-profile"></a>
 <a id="claude-code-profileclaude-code--anthropic-默认"></a>
 
 ### Claude Code：设备身份、缓存与手工字段
 
-Anthropic 默认使用 `claude-code`。全局设置 `settings.runtime.claude_code_device_id` 留空时，首次使用会生成并保存自动身份；手工设置需为 64 位十六进制字符串，保存后规范为小写。手动值随配置保存和发布，清空后恢复使用文件里的自动值。若复用已有客户端的身份，请同时核对本地模板中的 OS、arch 与其来源环境。
+Anthropic 协议默认使用 `claude-code`。全局设置 `settings.runtime.claude_code_device_id` 留空时，系统会在首次调用时生成自动身份并写入 `data/client_identity.json`；如需手工指定，请填写 64 位十六进制字符串（保存时自动转为小写，清空后切回文件中的自动值）。若要复用现成客户端的设备身份，建议同时核对本地模板中的操作系统与架构字段是否与来源环境一致。
 
-开启渠道的 `prompt_caching` 后，模板在 system 与消息中的适当位置设置缓存断点，TTL 使用 `cache_ttl`。实际命中情况在“用量”页查看；模板的打点位置与 beta 推导规则见[Claude Code 实现](../dev/client-fingerprints.md#claude-code-profileclaude-code--anthropic-默认)。
+在渠道中开启 `prompt_caching` 后，模板会自动在 `system` 与对话消息的合适位置插入缓存断点，并按 `cache_ttl` 设置有效期。缓存命中率可在后台“用量”页查看，具体的打点位置与 `anthropic-beta` 推导规则见 [Claude Code 实现说明](../dev/client-fingerprints.md#claude-code-profileclaude-code--anthropic-默认)。
 
-`system`、`messages`、`tools` 由模板管理，放入 `extra_body` 会被拒绝；自动 user_id 开启时，`metadata.user_id` 也受此限制，包括 `null`。需要手工 user_id 时，在本地模板关闭 `metadata_user_id` 并移除相应 Session Header 绑定；需要完整手工 Body 时可选择 `legacy-claude`，或使用不声明自动 Body 策略的自定义模板。
+`system`、`messages`、`tools` 由模板统一组装，不能写入 `extra_body`；启用自动 `user_id` 时，`metadata.user_id`（含显式传入 `null`）同样禁止在 `extra_body` 中覆盖。如需自行指定 `user_id`，请在本地模板中关闭 `metadata_user_id` 并移除对应的 Session 请求头绑定；若需要完全自定义请求体结构，可改选 `legacy-claude` 或编写不声明自动 Body 策略的自定义模板。
 
 <a id="codex-profile"></a>
 <a id="codex-profilecodex--openai-responses-默认"></a>
 
 ### Codex：会话身份与缓存键
 
-Responses 默认使用 `codex`，其 UA 与环境描述来自模板中的固定 Linux 预设。需要匹配其他环境时编辑本地模板并重启；渠道或模型设置的 `user_agent` 仍具有更高优先级。
+OpenAI Responses 协议默认使用 `codex`，其 UA 与客户端环境描述采用模板内置的 Linux 预设。如需改为其他系统特征，可编辑本地 `codex.toml` 后重启服务；若只需要替换 UA，直接在渠道或模型的 `parameters.user_agent` 中填写即可优先生效。
 
-Session 请求头和 `prompt_cache_key` 共用业务 Session UUID。切换模型思考档位、冷场或恢复存档会保留这个身份，新建或清空会话会改变它。
+该模板的 Session 请求头与请求体中的 `prompt_cache_key` 共用同一个业务 Session UUID：切换思考档位、经历冷场缩窗或恢复历史存档时都会沿用原标识，新建或清空会话时则会生成新标识。
 
-当模板声明 `prompt_cache_key` 动态绑定时，渠道或模型 `extra_body` 不能同时填写该字段，包括 `null`。需要手工控制缓存键，可从本地 `codex.toml` 移除 `[protocols.openai_responses.body_bindings]` 段后重启，再配置自己的值。
+只要模板声明了 `prompt_cache_key` 动态绑定，渠道或模型的 `extra_body` 中就不能再填写该字段（含 `null`）。如需手工指定缓存键，请先从本地 `codex.toml` 中删去 `[protocols.openai_responses.body_bindings]` 段并重启服务，再在 `extra_body` 中配置所需的值。
 
 <a id="gemini-cli-profile"></a>
 <a id="gemini-cli-profilegemini-cli--gemini-默认"></a>
 
 ### Gemini CLI：安装身份与模型名显示
 
-Gemini 默认使用 `gemini-cli`。全局 `settings.runtime.gemini_cli_install_id` 可以填写 UUIDv4；留空时使用保存在 `data/client_identity.json` 中的自动身份。手动值不会覆盖文件中的自动值，清空配置即可切回自动值。备份时保留身份文件，独立部署使用独立身份。
+Gemini 协议默认使用 `gemini-cli`。全局设置 `settings.runtime.gemini_cli_install_id` 留空时，默认读取保存在 `data/client_identity.json` 中的自动安装 UUID；你也可以手工填写一个标准 UUIDv4，清空配置后即恢复使用文件中的自动值（备份与多实例克隆时的身份处理见上文“备份与复制安装身份”）。
 
-UA 中的 `{session_model}` 在业务 Session 首次使用该模板时固定。后续切换模型后，UA 仍可能显示最初的模型名；这不改变请求实际使用的模型。新建或清空 Session 后会重新绑定。
+模板 UA 中的 `{session_model}` 会在当前业务 Session 首次通过该模板发请求时固定下来。此后在同一会话内切换模型，UA 字符串仍会保留最初绑定的模型名，实际调用的目标模型以当前请求路由为准；新建或清空会话后会重新绑定。
 
-默认模板通过 `x-goog-api-key` Header 发送 API Key，`legacy-gemini` 使用 URL 查询参数。显式 `auth_method = "bearer"` 使用 Bearer 认证。`contents`、`systemInstruction`、`tools` 由模板管理；上游不支持 `parametersJsonSchema` 或需要手工覆盖这些字段时，可以选择 `legacy-gemini`。
+认证与请求体方面，`gemini-cli` 默认通过 `x-goog-api-key` 请求头传递密钥，显式配置 `auth_method = "bearer"` 时改走 `Authorization: Bearer` 头，而 `legacy-gemini` 则使用传统的 URL 查询参数（`?key=`）。`contents`、`systemInstruction` 与 `tools` 由模板统一管理；如果所连中转站不支持 `parametersJsonSchema` 或需要手工覆盖上述字段，请切换为 `legacy-gemini`。

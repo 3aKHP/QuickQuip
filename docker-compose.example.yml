@@ -92,18 +92,17 @@ services:
       # 群友身份与黑话词表（可选）。将 llm_about/vocab.yaml.example 和
       # llm_about/identities.yaml.example 复制为 .yaml 并编辑后，取消注释：
       # - ./llm_about:/app/llm_about:ro
-      # Skill 扩展（可选）。将 skills.example/ 中需要的 skill 复制到 skills/ 后，
-      # 与 web-admin 侧的 skills 挂载同时取消注释：bot 只读消费，web-admin 读写
-      # 支撑 Skill 管理页落盘持久化。
+      # Skill 扩展（可选）：将 skills.example/ 中需要的技能包复制到 skills/ 后，
+      # 与下方 web-admin 的 skills 挂载同时取消注释（Bot 只读挂载，Web Admin 读写挂载以支持后台落盘）。
       # - ./skills:/app/skills:ro
-      # host-healthcheck 可选宿主机视图：取消下一行注释，将 /proc 只读挂载：
+      # 可选宿主机指标视图（供 host-healthcheck Skill 读取）：取消下一行注释以只读挂载 /proc：
       # - /proc:/host/proc:ro
       # 仅当已发布 LLM 配置启用 docker transport MCP 时才挂载：
       # - /var/run/docker.sock:/var/run/docker.sock
     restart: unless-stopped
 
   # ── Web 管理后台 ────────────────────────────────────────────────────────
-  # 与 quickquip 共用同一镜像，仅 command 不同。
+  # 与 env-agent、quickquip 共用同一应用镜像，以不同命令启动后台服务。
   web-admin:
     image: ghcr.io/3akhp/quickquip:latest
     container_name: quickquip-web-admin

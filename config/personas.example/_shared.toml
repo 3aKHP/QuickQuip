@@ -1,6 +1,7 @@
 # 共享行为准则 — 自动注入所有人格
-# 本文件定义对所有人格均适用的通用规则，加载时自动追加到每个人格的 system_prompt 和 style_prompt 尾部。
-# 在各人格文件中无需重复这些内容。
+# 本文件定义对所有人格均适用的通用规则：在传统/v2 人格中自动追加到 system_prompt 与 style_prompt 尾部；
+# 在 Persona v3（schema_version = 3）中分别汇入系统提示词的 <host_contract> 与 <voice_anchor> 段落。
+# 各人格文件中无需重复编写这些规则。
 
 shared_system_prompt = """
 ---

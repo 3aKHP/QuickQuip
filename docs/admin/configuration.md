@@ -25,7 +25,7 @@
 
 ## .env 环境变量
 
-`QUICKQUIP_ENV_MANAGEMENT_ENABLED` 默认 `false`。启用步骤、只写面板与热更新范围见[环境变量管理](environment.md)。
+根目录 `.env` 保存连接配置、访问口令、API Key 与部署方式参数。在线管理面板的启用步骤、只写保护与热更新范围见[管理环境变量](environment.md)。
 
 ### 基础运行
 
@@ -35,9 +35,24 @@
 | `HOST` | QuickQuip 监听地址 | `0.0.0.0` |
 | `PORT` | QuickQuip 监听端口 | `8080` |
 | `QQ_ACCOUNT` | 可选的机器人 QQ 号，用于报告识别 Bot 自身发言及运维巡检核对账号 | — |
-| `ONEBOT_WS_URLS` | OneBot V11 正向 WebSocket 地址列表，使用 JSON 数组。反向 WebSocket 使用空数组 | `[]` |
-| `ONEBOT_ACCESS_TOKEN` | OneBot 接入鉴权令牌 | — |
+| `ONEBOT_WS_URLS` | OneBot V11 正向 WebSocket 地址列表，使用 JSON 数组；反向 WebSocket 使用空数组 | `[]` |
+| `ONEBOT_ACCESS_TOKEN` | OneBot 接入鉴权令牌（两端须配置相同值） | — |
+| `ONEBOT_SECRET` | 可选的 OneBot 适配器签名密钥（Bot 启动时读取） | — |
+| `ONEBOT_API_ROOTS` | 可选的 OneBot HTTP API 根地址映射（Bot 启动时读取） | — |
 | `TZ` | 容器与进程时区（影响日志时间戳、定时任务展示时间等） | `Asia/Shanghai` |
+
+> **OneBot 变量别名兼容**：`ONEBOT_ACCESS_TOKEN`、`ONEBOT_WS_URLS`、`ONEBOT_SECRET` 与 `ONEBOT_API_ROOTS` 同时支持带协议前缀的同义变量名 `ONEBOT_V11_ACCESS_TOKEN`、`ONEBOT_V11_WS_URLS`、`ONEBOT_V11_SECRET` 与 `ONEBOT_V11_API_ROOTS`。
+
+### 部署与配置同步（`qqconf` / `qqsync` / `deploy-v4`）
+
+| 变量 | 说明 | 默认值 |
+|------|------|--------|
+| `QUICKQUIP_DEPLOY_LOCATION` | 部署位置模式：`local`（本地部署）或 `cloud`（云端部署），供 `qqconf pack`、`qqsync` 与部署脚本判断配置流向（云端部署时本地与服务器两端的根 `.env` 均须设为 `cloud`） | —（`.env.example` 示例为 `local`） |
+| `QUICKQUIP_DEPLOY_RUNTIME` | 应用运行方式：`source`（原生 Python 进程／Windows 懒人包）或 `docker`（Docker Compose 容器运行） | —（`.env.example` 示例为 `source`） |
+| `QUICKQUIP_DEPLOY_SSH_HOST` | `cloud` 模式下连接远端服务器使用的本地 SSH 主机别名 | `quickquip-prod` |
+| `QUICKQUIP_DEPLOY_REMOTE_DIR` | `cloud` 模式下远端服务器的部署根目录路径 | `/opt/QuickQuip` |
+
+> **编排插值内部变量**：`prod.example/docker-compose.yml` 中引用的 `QUICKQUIP_ROOT`（部署根目录，默认 `..`）、`QUICKQUIP_ENV_FILE`（Compose 读取的 `.env` 文件路径，默认 `../.env`）与 `QUICKQUIP_RELEASE`（应用镜像版本标签，默认 `latest`）仅供容器编排插值使用，由 `deploy-v4`、`qqsync` 或手动维护流程在调用 `docker compose` 时注入，无需写入根 `.env`。
 
 ### LLM API Keys 与 MCP 凭据
 
@@ -87,7 +102,7 @@
   - 每个独立的 Trace 数据库使用自己的 `trace_blobs/` 目录，避免一个数据库清理掉另一个仍引用的媒体。
 - **关闭与版本回退说明**：
   - 将 `LLM_TRACE_MEDIA_MIN_BYTES` 改回 `0` 并重启，即可停止对新记录做媒体抽取，且当前版本依然能正常读取和还原之前已抽取的记录。
-  - 如果需要回退到不支持该去重格式的老版本程序，老程序查看已抽取的记录时只会显示占位符——如果你需要在老版本中查看完整历史报文，请先在当前版本导出原文，或恢复启用该功能前的 Trace 备份（存量历史大记录的离线批量转换另行安排）。
+  - 如果需要回退到不支持该去重格式的老版本程序，老程序查看已抽取的记录时只会显示占位符——如果你需要在老版本中查看完整历史报文，请先在当前版本导出原文，或恢复启用该功能前的 Trace 备份。
 - **管理员还原与附件下载接口**（均需携带有效的 Web Admin 登录会话）：
   - **获取还原后的完整 JSON 正文**：访问 `/ops/api/logs/trace/calls/{call_id}?restore=true`（`call_id` 填详情记录中的实际 ID）。
   - **单独下载媒体附件**：访问 `/ops/api/logs/trace/blobs/{sha256}`（使用占位符中的 SHA-256 摘要；仅允许下载当前仍被有效 Trace 记录引用的媒体载荷）。
@@ -127,6 +142,9 @@
 | `WEB_ADMIN_SESSION_TTL_HOURS` | 会话空闲滑动续期有效期（小时） | `168` |
 | `WEB_ADMIN_SESSION_MAX_AGE_HOURS` | 会话绝对寿命上限（小时），自创建起超过该时长后必须重新登录 | `168` |
 | `WEB_ADMIN_COOKIE_SECURE` | 是否为会话 Cookie 附加 `Secure` 属性：`auto` / `true` / `false` | `auto` |
+| `QUICKQUIP_ENV_MANAGEMENT_ENABLED` | 是否启用 Web Admin“环境变量”在线管理功能；在进程启动时固定读取，公开 Docker Compose 模板已在服务 `environment` 中将其显式固定为 `"true"`（详见[管理环境变量](environment.md)） | `false` |
+
+> **容器环境代理通信变量**：Docker 部署启用环境变量管理时，Compose 模板会通过服务 `environment` 自动注入 `QUICKQUIP_ENV_SOCKET`（只读快照 Unix Socket 路径）、`QUICKQUIP_ENV_WRITE_SOCKET`（管理写入 Unix Socket 路径）、`QUICKQUIP_ENV_ROOT`（`env-agent` 挂载的部署根路径）与 `QUICKQUIP_MANAGED_CONTAINER`（受管容器运行标记），这些内部通信参数无需在根 `.env` 中配置。
 
 ### Docker 镜像构建相关
 
@@ -159,7 +177,7 @@
 | `client_cluster` | 可选的部署集群标识（仅允许可打印 ASCII 字符）；在 `quickquip` Profile 下会映射为 `x-quickquip-cluster` 请求头，见[请求指纹 Profile](client-fingerprints.md) | `""` |
 | `claude_code_device_id` | 可选的 Claude Code 设备身份（64 位小写 hex 字符串）；留空时自动使用 `data/client_identity.json` 中的持久化随机身份 | `""` |
 | `gemini_cli_install_id` | 可选的 Gemini CLI 安装 UUIDv4；留空时自动使用持久化随机身份，见[请求指纹 Profile](client-fingerprints.md) | `""` |
-| `history_limit` | **历史兼容字段**（仅解析，不再参与窗口计算）。默认由下方的“会话纪元（Epoch）”自动管理；当群聊或私聊通过 `/llm context_limit <n>` 手动固定窗口行数时，保留最新 `n` 行（上限 `1024` 条） | `10` |
+| `history_limit` | **历史兼容字段**（仅保留解析兼容，不参与默认窗口计算）。默认由下方的“会话纪元（Epoch）”自动管理；当群聊或私聊通过 `/llm context_limit <n>` 手动固定窗口行数时，保留最新 `n` 行（上限 `1024` 条） | `10` |
 | `history_max_messages_per_group` | **历史兼容字段**（解析后忽略其值）。对话存储现按会话纪元锚点裁剪，单会话硬上限为 `2048` 行 | `40` |
 | `memory_limit` | 单轮自动召回正文条数，最多 5 条；同时受 2048 token 总预算限制 | `5` |
 | `memory_max_items_per_group` | 每个群或私聊最多存储的记忆条数；满额拒绝新增，保留已有条目 | `1000` |
@@ -245,22 +263,21 @@
 | `temperature` | 图片转述请求的采样温度（`null` 表示沿用所选渠道设置或不下发） | `null` |
 | `prompt` | 自定义图片转述 System Prompt（留空则使用内置默认提示词） | `""` |
 
-- **单轮图片上限与失败处理**：单轮请求最多转述处理 **5 张**图片（按“当前消息图片 $\rightarrow$ 引用消息图片 $\rightarrow$ 合并转发图片”顺序选取；被动唤醒需要附带近期群图片时，会利用剩余名额挑选最新图片）。如果本轮中**有任何一张图片转述失败**，为避免主模型基于残缺信息胡言乱语，本轮将中止调用主模型，并向用户返回可重试提示。
+- **单轮图片上限与失败处理**：单轮请求最多转述处理 **5 张**图片（按“当前消息图片 → 引用消息图片 → 合并转发图片”顺序选取；被动唤醒需要附带近期群图片时，会利用剩余名额挑选最新图片）。如果本轮中**有任何一张图片转述失败**，为避免主模型基于残缺信息胡言乱语，本轮将中止调用主模型，并向用户返回可重试提示。
 
 ---
 
 <a id="settingstools--工具调用"></a>
 
-### `settings.group_history` — 群聊历史查询（#72）
+### `settings.group_history` — 群聊历史查询
 
-LLM 按需检索本群归档历史的只读能力；默认关闭，群级开关见
-[工具发现配置](tool-discovery.md)。本节为 document-only 存储（不建关系表）。
+控制对话模型按需只读检索本群聊天归档库（`data/chat_archive.db`）的能力；全局默认关闭，群级三态设置（`/llm history on|off|reset` 或 Web Admin“群 LLM”页）优先于全局默认值，私聊不提供该组工具。详见[工具发现配置](tool-discovery.md)。
 
 | 键名 | 说明 | 默认值 |
 |----|------|--------|
-| `enabled` | 全局默认开关；群级显式开关优先于本值 | `false` |
-| `investigation_provider_id` | 调查执行器专用渠道；留空跟随当前对话渠道 | `""` |
-| `investigation_model` | 调查执行器专用模型；留空用渠道默认模型 | `""` |
+| `enabled` | 全局默认开关；群级显式开关优先覆盖本值 | `false` |
+| `investigation_provider_id` | 调查执行器专用渠道；留空时跟随当前对话渠道 | `""` |
+| `investigation_model` | 调查执行器专用模型；留空时，未切换渠道则跟随当前对话模型，指定其他渠道则使用该渠道的默认模型 | `""` |
 | `investigation_timeout_seconds` | 调查子任务总时限（1–3600 秒，含排队与报告） | `240` |
 | `investigation_max_calls` | 调查子任务模型调用数上限（1–32，最后一次预留给报告） | `10` |
 | `investigation_tool_calls` | 调查子任务内历史工具（搜索/阅读/计数）总次数上限（1–128；每轮可并行多个工具） | `30` |
@@ -269,18 +286,24 @@ LLM 按需检索本群归档历史的只读能力；默认关闭，群级开关�
 
 | 键名 | 说明 | 默认值 |
 |----|------|--------|
-| `enabled` | 自定义工具名单列表。为空数组 `[]` 时，默认暴露所有内置默认白名单工具 + 全部已启用的 MCP 工具；非空时按下方 `enabled_mode` 规则生效 | `[]` |
-| `enabled_mode` | 当 `enabled` 非空时的作用模式：<br>• **`append`（默认，追加模式）**：在内置默认白名单 + 全部 MCP 工具的基础上，额外启用列入的可选内置工具（例如开启 `draw_svg` 画图工具只需用此模式）；<br>• **`replace`（替换模式）**：严格精确白名单，仅向模型暴露 `enabled` 中明确列出的工具 | `append` |
+| `enabled` | 自定义工具名单列表。为空数组 `[]` 时，默认暴露所有内置默认白名单工具与全部已启用的 MCP 工具；非空时按下方 `enabled_mode` 规则生效 | `[]` |
+| `enabled_mode` | 当 `enabled` 非空时的作用模式：<br>• **`append`（默认，追加模式）**：在内置默认白名单与全部已启用 MCP 工具的基础上，额外开启列入的按需内置工具；<br>• **`replace`（替换模式）**：严格精确白名单，仅向模型暴露 `enabled` 中明确列出的工具 | `append` |
 | `discovery_mode` | 工具按需发现模式（用于节省海量 MCP 工具占用的上下文 Token）：<br>• `off`：全量直接暴露所有工具定义；<br>• `on`：仅暴露常驻工具（`always_loaded`），其余工具通过 `tool_search` 按需动态加载；<br>• `auto`（默认）：当可延迟加载的工具数量超过 `discovery_min_tools`，或其 schema 总量超过 `discovery_min_schema_tokens` 阈值时，自动启用按需发现 | `auto` |
 | `discovery_min_tools` | `auto` 模式下触发按需发现的“可延迟工具”数量阈值 | `6` |
-| `discovery_min_schema_tokens` | `auto` 模式下触发按需发现的“可延迟工具 schema 总量”阈值（token 估算，与数量阈值 OR 关系；`0` 关闭该控线） | `2000` |
+| `discovery_min_schema_tokens` | `auto` 模式下触发按需发现的“可延迟工具 schema 总量”阈值（token 估算，与数量阈值满足其一即触发；`0` 关闭该控线） | `2000` |
 | `discovery_search_limit` | 模型单次调用 `tool_search` 最多返回并加载的工具数量 | `5` |
 | `discovery_max_loaded_tools` | 单次会话中允许同时加载的工具总数上限（含常驻工具；达到该上限后停止新增加载，已加载的工具集合保持可用） | `12` |
 | `always_loaded` | 开启工具发现时，第一轮就直接暴露给模型的常驻工具名列表（未配置时使用右侧内置默认集合） | `["tool_search", "tool_list", "get_identity", "list_memories", "read_memory", "write_memory", "delete_memory", "search_web", "activate_skill"]` |
 
-> **本地元工具工作原理与 v1.12 升级提示**：
-> - `tool_search` 和 `tool_list` 是 QuickQuip 本地实现的元工具（不依赖 Claude 原生的服务端 tool search 特性）。当接入了庞大的 MCP 工具集时，模型会先调用 `tool_search` 按关键词搜索相关工具；若搜不到，还可调用 `tool_list` 浏览工具分组、工具名称或按精确名称加载工具，然后在下一轮 Tool Loop 中直接调用刚刚被加载进上下文的真实工具（详见专题文档 [tool-discovery.md](tool-discovery.md)）。
-> - **`enabled_mode` 历史版本升级说明（v1.11 $\rightarrow$ v1.12）**：在 v1.11 及更早版本中，只要 `enabled` 非空就会变成严格的 `replace` 替换白名单，导致没写进去的 MCP 工具被全部过滤掉。自 v1.12 起默认改为了 **`append`（追加模式）**——因此启用 `draw_svg` 等可选工具时不再会误杀 MCP 工具；如果你确实需要严格的精确白名单过滤，请显式设置 `enabled_mode = "replace"`。
+> **内置工具范围与按需发现说明**：
+> - **默认启用的内置工具**：除 `always_loaded` 中的 9 个常驻工具外，默认白名单还包含进入延迟池的 `search_recent_messages`、`get_llm_status`、只读群语录查询 `query_group_quotes`（仅群聊可用，支持按编号、关键词与发言人检索），Skill 启用时的 `read_skill_resource`、`search_skill_resources`、`run_skill_script`，以及本群开启群历史查询时的 `search_group_history`、`read_group_history`、`investigate_group_history`（仅群聊可用）。
+> - **5 个按需启用（Opt-in）的内置工具**：以下工具默认关闭，需在 `settings.tools.enabled` 中配合 `enabled_mode = "append"` 填入名称开启（`append` 模式会完整保留默认白名单与已启用的 MCP 工具；若需像 v1.11 及更早版本那样仅暴露指定工具，可显式设为 `enabled_mode = "replace"`）：
+>   - `draw_svg`：SVG 矢量画图（须同时在 `config/generation.toml` 中设置 `[svg] enabled = true`）；
+>   - `get_group_stats`：查看当前群消息统计与活跃用户排行（仅群聊可用）；
+>   - `get_rule_status`：查看当前群规则开关状态（仅群聊可用）；
+>   - `get_health_status`：执行内部配置与运行组件轻量自检（群聊与私聊均可用）；
+>   - `manage_scheduled_messages`：查看、创建、启停或删除当前群的定时消息任务（仅群聊可用）。
+> - **按名批量加载与纪元粘性保留**：`tool_search` 和 `tool_list` 是 QuickQuip 本地实现的元工具（详见 [tool-discovery.md](tool-discovery.md)）。开启按需发现时，每轮上下文信封会向模型列出当前可延迟加载的工具名，模型既可按关键词搜索，也可通过 `tool_search` 的 `select:名称1,名称2` 语法一次批量加载多个已知工具，或用 `tool_list` 浏览分组兜底。动态加载的工具在同一会话纪元（`scope × provider × model`）内跨轮次粘性保留并维持原有顺序，当轮延迟池清单会自动扣除已加载工具，同时保持 `system_prompt` 静态前缀稳定以提高缓存命中率；当纪元推进／重建、切换人格、清空会话或重启进程时自动重置。
 
 ---
 
@@ -328,7 +351,7 @@ LLM 按需检索本群归档历史的只读能力；默认关闭，群级开关�
 | `builtin_search` | 是否启用服务商原生联网搜索（**仅 `gemini` 与 `claude` 协议生效**；`openai_responses` 的原生搜索由下方 `responses_profile` 控制，不读取本开关）：<br>• `gemini`：请求携带 `google_search` 声明，保存 Grounding 来源供追溯；<br>• `claude`：请求在 `tools` 中声明 `{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}`，从 `server_tool_use` / `web_search_tool_result` / `citations` 提取检索词与引用来源；<br>开启后该渠道会话自动移除本地 `search_web` 工具并切换提示词引导，QQ 显示层隐藏来源引用及自动来源尾块（其他协议配置此项无效并会记录 warning；检索在服务端执行并计费，不计入本地轮次与 Token 看板）。<br>⚠️ **Gemini 版本兼容性警告**：将 `google_search` 与工具调用（Function Calling）放在同一次请求中混用，**仅 Gemini 3 系列模型支持**！如果你使用的是 Gemini 2.x 模型，必须关闭 `builtin_search` 或关闭全局 `tool_calling_enabled`，否则请求会被 Google API 直接拒绝 | `false` |
 | `gemini_empty_response_recovery` | Gemini GenerateContent 空回复补正开关，触发条件与额度规则见[空回复补正](#gemini-空回复补正) | `false` |
 | `gemini_empty_response_recovery_max_output_tokens` | 补正请求的输出额度上限，包含推理与回答；可设为 `1`–`1048576` | `65536` |
-| `responses_profile` | **`openai_responses` 协议专属后端能力档位**：<br>• `openai-public`（默认）：对接官方 `/v1/responses` 接口；<br>• `responses-plaintext-reasoning`：对接返回明文 `reasoning.content`（`type="reasoning_text"`）及 `response.reasoning.{delta,done}` 别名事件的兼容 Responses 端点（不发送 `service_tier`，保留 `store: false` 与 `low`–`xhigh` 档位）；<br>• `codex-http-relay`：对接 Codex 形态的第三方中转网关（不发送 `service_tier`、容忍 `codex.*` 扩展事件、当终态事件缺省字段时以流式完整收集的 item 作为历史回放基准）；<br>• `codex-relay-hosted-tools`：`codex-http-relay` 的全部行为，并在开启工具调用时由请求侧显式声明 `image_generation` 生图与 `web_search` 搜索工具；普通工具对话优先使用该原生搜索路径并移除本地 `search_web`，无 function 工具时也可使用；禁用工具后不声明搜索，相关历史使用通用投影；在 `store: false` 无状态回放模式下仅保留搜索动作与来源 URL，跨轮不恢复首轮未披露的网页正文（需要跨轮可读正文证据时请改用 `codex-relay-standalone-search`）；模型可自主搜索并产生额外费用，渠道不支持时切回 `codex-http-relay`；<br>• `codex-relay-standalone-search`：保留 relay 档位、事件对账与 `image_generation`，在开启工具调用时通过原生 `web.run` 与 `/alpha/search` 执行独立搜索，移除本地 `search_web` 且不声明 hosted `web_search`，明文检索结果落库并跨轮完整回放；禁用工具调用时关闭搜索。需上游同时支持 `namespace` 工具与 `/alpha/search` | `openai-public` |
+| `responses_profile` | **`openai_responses` 协议专属后端能力档位**：<br>• `openai-public`（默认）：对接标准官方 `/v1/responses` 接口；<br>• `responses-plaintext-reasoning`：对接返回明文 `reasoning.content`（`type="reasoning_text"`）及 `response.reasoning.{delta,done}` 别名事件的兼容 Responses 端点（不发送 `service_tier`，保留 `store: false` 与 `low`–`xhigh` 思考档位）；<br>• `codex-http-relay`：对接 Codex 形态的第三方中转网关（不发送 `service_tier`，兼容 `codex.*` 扩展事件，并在终态响应省略输出详情时自动用流式增量收集的完整条目补齐历史回放）；<br>• `codex-relay-hosted-tools`：包含 `codex-http-relay` 的全部行为，并在开启工具调用时向服务端声明托管 `image_generation` 生图与 `web_search` 搜索工具（自动移除本地 `search_web`，即使未加载其他函数工具也可搜索；关闭工具调用时不声明搜索）。由于采用 `store: false` 无状态回放，跨轮仅保留搜索动作与来源 URL，不会恢复首轮未展开的网页原文；若需要跨轮完整保留检索正文，请改用下方 `codex-relay-standalone-search`。模型自主发起的托管工具调用可能产生额外费用，若上游不支持请切回 `codex-http-relay`；<br>• `codex-relay-standalone-search`：包含 `codex-http-relay` 的事件兼容与托管 `image_generation` 生图能力，并在开启工具调用时改用原生 `web.run` 工具配合网关 `/alpha/search` 接口执行独立搜索（自动移除本地 `search_web` 且不声明托管 `web_search`），将明文检索结果写入会话历史供后续轮次完整回放；要求上游网关同时支持 `namespace` 工具定义与 `/alpha/search` 端点 | `openai-public` |
 | `reasoning_effort` | **思考档位（全协议通用）**：可选 `low` / `medium` / `high` / `xhigh` / `max` / `ultra`，留空 `""` 表示不发送思考参数（使用模型自身默认档）。系统会根据协议和模型家族自动翻译为对应的底层参数并做超档钳制（详见下方映射表）。支持在群内用 `/llm effort <档位>` 按群覆盖（`/llm effort default` 恢复跟随；`/llm status` 可查看“配置档 / 覆盖档 / 实际生效档”三层状态），也可在 Web 后台“群 LLM”页按群设置 | `""` |
 | `max_inline_media_bytes` | **单次请求内联图片总解码字节预算**（设为 `0` 表示不限制，详见下方媒体预算说明） | `5242880` (5 MiB) |
 | `epoch_*` / 预算键 | 支持同名覆盖 `settings.runtime` 中的 6 个 `epoch_*` 水位键，以及 `request_input_token_budget` 和 `agent_replay_loop_tokens` | `null` (继承全局) |
@@ -337,9 +360,9 @@ LLM 按需检索本群归档历史的只读能力；默认关闭，群级开关�
 
 在 Web Admin 的“渠道与模型 → 生成”中开启“Gemini 空回复补正”，保存草稿并应用到 Bot。渠道和单个模型均可设置；模型选择“跟随上层”时继承渠道值。启用后可能增加一次模型调用及对应费用。
 
-补正仅在单个候选以 `MAX_TOKENS` 结束、正文为空、没有工具调用或多模态产出，并携带非空 `continuationToken` 时触发。适配器在同一实际端点重发原始请求，附上该 token，将输出额度扩大为原额度的两倍，并受 `gemini_empty_response_recovery_max_output_tokens` 限制。例如原额度为 `16384`、补正上限为 `65536` 时，补正请求的额度为 `32768`。推理 token 仍计入额度；上限未高于原额度时跳过补正。渠道须支持返回 token 的续接请求，参见 [Google 的 GenerateContent 续接说明](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon)。
+补正仅在单个候选以 `MAX_TOKENS` 结束、尚无回答正文、没有客户端函数调用或多模态产出（仅含思考内容、签名或服务端原生搜索 `toolCall`／`toolResponse` 中间块但尚无回答正文时仍可触发），并携带非空 `continuationToken` 时触发。适配器在同一端点重发原始请求并附上该续接 token，将输出额度扩大为原额度的两倍，最高不超过 `gemini_empty_response_recovery_max_output_tokens`。例如原额度为 `16384`、补正上限为 `65536` 时，补正请求的输出额度为 `32768`。推理 token 同样计入该额度；若配置的补正上限未高于原额度则自动跳过补正。上游渠道须支持返回续接 token 的 GenerateContent 请求，参见 [Google 的 GenerateContent 续接说明](https://docs.cloud.google.com/gemini-enterprise-agent-platform/models/guides/gemini-4-argon)。
 
-每次生成最多补正一次，流式与非流式均支持。补正 HTTP 请求的总等待时间受 `timeout_seconds` 约束；失败时结束本次调用，已知用量保留。已有正文的截断回复、正常结束、安全拦截和 `CONTINUATION` 终值保持各自处理方式；探活与单次诊断不触发补正。
+单次模型调用最多执行一次补正，流式与非流式请求均支持。补正请求受 `timeout_seconds` 超时限制：成功时合并两次请求的用量统计，失败时保留首次请求已记录的用量并结束本次调用。渠道探活与单次诊断请求不启用补正。
 
 #### 渠道与模型的 JSON 层级示例
 
@@ -368,7 +391,7 @@ LLM 按需检索本群归档历史的只读能力；默认关闭，群级开关�
 
 #### 思考档位跨协议映射
 
-QuickQuip 内部统一的 6 个思考档位（`low` $\rightarrow$ `ultra`）在发送给不同协议后端时，会自动按以下矩阵翻译并钳制（注：`ultra` 是 Codex 订阅客户端的产品层档位，所有公开 API 的词表最高均止步于 `max`，因此任何渠道选 `ultra` 都会在底层自动降为 `max`）：
+QuickQuip 内部统一的 6 个思考档位（`low` → `ultra`）在发送给不同协议后端时，会自动按以下矩阵翻译并钳制（注：`ultra` 是 Codex 订阅客户端的产品层档位，所有公开 API 的词表最高均止步于 `max`，因此任何渠道选 `ultra` 都会在底层自动降为 `max`）：
 
 | 内部档位 (`reasoning_effort`) | OpenAI Chat<br>（顶层 `reasoning_effort`） | Claude 4.7+<br>（`adaptive` + `output_config.effort`） | Claude 4.6<br>（Opus / Sonnet） | Claude ≤ 4.5<br>（旧式 `budget_tokens`） | Gemini 3.x<br>（`thinkingLevel`） | Gemini 2.5<br>（`thinkingBudget`） |
 |---|---|---|---|---|---|---|
@@ -402,8 +425,8 @@ QuickQuip 内部统一的 6 个思考档位（`low` $\rightarrow$ `ultra`）在�
 以下为 2026-10 调研的各后端支持情况，供排障参考：
 - **Claude 官方协议**：Extended Thinking 自 **Claude 3.7** 代际引入（3.5 及更早模型无思考能力，若配置了档位下发 budget 会被上游拒绝）；而 **Claude 4.7+ / 5 系**仅接受新版 `adaptive + effort` 格式，若发送旧版 `type: "enabled"` 会直接报 `400`。
 - **Claude 兼容第三方端点（Kimi k3 / MiMo m2.5 / GLM Coding Plan 等）**：
-  - 这些面向 Claude Code 客户端设计的 Anthropic 兼容端点，对接收 `adaptive + effort` 并映射为自家思考档位有实测旁证，具体支持情况以所用端点为准。但请注意：**一旦在配置中开启了思考档位，QuickQuip 就会遵循 Anthropic 契约不再下发非默认的 `temperature`**（哪怕上游中转站实际上忽略了思考参数，你的自定义温度也不会下发）。
-  - **历史对话兼容问题**：某些兼容端点会拒绝历史 thinking 内容。若只在多轮工具对话中出错，请结合 Trace 核对返回的错误和历史内容；Claude 适配器没有自动剥离历史推理后重试的处理。历史保留与降级规则见[开发说明](../dev/llm-module.md#历史回放的协议约束)。
+  - 这类面向 Claude Code 客户端设计的 Anthropic 兼容端点通常支持接收 `adaptive + effort` 并映射为各自模型的思考档位。需注意：**只要在配置中开启了思考档位，QuickQuip 就会按 Anthropic 协议要求省略非默认的 `temperature`**（即使上游中转站实际上忽略了思考参数，自定义温度同样不会下发）。
+  - **历史对话兼容问题**：部分兼容端点会拒绝历史 thinking 内容。若仅在多轮工具对话中报错，请结合 Trace 核对上游返回的错误与历史内容；Claude 适配器不做自动剥离历史推理重试，历史保留与降级规则见[开发说明](../dev/llm-module.md#历史回放的协议约束)。
 - **Gemini 协议**：`thinkingLevel` 仅适用于 **Gemini 3.x**；**Gemini 2.5** 仅认识 `thinkingBudget`；而 **Gemini 2.0** 系列完全不支持思考参数（配置后会报错），且 `thinkingLevel` 与 `thinkingBudget` 绝不能同时发送。
 
 ---
@@ -412,11 +435,14 @@ QuickQuip 内部统一的 6 个思考档位（`low` $\rightarrow$ `ultra`）在�
 
 #### 图片预算与多轮对话排障
 
-`max_inline_media_bytes` 限制一次请求中全部内联图片解码后的总字节数，默认 5 MiB，`0` 表示不限。用户图片和工具结果共用预算。超限图片会先尝试压缩，仍放不下时跳过它和后续低优先级图片；优先保留当前提问、引用和近期消息里的图片。
+`max_inline_media_bytes` 限制单次请求中全部内联图片解码后的总字节数，默认 `5242880`（5 MiB），设为 `0` 表示不限制。用户输入图片与工具返回图片共用该预算；超限图片会先尝试压缩，仍放不下时跳过该图及后续低优先级图片，优先按“当前提问 → 引用消息 → 合并转发 → 近期群消息”的顺序保留图片（压缩与媒体组装细则见[图片输入实现](../dev/llm-module.md#43-图片输入边界)）。
 
-如果上游提示请求体过大，可以调小该值。图片经过 Base64 编码后体积约增加三分之一，另外还要计入文本与工具定义。压缩和媒体组装的具体规则见[图片输入实现](../dev/llm-module.md#43-图片输入边界)。
-
-Gemini 和 Responses 需要完整的工具调用与结果配对。工具批次超过轮次上限时会停止本轮，排障时检查 `tool_max_calls_per_round` 和模型返回的工具数。Responses 对符合条件的历史推理错误会去除历史 reasoning 后重试一次；Claude 不采用这条重试路径。完整条件见[历史回放说明](../dev/llm-module.md#历史回放的协议约束)。
+常见多轮与媒体报错处理：
+- **上游返回请求体过大（如 HTTP `413`）**：图片经 Base64 编码后体积约增加三分之一，并需与对话文本、工具定义共享网关请求体上限；遇到体积超限时，请调小该渠道或模型的 `max_inline_media_bytes`。
+- **多轮工具调用提前停止**：Gemini 与 OpenAI Responses 要求历史消息中的工具调用与工具结果严格成对；当模型单轮返回的工具调用数量超过 `tool_max_calls_per_round` 时，系统会中止本轮以防写入残缺配对。排障时请结合日志检查模型单轮调用数，按需调大 `settings.runtime.tool_max_calls_per_round`。
+- **跨渠道切换或严格上游报历史推理／签名 HTTP `400` 错误**：
+  - **Gemini `thoughtSignature` 兼容与自动降级重试**：适配器会自动剔除流式尾包的纯空文本块，并为缺少签名的历史 `functionCall` 填入官方哨兵值 `skip_thought_signature_validator`；当跨中转站切换或上游返回 HTTP `400` 明确拒绝历史 `thoughtSignature` 时，系统会自动降级历史模型轮中的签名（将工具调用签名替换为哨兵值，并剥离服务端工具中间块与普通签名）后重试一次。
+  - **OpenAI Responses 与 Claude 历史推理**：Responses 遇到符合条件的历史 reasoning 校验错误时会自动剥离历史 reasoning 重试一次；Claude 适配器不做自动剥离重试（完整条件见[历史回放说明](../dev/llm-module.md#历史回放的协议约束)）。
 
 ---
 
@@ -561,7 +587,7 @@ Gemini 和 Responses 需要完整的工具调用与结果配对。工具批次�
 | 键名 | 说明 |
 |----|------|
 | `enabled` | 全局总开关（`true` / `false`） |
-| `generate_cron` / `publish_cron` | 后台生成总结的 cron 表达式，以及发往群内的发布 cron 表达式（定时自动补发最多保留近 2 天内记录，单条最多尝试 3 次，同群按日期顺序串行发送） |
+| `generate_cron` / `publish_cron` | 后台生成总结的 cron 表达式，以及发往群内的发布 cron 表达式（发群时优先使用合并转发，若合并转发失败则自动降级渲染为单张浅色卡片长图发送；定时自动补发最多保留近 2 天内记录，单条最多尝试 3 次，同群按日期顺序串行发送） |
 | `min_messages` | 当日最小群消息数（不足时自动跳过不生成） |
 | `summary_length_hint` | 提示模型生成的目标字数 |
 | `routes.daily_summary` | 每日总结专属的有序模型级联候选列表 |
@@ -578,7 +604,7 @@ Gemini 和 Responses 需要完整的工具调用与结果配对。工具批次�
 |----|------|--------|
 | `enabled` | 全局总开关 | `false` |
 | `generate_cron` | 报告生成 cron 表达式 | 周报：`0 9 * * 1`（每周一 09:00）<br>月报：`0 9 1 * *`（每月1日 09:00） |
-| `publish_cron` | 报告发布 cron 表达式（周报与月报共用，每天检查发布新报告并在补发窗口内补发未发布记录：周报近 14 天、月报近 35 天，单条最多尝试 3 次，同群按周期顺序串行发送） | `0 10 * * *`（每天 10:00） |
+| `publish_cron` | 报告发布 cron 表达式（周报与月报共用，发群时优先合并转发、失败自动降级为单张长图；每天检查发布新报告并在补发窗口内补发未发布记录：周报近 14 天、月报近 35 天，单条最多尝试 3 次，同群按周期顺序串行发送） | `0 10 * * *`（每天 10:00） |
 | `min_messages` | 周期内触发生成的最小消息数门槛 | 周报：`100` / 月报：`300` |
 | `length_hint` | 目标生成字数提示 | 周报：`2000` / 月报：`2500` |
 | `input_char_budget` | **月报专属**：月报终稿聊天记录字符总预算（最小值为 `8000`） | `240000` |
@@ -623,7 +649,7 @@ Gemini 和 Responses 需要完整的工具调用与结果配对。工具批次�
 | `protocol` 取值 | 协议行为与适用服务说明 |
 |---|---|
 | `minimax_t2a_http` | MiniMax 同步 HTTP TTS（响应体直接包含 hex 编码音频） |
-| `minimax_t2a_async` | MiniMax 异步 TTS（创建任务 $\rightarrow$ 轮询状态 $\rightarrow$ 下载音频文件） |
+| `minimax_t2a_async` | MiniMax 异步 TTS（创建任务 → 轮询状态 → 下载音频文件） |
 | `openai_tts` | OpenAI TTS 兼容协议（`POST /audio/speech`，响应体为音频二进制流）。广泛兼容 **edge-tts、GPT-SoVITS、piper** 等本地语音服务的 OpenAI 包装层（对接本地无鉴权服务时可省略 `api_key_env`，请求时不附带 Authorization 头） |
 | `http_tts` | 通用自定义原始 HTTP POST 协议：请求体 JSON 直接从模型配置的 `extra_body` 模板派生，支持 `{text}` 和 `{voice}` 占位符自动替换，专用于对接非 OpenAI 格式的本地自建 TTS 服务（注：`extra_body` 中以双下划线开头的 `__path` 请求路径与 `__method` HTTP 方法属于内部控制字段，不会发往请求体） |
 
@@ -708,10 +734,10 @@ Gemini 和 Responses 需要完整的工具调用与结果配对。工具批次�
 
 | 配置区段 | 命中后的处理行为 |
 |------|------|
-| **`[block.<category>]`** | **硬拦截级**：命中后直接阻断 LLM 输入、替换脱敏 LLM 输出，或在工具调用链路上拒绝执行 / 替换工具返回结果 |
-| **`[soft.<category>]`** | **软观察级**：命中后仅记录审计日志，不阻断正常请求或回复 |
+| **`[block.<category>]`** | **硬拦截级**：命中后阻断 LLM 与多模态生成输入、替换脱敏模型输出、拒绝工具调用或清洗工具返回结果；在全局 OneBot 文本出口守卫（普通消息与合并转发节点）及长消息发群前预扫中命中时，直接替换为单条固定提示（不执行合并转发，也不降级渲染为 PNG 长图）；词云与热词统计静默跳过命中消息，不计入词频 |
+| **`[soft.<category>]`** | **软观察级**：命中后记录审计日志，对话请求、工具调用与消息出站均照常放行（词云统计不记录 `soft` 日志） |
 
-- 每个分类下使用 `words = ["词1", "词2"]` 定义词表；为保护隐私，命中日志中**记录命中的类别名称与词条哈希，不记录命中原文**。
+- 每个分类下使用 `words = ["词1", "词2"]` 定义词表；为保护隐私，命中日志**仅记录环节、类别名称与词条 SHA-256 前 12 位，不记录命中原文**。
 
 ---
 
@@ -859,7 +885,7 @@ scope         = ['group']  # 可选限制适用范围：'group' / 'private'，�
 
 - **作用域继承键（`_shared.toml`）**：除通用的 `shared_system_prompt` 与 `shared_style_prompt` 外，还支持 `shared_group_system_prompt`、`shared_private_system_prompt`、`shared_group_style_prompt`、`shared_private_style_prompt`，为单作用域人格（`scope = ["group"]` 或 `scope = ["private"]`）提供独立共享准则。
 - **Structured v2 结构化扩展表**：除了上述扁平字段外，人格文件还支持 `structured v2` 规范（示例见 `config/personas.example/structured.toml`），其中的 `[identity]`、`[biography]`、`[cognition]`、`[instinct]`、`[voice]`、`[boundaries]`、`[world]` 等扩展表会被运行时自动组装渲染进最终的 System Prompt 中。
-- **Persona v3 拓扑与按需百科（`schema_version = 3`）**：当人格文件声明 `schema_version = 3` 时，编译层按「`<persona_core>` → `<host_contract>` → `<voice_anchor>`」三段结构组装，支持以下字段（示例见 `config/personas.example/v3-topology.toml`）：
+- **Persona v3 拓扑与按需百科（`schema_version = 3`）**：当人格文件声明 `schema_version = 3` 时，编译层按“`<persona_core>` → `<host_contract>` → `<voice_anchor>`”三段结构组装，支持以下字段（示例见 `config/personas.example/v3-topology.toml`）：
   - `[portrait]`：常驻精简视觉锚点，通过 `appearance`（容貌身材）与 `attire`（穿着打扮）保持跨轮外貌与衣着一致性；详尽多再临变体的 `[appearance]` 档案表与 `[audit]` 备忘保留在文件中作参考，不进入每轮常驻 System Prompt。
   - `[mind]` 与 `[topology]`：定义核心驱动、判断逻辑、盲点、压力反应、行为向量及情境切换（`phase_shifts`）。
   - `[voice]`：定义声腔 `register`、节奏 `rhythm`、语气切换 `tone_shift`、低频自然词库 `lexical_palette` 与语言禁区 `anti_patterns`。

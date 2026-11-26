@@ -20,8 +20,8 @@ services:
       - environment-control:/run/quickquip-environment
     restart: unless-stopped
 
-  # 运维模板使用外部 SearXNG，通过 QUICKQUIP_SEARXNG_BASE_URL 配置其地址。
-  # 面向终端用户的开箱即用自带 searxng 见仓库根目录 docker-compose.example.yml。
+  # 生产模板连接外部独立的 SearXNG 服务，请在根目录 .env 中设置 QUICKQUIP_SEARXNG_BASE_URL。
+  # 如需开箱即用的内置 searxng 容器示例，请参考仓库根目录的 docker-compose.example.yml。
 
   quickquip:
     init: true
@@ -61,10 +61,10 @@ services:
       - ../llm_about:/app/llm_about:ro
       - ../bot.py:/app/bot.py:ro
       - ../src:/app/src:ro
-      # Skill 目录（共享）：位于部署根（与 data/ 同级），跨 release 与容器重建持久；
-      # bot 只读消费，在线安装/编辑经 web-admin 的读写挂载落盘。
+      # 共享 Skill 目录：位于部署根目录（与 data/ 同级），跨版本发布与容器重建持久保留；
+      # Bot 只读挂载，Web Admin 读写挂载以支持后台在线安装与编辑落盘。
       - ${QUICKQUIP_ROOT:-..}/skills:/app/skills:ro
-      # host-healthcheck 可选宿主机视图：取消下一行注释，将 /proc 只读挂载。
+      # 可选宿主机指标视图（供 host-healthcheck Skill 读取）：取消下一行注释以只读挂载 /proc。
       # - /proc:/host/proc:ro
     restart: unless-stopped
 
