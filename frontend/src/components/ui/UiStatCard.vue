@@ -1,11 +1,14 @@
 <template>
-  <article :class="['ui-stat-card', `ui-stat-card--${variant}`]">
+  <article :class="['ui-stat-card', `ui-stat-card--${variant}`, 'qq-glow-card']" data-glow-card>
     <div class="ui-stat-card__head">
       <span class="ui-stat-card__label">{{ label }}<UiInfoTip v-if="tip" :text="tip" /></span>
       <UiIcon v-if="icon" :name="icon" :size="15" class="ui-stat-card__icon" />
     </div>
     <div class="ui-stat-card__value-row">
-      <strong class="ui-stat-card__value">{{ displayValue }}</strong>
+      <strong class="ui-stat-card__value">
+        <UiDigitRoll v-if="useOdometer" :value="displayValue" />
+        <template v-else>{{ displayValue }}</template>
+      </strong>
       <small v-if="unit" class="ui-stat-card__unit">{{ unit }}</small>
     </div>
     <small v-if="sub" class="ui-stat-card__sub">{{ sub }}</small>
@@ -14,12 +17,14 @@
 
 <script setup lang="ts">
 /**
- * 统计卡。DashboardView 的 .stat-card 为同构样式，后续可统一回填。
- * 传入 countTo（数值）时启用 count-up 滚动动画，优先于 value 展示。
+ * 统计卡。
+ * - 传入 countTo（数值）时默认启用 UiDigitRoll 机械滚轮动效（可通过 :digit-roll="false" 切回 count-up）；
+ * - 传入字符串 value 时可显式开启 digit-roll 让数值型遥测指标平滑滚轮过渡。
  */
 import { computed } from 'vue'
 import UiIcon from './UiIcon.vue'
 import UiInfoTip from './UiInfoTip.vue'
+import UiDigitRoll from './UiDigitRoll.vue'
 import { useCountUp } from '../../composables/useCountUp'
 
 const props = withDefaults(defineProps<{
@@ -32,10 +37,12 @@ const props = withDefaults(defineProps<{
   sub?: string
   icon?: string
   variant?: 'default' | 'primary' | 'warn'
-  /** 数值型指标：传入后启用 count-up 滚动（覆盖 value 的展示） */
+  /** 数值型指标：传入后启用数字滚轮过渡（覆盖 value 的展示） */
   countTo?: number
-  /** count-up 展示格式化（如万缩写），默认千分位取整 */
+  /** 数值展示格式化（如万缩写），默认千分位取整 */
   countFormat?: (n: number) => string
+  /** 是否使用机械滚轮数字动效（countTo 默认开启，value 默认关闭） */
+  digitRoll?: boolean
 }>(), {
   value: '',
   unit: undefined,
@@ -45,12 +52,21 @@ const props = withDefaults(defineProps<{
   variant: 'default',
   countTo: undefined,
   countFormat: undefined,
+  digitRoll: undefined,
 })
 
-const counted = useCountUp(() => props.countTo)
+const useOdometer = computed(() => {
+  if (props.digitRoll !== undefined) return props.digitRoll
+  return props.countTo !== undefined
+})
+
+// 仅在显式关闭 digitRoll 时才运行 JS 逐帧 count-up，避免与 CSS 滚轮冲突
+const counted = useCountUp(() => (useOdometer.value ? undefined : props.countTo))
+
 const displayValue = computed(() => {
   if (props.countTo === undefined) return props.value
-  const n = Math.round(counted.value)
+  const raw = useOdometer.value ? props.countTo : counted.value
+  const n = Math.round(raw)
   return props.countFormat ? props.countFormat(n) : n.toLocaleString()
 })
 </script>
@@ -71,10 +87,21 @@ const displayValue = computed(() => {
   color: var(--qq-on-primary);
   background: var(--qq-gradient-brand);
   border-color: transparent;
+  --glow-color: rgba(255, 255, 255, 0.55);
+  --glow-sheen: rgba(255, 255, 255, 0.10);
 }
 
 .ui-stat-card--warn {
   border-color: var(--qq-warn);
+  --glow-color: rgba(245, 158, 11, 0.55);
+  --glow-sheen: rgba(245, 158, 11, 0.08);
+}
+
+.ui-stat-card__head,
+.ui-stat-card__value-row,
+.ui-stat-card__sub {
+  position: relative;
+  z-index: 1;
 }
 
 .ui-stat-card__head {

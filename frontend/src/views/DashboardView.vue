@@ -1,6 +1,6 @@
 <template>
-  <div class="dash-view">
-    <header class="dash-hero">
+  <div ref="dashRootRef" class="dash-view">
+    <header class="dash-hero qq-glow-card" data-glow-card>
       <div class="dash-hero__brand">
         <img class="dash-hero__logo" src="/brand.svg" alt="" width="48" height="48" aria-hidden="true">
         <div class="dash-hero__info">
@@ -29,7 +29,9 @@
         <router-link
           v-for="section in NAV_SECTIONS.filter(s => s.key !== 'overview')"
           :key="section.key"
-          class="domain-card"
+          class="domain-card qq-glow-card"
+          data-glow-card
+          :style="domainCardStyle(section.key)"
           :to="firstPath(section.key)"
         >
           <span class="domain-card__icon">
@@ -39,7 +41,7 @@
             <span class="domain-card__title">{{ section.label }}</span>
             <span class="domain-card__desc">{{ section.description }}</span>
           </span>
-          <UiIcon name="ArrowRight" :size="16" />
+          <UiIcon name="ArrowRight" :size="16" motion="nudge" />
         </router-link>
       </div>
 
@@ -118,7 +120,7 @@
             <router-link to="/conversations" class="dash-card-link">查看对话 <UiIcon name="ArrowRight" :size="14" /></router-link>
           </div>
           <div class="cron-summary">
-            <span class="llm-count">{{ fmt(data.llmConversations.count) }}</span>
+            <span class="llm-count"><UiDigitRoll :value="fmt(data.llmConversations.count)" /></span>
             <span class="muted">条消息</span>
             <span v-if="data.llmConversations.latest" class="muted" style="margin-left:auto">最近 {{ fmtTime(data.llmConversations.latest) }}</span>
           </div>
@@ -136,10 +138,15 @@ import UiTag from '../components/ui/UiTag.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiStatCard from '../components/ui/UiStatCard.vue'
+import UiDigitRoll from '../components/ui/UiDigitRoll.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchDashboardData, type DashboardData } from '../api/dashboard'
 import { NAV_ITEMS, NAV_SECTIONS } from '../config/nav'
+import { usePointerGlow } from '../composables/usePointerGlow'
+
+const dashRootRef = ref<HTMLElement | null>(null)
+usePointerGlow(dashRootRef)
 
 const data = ref<DashboardData | null>(null)
 const loading = ref(true)
@@ -172,6 +179,17 @@ function pct(value: number, max: number): number {
 
 function firstPath(sectionKey: string): string {
   return NAV_ITEMS.find(item => item.section === sectionKey)?.path || '/'
+}
+
+function domainCardStyle(sectionKey: string) {
+  const color = `var(--qq-domain-${sectionKey}, var(--qq-primary))`
+  const soft = `var(--qq-domain-${sectionKey}-soft, var(--qq-primary-soft))`
+  return {
+    '--card-domain-color': color,
+    '--card-domain-soft': soft,
+    '--glow-color': color,
+    '--glow-sheen': soft,
+  }
 }
 
 async function load() {
@@ -223,6 +241,8 @@ onMounted(() => { load() })
 }
 
 .dash-hero__brand {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: var(--qq-gap-md);
@@ -259,6 +279,8 @@ onMounted(() => { load() })
 }
 
 .dash-hero__actions {
+  position: relative;
+  z-index: 1;
   display: flex;
   align-items: center;
   gap: var(--qq-gap-sm);
@@ -297,21 +319,30 @@ onMounted(() => { load() })
 }
 
 .domain-card:hover {
-  border-color: var(--qq-primary);
+  border-color: var(--card-domain-color, var(--qq-primary));
   transform: translateY(-1px);
 }
 
 .domain-card__icon {
+  position: relative;
+  z-index: 1;
   width: 42px;
   height: 42px;
   display: grid;
   place-items: center;
   border-radius: var(--qq-radius-sm);
-  background: var(--qq-primary-soft);
-  color: var(--qq-primary);
+  background: var(--card-domain-soft, var(--qq-primary-soft));
+  color: var(--card-domain-color, var(--qq-primary));
+}
+
+.domain-card > svg {
+  position: relative;
+  z-index: 1;
 }
 
 .domain-card__body {
+  position: relative;
+  z-index: 1;
   display: flex;
   min-width: 0;
   flex-direction: column;
