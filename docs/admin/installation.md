@@ -2,7 +2,7 @@
 
 本文帮助部署者选择 QuickQuip 的运行位置和运行方式，并找到首次安装教程。部署按两个独立维度描述：**本地／云端**与**源码／Docker**。
 
-配置工具通过根 `.env` 中的两个部署枚举选择工作方式，设置方法见 [qqsync 指南](config-sync.md#先设置部署方式)。
+配置同步与工作副本工具通过根 `.env` 中的 `QUICKQUIP_DEPLOY_LOCATION` 与 `QUICKQUIP_DEPLOY_RUNTIME` 判断工作流向，设置说明见 [qqsync 指南](config-sync.md#先设置部署方式)。
 
 ## 确定部署方式
 
@@ -38,6 +38,17 @@ ONEBOT_WS_URLS=["ws://127.0.0.1:3001/"]
 
 在协议端填写与 `.env` 相同的 `ONEBOT_ACCESS_TOKEN`。反向 WebSocket 与其他连接方式见 [OneBot 接入说明](onebot-adapters.md#连接-quickquip)。
 
+### Windows 懒人包
+
+Release 分发的 `QuickQuip-*-windows-x64.zip` 已内置 Python、运行依赖、预构建 Web Admin 前端和 Playwright Chromium，按 [README 快速引导](../../README.md#windows-懒人包)解压并运行 `start.bat` 即可初始化配置与启动服务。日常运行与排障注意以下事项：
+
+- **SmartScreen 拦截提示**：浏览器直接下载的 ZIP 带有 Mark-of-the-Web 标记，解压后首次运行 `start.bat` 或内置 `python\python.exe` 时若弹出“Windows 已保护你的电脑”，点击“更多信息”→“仍要运行”即可（下载后使用命令行 `tar -xf` 解压不会传播该标记）。
+- **进程启停与后台窗口**：前台控制台（QQ Bot）可直接按 `Ctrl+C` 停止；运行期间任务栏会保留一个最小化的“QuickQuip Admin”命令行壳窗口，随 Web Admin 退出自动关闭。由于 Web Admin（`pythonw.exe`）独立于 Bot 窗口运行，直接关闭控制台不会停止后台，需在 PowerShell 执行以下命令结束 Web Admin 进程：
+  ```powershell
+  Get-CimInstance Win32_Process -Filter "Name='pythonw.exe'" | Where-Object { $_.CommandLine -match 'web_api.py' } | ForEach-Object { Stop-Process -Id $_.ProcessId }
+  ```
+- **日志与维护命令**：Web Admin 运行日志追加写入 `data\web-admin.log`（无自动轮转）；在解压目录执行配置或数据维护脚本时，统一调用随包的 `python\python.exe`（见[数据与资产维护](../../scripts/maintenance/README.md)）。
+
 ## 云端源码安装
 
 需要 SSH 访问服务器，并在服务器准备源码安装所需的 Python 环境；构建 Web 前端时同时准备 Node.js 与 pnpm。先在本地终端连接服务器，将账号与地址替换为实际值：
@@ -56,7 +67,7 @@ ssh -N -L 5104:127.0.0.1:5104 user@server
 
 保持隧道运行，在本地浏览器打开 `http://127.0.0.1:5104/ops/`，用服务器根 `.env` 中的 `WEB_ADMIN_PASSWORD` 登录。接着按[首次启用 LLM](llm-configuration.md#首次启用-llm)完成模型设置与第一条回复验证。
 
-`deploy-v4` 的代码发布面向云端 Docker。云端源码的程序更新由部署者管理；新版标准入口启动的 Bot/Web 支持通过 qqsync 同步配置和暂停／恢复服务，见[配置同步](config-sync.md)。
+`deploy-v4` 自动发布脚本面向云端 Docker 部署；云端源码部署的代码更新由管理员自行维护，通过项目根目录 `bot.py` 与 `web_api.py` 启动的 Bot 和 Web Admin 支持使用 `qqsync` 同步配置并自动暂停／恢复服务，详见[配置同步](config-sync.md)。
 
 ## 本地 Docker 安装
 
@@ -67,7 +78,7 @@ cp .env.example .env
 cp -r config/personas.example config/personas
 ```
 
-编辑根 `.env`，设置 `QUICKQUIP_DEPLOY_RUNTIME=docker`、`WEB_ADMIN_PASSWORD` 和自己的 `SEARXNG_SECRET`。启动并登录自备协议端，按[OneBot 接入说明](onebot-adapters.md#连接-quickquip)配置正向或反向 WebSocket。正向地址须从 Bot 容器可达。若复用源码配置，也请核对搜索地址，根 Compose 模板内置 SearXNG，通常可沿用默认值。
+编辑根目录 `.env`，设置 `QUICKQUIP_DEPLOY_LOCATION=local`、`QUICKQUIP_DEPLOY_RUNTIME=docker`、`WEB_ADMIN_PASSWORD` 以及自定义的 `SEARXNG_SECRET`。启动自备的 OneBot 协议端并登录 QQ，按[OneBot 接入说明](onebot-adapters.md#连接-quickquip)配置正向或反向 WebSocket（正向连接地址须从 Bot 容器内部可达）。根模板 `docker-compose.example.yml` 已内置 SearXNG 服务并自动注入容器内搜索地址；若复用本地源码环境的 `.env`，保持 `QUICKQUIP_SEARXNG_BASE_URL` 的默认配置即可。
 
 在同一项目根目录启动：
 
@@ -77,14 +88,14 @@ docker compose -f docker-compose.example.yml ps --all
 docker compose -f docker-compose.example.yml logs --tail 80 quickquip web-admin
 ```
 
-模板先通过 `config-init` 初始化配置，再启动 Bot 和 Web；该初始化服务成功后显示退出码 `0`，其他服务保持运行。已有数据库升级按[存储迁移](storage-migration.md)执行。
+模板会先启动环境代理 `env-agent` 并通过 `config-init` 初始化配置，初始化成功（退出码 `0`）后再启动 `quickquip` 和 `web-admin`。已有数据库升级按[存储迁移](storage-migration.md)执行。
 
 在 QuickQuip 日志中确认账号连上，再在测试群发送“早安”。收到规则回复后，打开 `http://127.0.0.1:5104/ops/` 登录后台，按[首次启用 LLM](llm-configuration.md#首次启用-llm)继续配置。
 
-根模板将应用的 `config/` 和 `data/` 保存在当前项目。按模板注释启用可选的资料和 Skill 挂载。修改根 `.env` 后，在项目根目录重新创建应用容器：
+根模板将应用的 `config/` 和 `data/` 挂载在当前项目目录下，并默认启用环境变量在线管理（见[管理环境变量](environment.md)）；可选的群资料与 Skill 目录按模板注释取消注释启用。日常通过后台面板更新已绑定渠道的 API Key 与贴吧关键词会自动热更新，无需重建容器；若修改了端口、OneBot 连接参数、`WEB_ADMIN_PASSWORD` 或卷挂载等启动期配置，请在项目根目录重新创建服务容器：
 
 ```bash
-docker compose -f docker-compose.example.yml up -d quickquip web-admin
+docker compose -f docker-compose.example.yml up -d
 ```
 
 停止服务使用 `docker compose -f docker-compose.example.yml down`，配置和主机目录中的数据继续保留。

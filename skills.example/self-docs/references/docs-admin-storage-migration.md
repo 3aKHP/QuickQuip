@@ -2,7 +2,7 @@
 
 # 将配置与运行数据分开存储（存储迁移指南）
 
-本文面向**从 1.16.3 升级到 1.16.4** 的已有安装环境（包括仍在使用 `data/llm_config.db`、在业务数据库中存放群设置、或使用混合定时消息文件的环境）。
+本文面向**从 `1.16.3`（`schema 3`）升级到 `1.16.4` 及更高版本**的未迁移环境（包括仍在使用 `data/llm_config.db`、在业务数据库中存放群设置、或使用混合定时消息文件的环境；已完成本迁移的环境后续升级更高版本时无需重复执行）。
 
 本次迁移会将 LLM 配置、群和私聊参数、牛牛文案模式收拢到独立的 SQLite 配置存储中，将发布与执行状态另存到运行期数据库，并把循环定时任务与一次性待办任务分开保存；同时完整保留现有的聊天记录、记忆、游戏记录、配置修订历史和任务进度。
 
@@ -36,7 +36,7 @@
    - 如果还是 `schema 1` 或 `schema 2`，必须先用支持 `schema 3` 的旧版本程序，按当时的升级说明升级到 `schema 3`，然后再进行本次迁移。
 2. **完整备份现有数据与环境**：
    - **备份文件与目录**：根目录 `.env`、`config/`、`data/`、`llm_about/`、`skills/` 以及私有运维配置。
-   - **保留回退资产**：保留协议端登录资产、旧版程序包或旧版 Docker 镜像标识（Tag/Digest）。
+   - **保留回退资产**：保留旧版程序包或旧版 Docker 镜像标识（Tag/Digest）；外部独立协议端的登录资产保持原位不动。
    - **数据库备份方式**：SQLite 数据库请使用一致性备份，或者在完全停止服务写入后直接完整复制备份整个数据目录。
    - **预留磁盘空间**：请确保磁盘有充足空间，迁移过程会自动生成并保存**三个旧数据库及定时消息文件的备份**。
 3. **停止 Bot 和 Web 服务（预留停服窗口）**：
@@ -91,16 +91,16 @@
 ### 方案 C：本地 Docker 与手工 Compose
 
 1. **更新 Compose 配置与镜像**：
-   - 保留旧版镜像版本和数据备份。
+   - 保留迁移前的旧版 Compose 文件、旧版镜像版本和数据备份。
    - 更新 Compose 文件中的卷挂载配置：
-     - **根目录模板布局**：Bot 容器在只读挂载 `config/` 的基础上，叠加挂载可写的 `config/managed/`。
-     - **生产 release 布局**：Bot 和 Web 容器均需挂载部署根目录下的共享目录。
-   - 将 `config-init`、`quickquip`、`web-admin` 三个服务固定为**同一个新版镜像**。
+     - **根目录模板布局**：Bot 容器在只读挂载 `config/` 的基础上，叠加挂载可写的 `config/managed/`，并同步接入 `env-agent` 与通信卷。
+     - **生产 release 布局**：Bot 和 Web 容器均需挂载部署根目录下的共享 `data/` 与 `config/managed/` 目录（以及 `env-agent` 所需的部署根目录与通信卷）。
+   - 将 `env-agent`、`config-init`、`quickquip`、`web-admin` 四个服务固定为**同一个新版镜像**。
 2. **执行容器迁移流程**：
    如果使用项目根目录的 Compose 模板，在项目根目录依次执行：
    ```bash
    # 1. 拉取新版镜像
-   docker compose -f docker-compose.example.yml pull config-init quickquip web-admin
+   docker compose -f docker-compose.example.yml pull env-agent config-init quickquip web-admin
 
    # 2. 停止正在运行的 Bot 和 Web
    docker compose -f docker-compose.example.yml stop quickquip web-admin
@@ -110,11 +110,11 @@
      python -m quickquip.llm.config_cli migrate-storage --services-stopped
 
    # 4. 确认上一条迁移命令成功（退出码为 0）后，启动新版服务
-   docker compose -f docker-compose.example.yml up -d quickquip web-admin
+   docker compose -f docker-compose.example.yml up -d env-agent quickquip web-admin
    ```
    > **注意**：
    > - 必须确认迁移命令成功完成后，才能启动服务。请保留好迁移输出的 `backup` 目录以及 `data/storage-migration.json`。
-   > - **没有 `config-init` 服务的手工生产 Compose**：请先构建好候选新版镜像，然后使用挂载了真实配置和数据目录的 `web-admin` 维护容器来执行相同的 `migrate-storage --services-stopped` 命令。
+   > - **没有 `config-init` 服务的手工生产 Compose**：请先构建好新版镜像，然后使用挂载了真实配置和数据目录的 `web-admin` 容器（`run --rm --no-deps web-admin`）执行相同的 `migrate-storage --services-stopped` 命令。
 
 ---
 
@@ -134,9 +134,9 @@ scripts/deploy/deploy-v4.ps1 -MigrateStorage
 
 #### `deploy-v4 --migrate-storage` 的自动执行逻辑与约束：
 - **保护服务器现有配置**：该选项会自动关闭本次配置同步，完整保留服务器上的现有配置。根目录 `.env` 默认继续使用服务器上的版本；如果你希望在迁移同时上传本地的 `.env` 凭据，请显式加上 `--env local`（PowerShell 为 `-EnvSource local`）。
-- **自动化流水线与自动回滚**：部署驱动会先构建候选镜像 $\rightarrow$ 停止 Bot 和 Web $\rightarrow$ 执行存储迁移 $\rightarrow$ 启动候选新版本 $\rightarrow$ 执行健康检查（生成的备份保留在共享数据目录中）：
+- **自动化流程与失败回滚**：部署脚本会依次执行：构建新版镜像 → 停止 Bot 和 Web → 执行存储迁移 → 启动新版本服务 → 执行健康检查（生成的备份保存在共享数据目录中）：
   - 如果**迁移过程本身失败**：自动恢复原存储结构。
-  - 如果**迁移成功，但候选版本启动后健康检查失败**：会自动将存储**反向转换回旧格式**，并重新启动旧版本服务。
+  - 如果**迁移成功，但新版本服务启动后健康检查失败**：会自动将存储**反向转换回旧格式**，并重新启动旧版本服务。
 - **参数组合限制**：
   - 存储迁移强制要求执行健康检查，因此**不能**与“跳过健康检查”或“推送配置”选项同时使用。
   - 如果你是旧的平铺目录部署，可以将平铺目录迁移参数 `--migrate` 与 `--migrate-storage` 组合在一起同时执行。
@@ -185,9 +185,9 @@ scripts/deploy/deploy-v4.ps1 -MigrateStorage
 
 ### 2. 如何回退到旧版本存储布局（Rollback）？
 
-如果你在迁移完成后需要回退到旧版本程序，**不能直接启动旧版程序**，必须先使用迁移时生成的备份目录，将存储结构**反向转换**回旧格式。
+如果你在迁移完成后需要回退到 `1.16.3` 旧版本程序，**不能直接启动旧版程序**，必须先使用迁移时生成的备份目录，将存储结构**反向转换**回旧格式。
 
-- **回退的核心优势（不丢新数据）**：对已完成迁移的环境执行 `--rollback` 时，工具**不会**简单粗暴地用老备份覆盖你迁移后新产生的聊天记录，而是会**保留迁移后新产生的业务记录与任务进度**，同时把配置和存储结构重建回旧版（`schema 3`）格式。
+- **保留迁移后新增的业务数据**：对已完成迁移的环境执行 `--rollback` 时，工具在将配置与存储结构还原为旧版（`schema 3`）格式的同时，会完整保留迁移期间新产生的聊天记录、记忆、游戏记录与已执行的任务进度。
 
 #### 通用回退命令
 
@@ -203,8 +203,8 @@ python -m quickquip.llm.config_cli migrate-storage --services-stopped --rollback
 |---|---|
 | **源码安装** | 1. 停止新版 Bot 和 Web；<br>2. 在新版环境下运行上述 `--rollback <备份目录>` 命令；<br>3. 转换成功后，切回支持 `schema 3` 的旧版代码并启动旧程序。 |
 | **Windows 懒人包** | 1. 停止新包的服务；<br>2. 使用**新包**目录里的 `python\python.exe` 执行上述 `--rollback <备份目录>` 命令；<br>3. 将已经反向转换回旧格式的配置和业务数据复制交还给**旧包**目录，再启动旧包。 |
-| **本地根 Compose** | 1. 停止 `quickquip` 和 `web-admin`；<br>2. 使用候选（新版）的 `config-init` 维护容器运行上述 `--rollback <备份目录>` 命令（注意：备份目录需填写**容器内的路径**）；<br>3. 将 `config-init`、`quickquip`、`web-admin` 三个服务镜像切回旧版并启动。 |
-| **生产 Release 布局 (`deploy-v4`)** | （注：如果直接运行普通的 `deploy-v4.sh --rollback`，脚本会拦截并提示你先完成以下存储反向转换步骤）<br>1. 先停止服务器上的 Bot 和 Web 服务；<br>2. 使用候选（新版）的 `web-admin` 维护容器执行上述 `--rollback <备份目录>` 命令（路径填容器内路径）完成反向转换；<br>3. 执行 `scripts/deploy/deploy-v4.sh --rollback` 切回旧版程序（全程保留同一份共享配置和业务数据）。 |
+| **本地根 Compose** | 1. 停止 `quickquip`、`web-admin` 和 `env-agent`；<br>2. 使用新版 `config-init` 容器运行上述 `--rollback <备份目录>` 命令（注意：备份目录需填写**容器内的路径**）；<br>3. 恢复迁移前备份的 `1.16.3` 旧版 Compose 文件，将服务镜像切回旧版后重新启动。 |
+| **生产 Release 布局 (`deploy-v4`)** | （注：如果直接运行普通的 `deploy-v4.sh --rollback`，脚本会拦截并提示你先完成以下存储反向转换步骤）<br>1. 先停止服务器上的 Bot、Web 与 `env-agent` 服务；<br>2. 使用新版 `web-admin` 容器执行上述 `--rollback <备份目录>` 命令（路径填容器内路径）完成反向转换；<br>3. 执行 `scripts/deploy/deploy-v4.sh --rollback` 切回旧版程序（若回退到 `1.16.3` 旧版，请一并恢复迁移前的旧版 `prod/docker-compose.yml`；全程保留同一份共享配置和业务数据）。 |
 
 #### 回退后的核对与再次升级
 
@@ -222,7 +222,7 @@ python -m quickquip.llm.config_cli migrate-storage --services-stopped --rollback
 
 | 功能类别 | 新版所在路径 | 迁移与兼容说明 |
 |---|---|---|
-| **部署程序** | `scripts/deploy/` | 维护程序随代码一起分发；`prod/` 目录现在仅用于保留真实配置及协议端登录资产 |
+| **部署程序** | `scripts/deploy/` | 维护程序随代码仓库分发；`prod/` 目录用于存放私有 Compose 编排、运维通知密钥（`sendkey.env`）及可选私有部署钩子（OneBot 协议端登录资产由外部协议端独立维护） |
 | **巡检与监控指标** | `scripts/ops/` | 请更新 cron 定时任务及监控脚本中的路径 |
 | **数据维护工具** | `scripts/maintenance/` | 请更新自定义维护脚本或快捷方式中的路径 |
-| **生产环境 Dockerfile** | `docker/Dockerfile.prod` | 生产部署驱动（`deploy-v4`）会自动为旧的 `prod/Dockerfile` 引用生成兼容构建文件；如果是**手工维护的 Compose 文件**，请对照新版模板手动更新构建路径 |
+| **生产环境 Dockerfile** | `docker/Dockerfile.prod` | 生产部署脚本（`deploy-v4`）会自动为旧的 `prod/Dockerfile` 引用生成兼容构建文件；如果是**手工维护的 Compose 文件**，请对照新版模板手动更新构建路径 |

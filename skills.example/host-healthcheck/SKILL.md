@@ -55,6 +55,6 @@ description: 当用户询问服务器/宿主机健康状态（CPU 负载、内�
 
 ## 禁止事项
 
-- 只跑 `scripts/collect.py`；不要借 run_skill_script 执行与采集无关的命令。
+- 只跑 `scripts/collect.py`；不要借 `run_skill_script` 执行与采集无关的命令。
 - 脚本只读；不要尝试修改任何系统或容器状态。
 - 不要向用户粘贴原始 JSON 或冗长字段，转述关键数字即可。

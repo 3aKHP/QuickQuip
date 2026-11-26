@@ -12,44 +12,36 @@ superseded_by: []
 
 ## 背景
 
-Agent 执行记录需要保存工具调用事实，以支持回放、交付检查和异常处理。查询近期聊天得到的正文已有自己的来源；将查询副本持续加入会话执行记录，会改变会话库的内容范围，并增加后续重放预算。
+Agent 执行记录需要保存工具调用事实，以支撑跨轮历史回放、消息交付核对与异常恢复。然而部分只读查询工具（如检索近期聊天、历史归档或群语录）返回的正文在自身数据源中已有权威留存；若把每次检索出的原文副本持续写入会话库，不仅会让会话存储混入额外归档副本，还会迅速推高后续轮次的重放上下文开销。
 
-普通工具结果需要有界保留，临时查询正文则需要独立的保留政策。HTTP Trace 承担实际请求与响应的诊断留档，其职责与业务记录分别管理。
+因此，工具执行记录需要区分常规工具结果的有界持久化与临时查询结果的当轮消费边界。原始模型请求与响应的排障留档由独立的 HTTP Trace 按诊断开关承担，不占用业务会话库。
 
 ## 决定
 
-工具结果使用明确的保留策略。`bounded` 在业务记录的体积和保留约束内保存允许的工具结果；`ephemeral` 的查询结果正文仅用于当前回合，业务记录保留调用结构、状态和确定的省略说明。
+为工具调用结果定义两档显式保留策略：
 
-临时查询结果的正文、分页游标和请求内命中内容保持临时性。省略正文后的回放继续说明原执行事实，保留成功、失败和结果不确定各自的含义。原生状态的保存与重放也应遵循相应内容保留边界。
+- `bounded`：在业务记录的体积与生命周期约束内保留经过清洗的工具结果正文，供后续轮次跨轮回放复用。
+- `ephemeral`：查询结果正文仅在当前 Agent Loop 内供模型推理消费；循环结束后，业务记录保留工具调用结构、执行状态与明确的省略标记，不再落库保存结果正文、分页游标或请求内命中明细。
+
+省略正文后的历史回放仍如实表达该工具曾被调用及其成功、失败或中断状态。协议原生状态块（如包含完整工具输出条目的原生响应副本）同样服从该保留边界，一旦当轮触达 `ephemeral` 工具即停止跨轮原生保留，避免临时查询原文经由原生状态旁路落库。
 
 ## 方案与理由
 
-历史评估考虑过用记录侧表补足对话过程，并讨论已离开活动窗口的记录查询。已确认方案分别规定普通结果的有界保存与查询正文的临时用途，将模型摘要和模型侧旧记录查询后置。
-
-这项选择服务于会话库的内容语义和重放预算。全量群聊归档由聊天归档体系维护；查询正文的临时政策按业务记录的用途解释。HTTP Trace 继续按独立诊断开关与保留规则留档。
+早期讨论曾考虑用附加记录侧表保存检索过程，或直接把检索结果纳入常规会话压缩。由于全量群聊消息与语录已由各自领域存储独立维护（见 [ADR-0007](0007-unified-chat-archive.md)），在 `llm.db` 中重复保存检索副本既缺乏增量事实价值，又会挤占正常对话的历史窗口预算。将查询正文定为 `ephemeral` 并保留结构化调用回执，能够在不丢失“模型查过什么、结果是否成功”的前提下守住会话库的职责边界与重放成本。
 
 ## 影响
 
-业务层能够保留工具执行的完整状态，同时为结果正文选择适当的保留方式。查询工具接入记录器时，需要显式传递保留策略；存储、原生状态和后续投影需要共同落实这一选择。
+工具定义与执行记录器之间需要显式声明并传递保留策略与参数脱敏规则；存储层、协议原生状态保存与跨轮历史投影需协同遵守同一边界。排查单次临时查询向模型实际输入了哪些原文时，管理员可通过开启 HTTP Trace 查看当轮原始报文。
 
 ## 落地核对
 
-核对基线为提交 `7a11405`。存储层已提供 `EPHEMERAL` 与 `BOUNDED`，并在临时策略下省略结果正文。当前工具循环调用记录器时未传递 `retention`，记录器使用默认 `bounded`；查询工具的策略选择需要在该入口补齐。该接入缺口属于本项已接受决策的后续实现工作。
+提交 `7a11405` 先行在存储层实现了 `EPHEMERAL` 与 `BOUNDED` 枚举及结果正文省略逻辑。2026-11（[Issue #72](https://github.com/3aKHP/QuickQuip/issues/72) 及后续扩展）完成了从工具注册元数据（`result_retention` 与 `redact_arguments`）、工具循环传递到执行记录器的全链路接线：声明了参数脱敏的工具仅按白名单持久化查询模式、分页偏移、时间范围或引用计数等结构化字段，不落库原始关键词与发言人文本；当轮一旦调用 `ephemeral` 工具，协议原生副本仅在内存中维持至当前 Agent Loop 结束，落库时整轮省略并标记 `NativeOmissionReason.EPHEMERAL_POLICY`。现已接入 `ephemeral` 策略的工具涵盖近期消息检索 `search_recent_messages`、群历史查询工具组（[ADR-0027](0027-history-investigation-executor.md)）以及只读群语录查询工具 `query_group_quotes`。
 
 ## 依据与相关契约
 
-- [PR #213：Agent Loop 实现](https://github.com/3aKHP/QuickQuip/pull/213)
+- [PR #213：Agent Loop 实现](https://github.com/3aKHP/QuickQuip/pull/213)、[PR #341：群历史查询与 ephemeral 全链路接线](https://github.com/3aKHP/QuickQuip/pull/341)、[PR #377：群语录只读查询工具](https://github.com/3aKHP/QuickQuip/pull/377)
 - [保留策略类型](../../../src/quickquip/llm/agent_records.py)、[存储的结果保留处理](../../../src/quickquip/llm/store_parts/agent_records.py)
-- [工具循环入口](../../../src/quickquip/llm/tool_loop.py)、[记录器默认策略](../../../src/quickquip/llm/service_parts/agent_runtime.py)
+- [工具循环入口](../../../src/quickquip/llm/tool_loop.py)、[记录器策略接线](../../../src/quickquip/llm/service_parts/agent_runtime.py)
 - [HTTP Trace 职责](../llm-module.md#1-模块定位)
-- [MCP 内容进入模型的归一化边界](0018-mcp-result-normalization.md)
+- [群历史查询与专用调查执行器](0027-history-investigation-executor.md)、[MCP 内容进入模型的归一化边界](0018-mcp-result-normalization.md)
 - [临时检索结果术语](../../glossary.md#ephemeral-result)
-
-## 2026-11 补记：ephemeral 全链接线（#72）
-
-本 ADR 定义的 EPHEMERAL 保留政策随 #72 落到工具面：注册元数据
-（`result_retention` / `redact_arguments`）→ 工具循环传递 retention →
-记录器按政策省略结果正文；声明参数按白名单持久化（只留模式/时间范围/
-引用计数）；ephemeral 工具触达后的 Loop，Turn 原生副本整体省略
-（`NativeOmissionReason.EPHEMERAL_POLICY`），内存协议状态保留至 Loop
-结束。首批接入：`search_recent_messages` 与群历史三工具（ADR-0027）。

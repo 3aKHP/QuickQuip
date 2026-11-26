@@ -2,235 +2,227 @@
 
 # QuickQuip 项目术语表
 
-本文供用户、管理员和开发者查阅项目概念。条目给出统一名称、常用英文或代码映射及简短定义；字段约束和操作步骤由链接的领域文档维护。术语按部署、配置、会话、历史和扩展能力分组。
+本文供用户、管理员和开发者查阅项目核心概念。每个词条给出统一中文名称、常用英文或代码标识及简明定义；具体参数、命令与操作步骤见词条末尾链接的领域文档。术语按部署、配置、会话、历史和扩展能力分组。
 
 ## 部署与运行
 
 <a id="deployment-location"></a>
 ### 部署位置（Deployment location）
 
-相对于执行配置或部署命令的电脑区分本地与云端。本地直接操作当前项目的配置和服务；云端通过 SSH 操作另一台服务器。它与应用的运行方式独立。见[部署分类与安装入口](admin/installation.md#确定部署方式)。
+按配置或部署命令的操作目标区分“本地”与“云端”：本地直接读写当前机器上的项目目录并管理本机服务，云端通过 SSH 操作远端服务器。见[部署分类与安装入口](admin/installation.md#确定部署方式)。
 
 <a id="runtime-mode"></a>
 ### 运行方式（Runtime mode）
 
-QuickQuip Bot 和 Web Admin 使用主机 Python 进程或 Docker 容器运行，文档分别称为源码与 Docker。Windows 懒人包归入主机 Python 进程；源码构建镜像和挂载源码的 hybrid 部署归入 Docker。见[部署分类与安装入口](admin/installation.md#确定部署方式)。
+QuickQuip Bot 与 Web Admin 的进程运行形态，分为主机 Python 进程（文档简称“源码”，包含 Windows 懒人包）与 Docker 容器（包含发行镜像、本地构建镜像及挂载源码的混合编排）。见[部署分类与安装入口](admin/installation.md#确定部署方式)。
 
 <a id="onebot-backend"></a>
 ### 协议端（OneBot backend）
 
-由部署者独立提供的 QQ 服务，为 QuickQuip 提供 OneBot V11 连接、消息与调用。接入方式见[协议端说明](admin/onebot-adapters.md)，分发边界见 [ADR-0032](dev/adr/0032-swappable-onebot-backend.md)。
+由部署者独立运行并维护 QQ 登录态的协议服务（如 LLBot、NapCat），通过 OneBot V11 协议为 QuickQuip 提供消息收发与接口调用。接入方法见[协议端说明](admin/onebot-adapters.md)，职责边界见 [ADR-0032](dev/adr/0032-swappable-onebot-backend.md)。
 
 ## 配置与生效
 
 <a id="provider"></a>
 ### 渠道（Provider）
 
-一组提供模型调用能力的连接配置，包含稳定 ID、协议、地址、认证引用和模型清单。服务商品牌相同的连接可以配置为多个渠道。代码中的 `provider_id` 指向渠道 ID。见[配置接口](dev/llm-configuration-api.md)。
+一组可直接调用上游模型接口的连接配置，包含稳定标识（代码中为 `provider_id`）、协议类型、接口地址、认证凭据引用和可用模型清单。同一服务商可按用途、密钥或中转入口配置为多个渠道。见[配置接口](dev/llm-configuration-api.md)。
 
 <a id="protocol"></a>
 ### 协议（Protocol）
 
-QuickQuip 与模型服务交换请求和响应的格式约定，例如 OpenAI Chat Completions、Anthropic Messages、Gemini GenerateContent 和 OpenAI Responses。渠道选择协议，协议适配器负责相应序列化和解析。见[LLM 模块](dev/llm-module.md#请求组装与协议处理)。
+QuickQuip 与上游模型服务通信时使用的请求和响应格式约定，支持 OpenAI Chat Completions、Anthropic Messages、Gemini GenerateContent 和 OpenAI Responses 四类。渠道选定协议后，由对应的协议适配器完成请求组装与响应解析。见[LLM 模块](dev/llm-module.md#请求组装与协议处理)。
 
 <a id="model-id"></a>
 ### 模型标识（Model ID）
 
-渠道配置中用于请求模型的名称，接口字段为 `model`。引用与定价使用渠道 ID 和模型标识组成的 `(provider_id, model)`；上游响应回报的模型名用于观测。见[配置接口](dev/llm-configuration-api.md#校验导入与历史)。
+渠道配置中发往上游接口的实际模型名称，接口字段为 `model`。系统内的模型绑定、路由与计费定价均以 `(provider_id, model)` 组合唯一定位。见[配置接口](dev/llm-configuration-api.md#校验导入与历史)。
 
 <a id="model-alias"></a>
 ### 模型别名（Model alias）
 
-渠道内便于选择模型的名称映射。调用时先解析别名，模型请求使用解析后的名称；别名清单由渠道配置维护。见[渠道与模型接口](dev/llm-configuration-api.md#修订与读写)。
+渠道内为较长或带日期后缀的模型标识设置的简短代称。用户在命令或配置中填写别名时，调用前会先解析为对应的模型标识。见[渠道与模型接口](dev/llm-configuration-api.md#修订与读写)。
 
 <a id="config-draft"></a>
 ### 配置草稿（Configuration draft）
 
-配置数据库中供编辑和校验的当前文档。保存草稿后，通过独立的应用操作把选定内容交给 Bot。见[配置操作](admin/llm-configuration.md#首次启用-llm)。
+配置数据库中供在线编辑和校验的工作版本。保存操作只会更新草稿，需进一步执行“应用”才会将选定草稿发布给 Bot 加载。见[配置操作](admin/llm-configuration.md#首次启用-llm)。
 
 <a id="config-workspace"></a>
 ### 配置工作副本（Configuration workspace）
 
-由本地真实配置生成的可编辑目录：数据库内容展开为业务 TOML，其余文件保留原格式。默认位于 `.config-workspace/`，保存注释、共同基线和恢复资料。见[工作副本操作](admin/config-workspace.md)。
+供本地文件编辑使用的配置展开目录（默认位于 `.config-workspace/`）。其中数据库受管配置会展开为带注释的业务 TOML 文件，其余独立配置文件保持原格式，同时保存合并基线与中断恢复信息。见[工作副本操作](admin/config-workspace.md)。
 
 ### qqconf
 
-本地配置工作副本 CLI。`unpack` 接收真实配置，`refresh` 只读预览，`pack` 校验并写回真实配置或 `.config-staging/` 候选。配置生效由应用和部署流程负责。见[命令指南](admin/config-workspace.md)。
+管理本地配置工作副本的命令行工具：`unpack` 从真实配置生成或更新工作副本，`refresh` 只读预览双端差异，`pack` 校验并将修改写回本地配置或生成 `.config-staging/` 暂存候选。见[命令指南](admin/config-workspace.md)。
 
 ### qqsync
 
-真实配置同步与生效 CLI。`refresh` 只读预览，`push` 推送配置或安装本地暂存，`pull` 回流线上配置。部署位置和运行方式由真实根 `.env` 决定；服务保持各自原有启停状态。见[命令指南](admin/config-sync.md)。
+跨环境同步配置并触发服务生效的命令行工具，按根 `.env` 中的部署位置与运行方式工作：`refresh` 只读预览变更，`push` 推送本地配置或安装暂存候选并按需通知运行中服务生效，`pull` 将线上配置拉回本地。见[命令指南](admin/config-sync.md)。
 
 <a id="config-revision"></a>
 ### 配置修订（Configuration revision）
 
-识别配置内容及并发修改的递增编号，接口字段为 `revision`。有效内容变更增加修订号，相同内容保存保持编号。项目发行版本、数据库 schema 和会话历史修订分别使用各自的标识。见[修订与读写](dev/llm-configuration-api.md#修订与读写)。
+配置数据库中用于标记版本与检测并发冲突的递增编号，接口字段为 `revision`。配置内容发生实际变化时递增，重复保存相同内容不会改变编号。见[修订与读写](dev/llm-configuration-api.md#修订与读写)。
 
 <a id="config-snapshot"></a>
 ### 配置快照（Configuration snapshot）
 
-应用或探测任务绑定的不可变配置输入。建立快照后继续修改草稿，该任务仍使用原目标；历史中包含应用和探测的快照，发布结果需结合任务状态判断。见[应用与探测](dev/llm-configuration-api.md#应用探测与运行状态)。
+发起“应用”或“探测”任务时冻结的一份不可变配置副本。快照生成后即使继续修改草稿，已创建的任务仍按启动时的快照执行。见[应用与探测](dev/llm-configuration-api.md#应用探测与运行状态)。
 
 <a id="published-config"></a>
 ### 已发布配置（Published configuration）
 
-配置数据库记录的当前发布版本。它与草稿、Bot 回报的加载版本分别展示，帮助管理员判断编辑和生效进度。见[配置状态](dev/llm-configuration-api.md#应用探测与运行状态)。
+配置数据库中最近一次执行“应用”所指定的目标运行配置。管理员可在后台对照草稿修订号、已发布配置与已加载配置，确认最新修改是否已发布并被 Bot 接纳。见[配置状态](dev/llm-configuration-api.md#应用探测与运行状态)。
 
 <a id="loaded-config"></a>
 ### 已加载配置（Loaded configuration）
 
-Bot 最近回报已接纳的运行配置版本，通过 `loaded_revision` 等状态字段观察。MCP 连接、工具发现等组件的就绪状态另外回报。见[运行状态](dev/llm-configuration-api.md#应用探测与运行状态)。
+Bot 进程实际完成装载并投入运行的配置版本（状态字段 `loaded_revision`）。执行“应用”后，待 Bot 拉取快照并完成重载，“已加载配置”即更新为刚发布的版本。见[运行状态](dev/llm-configuration-api.md#应用探测与运行状态)。
 
 ## 会话与执行
 
 <a id="scope"></a>
 ### 作用域（Scope）
 
-会话设置、历史和相关业务状态的隔离范围，例如一个群聊或一位用户的私聊入口。同一作用域可以先后绑定不同的业务 Session。见[上下文边界](dev/llm-module.md#4-上下文边界)。
+隔离对话设置、短期上下文与长期记忆的单元，通常对应一个群聊（`group:<群号>`）或一位私聊用户（`private:<QQ号>`）。见[上下文边界](dev/llm-module.md#4-上下文边界)。
 
 <a id="session"></a>
 ### 业务会话（Session）
 
-应用维护的一段持续 LLM 交互，具有稳定身份和明确的续接、归档与结束边界。聊天中的工具续轮、重试、冷场缩窗和服务重启沿用所属身份；独立任务按业务操作建立身份。本条适用于 LLM，游戏的 Session 模式见[游戏框架](dev/game-framework.md)。详细生命周期见[LLM 短期会话](dev/llm-module.md#42-llm-短期会话)。
+一段连续的 LLM 对话周期，具有稳定的 Session 标识及明确的开启、续接、存档与结束边界。日常对话中的多轮工具调用、失败重试、冷场缩窗和进程重启都会沿用当前业务会话身份；定时报告与单发命令则按各自任务独立建立身份（群内小游戏的对局 Session 另见[游戏框架](dev/game-framework.md)）。见[LLM 短期会话](dev/llm-module.md#42-llm-短期会话)。
 
 <a id="epoch"></a>
 ### 会话纪元（Session epoch）
 
-某个作用域、渠道和模型下，管理历史读取窗口与冻结表达的阶段，常简称“纪元”或 `epoch`。窗口或表达需要重建时推进纪元，业务 Session 可以继续保持。见[LLM 短期会话](dev/llm-module.md#42-llm-短期会话)及[冻结决策](dev/adr/0003-epoch-history-freezing.md)。
+同一作用域、渠道与模型组合下，管理对话历史读取起点与已冻结前缀的阶段编号（简称“纪元”或 `epoch`）。遇到清空上下文、切换人格或冷场缩窗等需要重建上下文窗口的情形时，系统推进到新纪元，所属业务会话身份保持延续。见[LLM 短期会话](dev/llm-module.md#42-llm-短期会话)及[冻结决策](dev/adr/0003-epoch-history-freezing.md)。
 
 <a id="agent-loop"></a>
 ### 执行回合（Agent Loop）
 
-一次外部触发启动的完整生成、工具执行和交付过程，可包含多个模型轮次。业务执行记录中的 Loop 与 HTTP Trace 的调用分组各自维护关联标识。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
+由一次用户触发或定时任务启动的完整 AI 处理闭环，内部可包含一轮或多轮模型生成、工具调用及消息发送。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
 
 <a id="turn"></a>
 ### 模型轮次（Turn）
 
-一个完整接收并通过结构校验的模型响应。工具调用轮和最终回复轮都可以形成 Turn；其中可显示的正文按交付策略生成消息片段。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
+单个执行回合内，模型完成一次生成并通过结构校验所产出的一轮响应。发起工具调用的中间响应和给出最终答复的响应各记为一个 Turn。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
 
 <a id="chunk"></a>
 ### 消息片段（Chunk）
 
-同一个 Turn 正文中供发送的一段源文本范围。正文拆分参数影响片段划分，模型轮次与工具事实保留各自的边界。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
+将单个模型轮次的可展示正文按分段发送策略切分后得到的文本片段，是向聊天平台逐条发送文字的基本单元。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
 
 <a id="delivery"></a>
 ### 交付条目（Delivery）
 
-计划向聊天平台发送的一个内容条目，包括文字片段、工具媒体或主机通知。交付记录关联发送尝试及其结果，供引用、撤回和故障判断使用。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
+计划向聊天平台发出的单条消息项，包括正文片段、工具产出的图片媒体或系统通知，用于关联发送结果、消息引用与撤回操作。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
 
 <a id="delivery-attempt"></a>
 ### 交付尝试（Delivery attempt）
 
-针对交付条目发起的一次 OneBot 调用。回执用于确认送达、失败或结果未知；发送尝试与模型生成轮次分别记录。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
+针对某个交付条目发起的一次 OneBot 发送请求，记录成功送达、明确报错或回执超时未知等发送结果。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
 
 <a id="http-attempt"></a>
 ### HTTP 尝试（HTTP attempt）
 
-向模型服务发起的一次实际 HTTP 请求。重试、备用地址或工具结果回送可以产生新的 HTTP 尝试，其追踪记录用于诊断。见[LLM 请求追踪](dev/llm-module.md#1-模块定位)。
+向模型服务发起的一次底层 HTTP 请求。发生网络重试、备用地址切换或多轮工具结果回传时，单个执行回合会产生多次 HTTP 尝试，完整请求与响应报文记录在 HTTP Trace 中供排障使用。见[LLM 请求追踪](dev/llm-module.md#1-模块定位)。
 
 <a id="generation"></a>
 ### 写入代次（Generation）
 
-作用域的执行有效性标识，代码字段为 `generation`。清空、切换等失效操作推进代次，后续写入校验据此阻止旧执行把迟到结果写回当前状态。它与 Session ID、配置修订、历史修订分别管理。见[会话写入边界](dev/llm-module.md#42-llm-短期会话)。
+用于防止旧异步任务覆盖最新会话状态的递增序号，代码字段为 `generation`。执行清空上下文、切换模型等重置操作时会推进代次；此前已在运行的旧任务结束时若发现代次过期，将放弃写回结果。见[会话写入边界](dev/llm-module.md#42-llm-短期会话)。
 
 ## 历史与上下文
 
 <a id="chat-archive"></a>
 ### 聊天归档（Chat archive）
 
-统一保存群聊消息的记录源，供群聊搜索、日报、词云和周期报告等功能使用。它与用于延续 LLM 对话的历史分别维护。见[持久化数据目录](dev/architecture.md#data--运行时持久化数据自用层gitignore)及[统一归档决策](dev/adr/0007-unified-chat-archive.md)。
+持久化保存群内日常聊天消息的统一数据库（`data/chat_archive.db`），供 `/find` 搜索、词云、每日总结、播报、周月报及按需群历史查询读取；与专门记录 AI 多轮问答的“LLM 对话历史”分开存储。见[持久化数据目录](dev/architecture.md#data--运行时持久化数据自用层gitignore)及[统一归档决策](dev/adr/0007-unified-chat-archive.md)。
 
 <a id="conversation-history"></a>
 ### LLM 对话历史（Conversation history）
 
-为多轮对话延续保存的用户输入、模型回复及关联执行事实。每次请求按当前窗口、协议兼容性和预算选取并投影相应内容。见[LLM 短期会话](dev/llm-module.md#42-llm-短期会话)。
+为延续多轮 AI 对话而保存的用户输入、模型回复及工具调用记录。每次发起请求时，系统按当前会话纪元窗口、协议兼容规则与 token 预算从中选取记录并组装上下文。见[LLM 短期会话](dev/llm-module.md#42-llm-短期会话)。
 
 <a id="recent-context"></a>
 ### 近期上下文（Recent context）
 
-从最近消息缓冲中取得、供当前回复理解现场的消息。缓冲的时间和数量边界由对应实现管理，选入请求的内容按本轮生命周期使用。见[临时上下文](dev/llm-module.md#41-临时上下文)。
+从内存近期消息缓冲中读取的最近若干条群内普通发言，供 AI 在被触发时快速了解当前聊天现场，仅在当轮请求内临时附带。见[临时上下文](dev/llm-module.md#41-临时上下文)。
 
 <a id="long-term-memory"></a>
 ### 长期记忆（Long-term memory）
 
-由主对话模型工具、群内指令或 Web 管理页维护的持久条目，用于后续检索与个性化回答。群内记忆共享，私聊独立保存；正文使用 Markdown，按会话管理检索与删除。见[记忆与上下文](dev/llm-module.md#74-记忆与上下文)及[记录身份契约](dev/record-identities.md)。
+跨对话持久保留的群内约定、偏好与事实笔记（支持 Markdown 格式），可通过 `/remember` 等指令、AI 记忆工具或 Web 管理后台维护。群聊记忆由全群共享，私聊记忆按个人独立保存。见[记忆与上下文](dev/llm-module.md#74-记忆与上下文)及[记录身份契约](dev/record-identities.md)。
 
 <a id="turn-envelope"></a>
 ### 当轮信封（Turn envelope）
 
-请求组装时放入用户消息头部的“轮次上下文”，承载当前时间、参与者、记忆或词表命中等动态信息。其生命周期属于当前交互，历史使用允许保留的规范表达重建。见[当前注入规则](dev/llm-module.md#55-身份映射注入)及[静态前缀决策](dev/adr/0012-static-prefix-turn-envelope.md)。
+组装本轮用户消息时拼在正文前面的动态背景块，包含当前时间、发言人与被艾特成员档案、自动召回的长期记忆及命中设定词条等信息；仅服务于当轮生成，不会原样固化进后续历史。见[当前注入规则](dev/llm-module.md#55-身份映射注入)及[静态前缀决策](dev/adr/0012-static-prefix-turn-envelope.md)。
 
 <a id="scene-patch"></a>
 ### 现场补丁（Scene patch）
 
-从近期群聊中选取、为本轮请求补充现场信息的内容，以“现场”段呈现。选择结果在本次请求装配和预算重组之间复用，并与已有历史去重。见[LLM 短期会话](dev/llm-module.md#42-llm-短期会话)。
+从近期群聊缓冲中提取、并与已有对话历史去重后补充进本轮请求的“现场”消息段，帮助 AI 自然衔接触发前群友正在讨论的话题。见[LLM 短期会话](dev/llm-module.md#42-llm-短期会话)。
 
 <a id="native-replay"></a>
 ### 原生回放（Native replay）
 
-在协议归属和结构检查通过后，把保存的协议原生条目用于历史请求，例如 Gemini parts、Claude 签名块或 Responses output items。具体兼容与降级规则由协议适配器维护。见[历史投影契约](dev/llm-module.md#42-llm-短期会话)及[原生回放决策](dev/adr/0013-native-replay-compatibility.md)。
+在同一协议与兼容模型下续接对话时，直接复用已保存的协议原生消息结构（如 Gemini `parts`、Claude 思维签名块、Responses 输出项）回放历史，保留完整的推理签名与工具交互细节。见[历史投影契约](dev/llm-module.md#42-llm-短期会话)及[原生回放决策](dev/adr/0013-native-replay-compatibility.md)。
 
 <a id="generic-replay"></a>
 ### 通用回放（Generic replay）
 
-从规范正文、结构化工具事实及省略说明生成可供目标模型理解的历史表达。原生状态缺失或不兼容时，投影按协议规则采用通用表达或档案。见[历史投影契约](dev/llm-module.md#42-llm-短期会话)。
+跨协议切换模型、原生块缺失或因临时结果策略省略原生副本时，根据已保存的规范文本、结构化工具执行记录与省略说明重新构造的通用历史消息。见[历史投影契约](dev/llm-module.md#42-llm-短期会话)。
 
 <a id="ephemeral-result"></a>
 ### 临时检索结果（Ephemeral result）
 
-按已接受的工具结果政策，仅供当前回合使用、业务记录保留执行事实和省略说明的查询结果正文，保留策略名为 `ephemeral`。存储支持与工具入口接入情况见[工具结果保留决策](dev/adr/0005-tool-result-retention.md#落地核对)；HTTP Trace 按独立诊断职责管理。
+采用 `ephemeral` 保留策略的工具返回内容（如近期消息搜索、群历史查询与群语录检索结果）。完整检索正文仅供模型在当前执行回合内阅读作答，写入对话记录时只保留调用事实与省略说明，避免大段检索摘录长期占用后续对话窗口。见[工具结果保留决策](dev/adr/0005-tool-result-retention.md#落地核对)。
+
+<a id="group-history-query"></a>
+### 群历史查询（Group history query）
+
+供 AI 按需只读检索本群聊天归档的能力，包含关键词搜索（`search_group_history`）、按来源引用展开上下文（`read_group_history`）和委派子代理处理复杂追溯问题（`investigate_group_history`）三个工具。全局默认关闭，支持按群显式开启或关闭（私聊不提供）；检索内容按临时检索结果处理，不自动写入长期记忆。见 [ADR-0027](dev/adr/0027-history-investigation-executor.md)。
+
+<a id="message-ref"></a>
+### 来源引用（Message ref）
+
+群历史查询工具为命中消息签发的归档定位标识，格式为 `hr1.<归档UUID前8位>.<行ID>`。模型可凭该标识在本群后续轮次中精确展开对应消息前后的上下文；标识绑定当前归档数据库并在读取时核验所属群号，更换归档库后自动失效（翻页游标则仅在单次请求内有效）。见 [ADR-0027](dev/adr/0027-history-investigation-executor.md)。
 
 ## 身份与扩展能力
 
 <a id="persona"></a>
 ### 人格（Persona）
 
-组织机器人角色、语气和业务行为提示的配置。群聊或私聊可以选择人格，来源文件与合并规则由 LLM 配置和人格加载流程维护。见[人格与资料](dev/llm-module.md#5-人格注入设计)。
+定义 AI 角色背景、说话风格与互动准则的提示词配置，支持按群聊或私聊独立选择与切换。见[人格与资料](dev/llm-module.md#5-人格注入设计)。
 
 <a id="client-profile"></a>
 ### 客户端 Profile（Client fingerprint profile）
 
-定义请求发给上游时采用的客户端特征、请求头与请求体投影策略的模板，由渠道的 `client_fingerprint` 选择。Profile 接收业务 Session 等输入，具体协议模板见[请求指纹 Profile](admin/client-fingerprints.md)，选择依据见[客户端 Profile 决策](dev/adr/0014-client-fingerprint-profiles.md)。
+控制向上游模型服务发请求时采用的客户端标识、HTTP 请求头与请求体结构的模板，由渠道配置中的 `client_fingerprint` 选定。见[请求指纹 Profile](admin/client-fingerprints.md)及[客户端 Profile 决策](dev/adr/0014-client-fingerprint-profiles.md)。
 
 <a id="member-identity"></a>
 ### 成员身份（Member identity）
 
-以 QQ 为稳定关联键的成员资料及名称解析结果，用于展示、提及和记录关联。群级覆盖、同名歧义和历史名称快照由[记录身份契约](dev/record-identities.md)维护，选择依据见[正文与成员关联决策](dev/adr/0008-record-content-member-identity.md)。
+以 QQ 号为稳定主键维护的群友身份档案与别名映射，用于识别群友称呼、解析真实艾特，并在长期记忆、语录和离线留言中动态展示最新群名片。见[记录身份契约](dev/record-identities.md)及[正文与成员关联决策](dev/adr/0008-record-content-member-identity.md)。
 
 <a id="tool"></a>
 ### 工具（Tool）
 
-向模型公开名称、说明和参数 schema，并由运行时校验和调度的可调用能力。工具可来自内置实现、MCP 或 Skill 脚本，具体注册与发现规则见[工具发现](dev/tool-discovery.md)。
+向模型公开名称、用途说明和参数 Schema，并由运行时校验参数后调度的可调用能力，来源包括内置工具、外部 MCP 服务及已激活的 Skill 脚本。见[工具发现](dev/tool-discovery.md)。
 
 <a id="tool-execution"></a>
 ### 工具执行（Tool execution）
 
-某个 Turn 声明的一次工具调用及其执行事实。声明、启动、成功、失败或结果不确定分别记录；历史回放引用这些事实。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
+模型在某一轮次中发起的单次工具调用及其执行记录，保存调用声明、执行状态（成功、失败或结果未知）及受保留策略控制的结果摘要，供后续对话回放与审计使用。见[执行与交付决策](dev/adr/0004-agent-execution-replay-delivery.md)。
 
 <a id="skill"></a>
 ### 技能包（Skill）
 
-由 `SKILL.md` 描述、按需激活的指令与资源包，可按部署权限提供脚本能力。包的安装、可见性、激活和执行边界见[Skill 系统](admin/skills.md)，按需取得正文的选择依据见[渐进加载决策](dev/adr/0015-progressive-skill-loading.md)。
+以 `SKILL.md` 描述、由模型在遇到匹配需求时按需激活的指令与参考资料包；经部署者授权后还可附带受隔离限制的可执行脚本。见[Skill 系统](admin/skills.md)及[渐进加载决策](dev/adr/0015-progressive-skill-loading.md)。
 
 <a id="mcp-server"></a>
 ### MCP 服务（MCP server）
 
-通过 Model Context Protocol 向 QuickQuip 提供工具或资源的外部服务。连接、能力发现、参数适配和结果校验由 MCP 集成层负责。见[MCP 集成](dev/mcp-integration.md)及[结果归一化决策](dev/adr/0018-mcp-result-normalization.md)。
-
-## 运维程序与生产配置
-
-通用运维程序由 `scripts/deploy/`、`scripts/ops/` 维护，随代码升级。`prod.example/` 分发配置模板，`prod/` 保存私有配置和协议端登录资产。生产镜像构建程序位于 `docker/Dockerfile.prod`。目录职责和入口见[脚本导航](../scripts/README.md)。
-
-### 群历史查询（Group history query）
-
-LLM 按需检索本群已归档历史消息的只读能力（Issue #72）。三个工具：
-`search_group_history`（关键词搜索）、`read_group_history`（按来源引用展开
-上下文）、`investigate_group_history`（委派专用调查执行器处理复杂问题）。
-同群限定、默认关闭（全局 `[group_history].enabled` + 群级开关双开），
-查询结果按临时载荷处理。见 [ADR-0027](dev/adr/0027-history-investigation-executor.md)。
-
-### 来源引用（Message ref）
-
-`hr1.<归档UUID前8>.<行ID>` 形式的归档消息定位值，由查询工具签发、可跨轮
-回查；绑定归档 UUID，库替换后失效。引用不是授权凭证，解析后仍按当前群
-复核。与之相对，续页游标只在当前请求生命周期内有效。
+通过 Model Context Protocol 向 QuickQuip 提供外部工具的独立服务，由 MCP 集成层负责连接维护、工具发现、参数传递与返回结果归一化。见[MCP 集成](dev/mcp-integration.md)及[结果归一化决策](dev/adr/0018-mcp-result-normalization.md)。

@@ -44,11 +44,13 @@ description: QuickQuip 官方、与部署版本对齐的公开文档副本：群
 | 私聊命令、私聊与群聊区别 | `references/docs-user-private-commands.md` |
 | 新三国梗触发 | `references/docs-user-three-kingdoms-memes.md` |
 | 云端部署、安装、启动、升级 | `references/docs-admin-deployment.md` |
+| 环境变量在线管理、凭据轮换与 env-agent | `references/docs-admin-environment.md` |
 | 配置项参考（.env 与各 TOML） | `references/docs-admin-configuration.md` |
 | LLM 配置数据库、迁移、草稿与应用、JSON 交换和备份恢复 | `references/docs-admin-llm-configuration.md` |
 | 请求身份、客户端 Profile 与模板覆盖 | `references/docs-admin-client-fingerprints.md` |
 | 全局管理员配置与权限 | `references/docs-admin-global-admins.md` |
 | 游戏系统管理与配置 | `references/docs-admin-game-config.md` |
+| 长期记忆开启、群内指令、后台编辑与容量召回 | `references/docs-admin-memory.md` |
 | OneBot V11 接入、功能要求、旧部署迁移与兼容记录 | `references/docs-admin-onebot-adapters.md` |
 | NapCat → LLBot 迁移 | `references/docs-admin-migration-napcat-to-llbot.md` |
 | 记录身份迁移与验收 | `references/docs-admin-record-identities.md` |

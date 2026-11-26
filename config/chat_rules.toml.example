@@ -23,18 +23,17 @@
 #                   probability 字段覆盖桶级值。覆写系统预定义桶时需整体重写
 #                   该桶条目（global_limit / user_limit 一并写全）。
 #   suppress_after_hit - （可选，默认 0 关闭）防连发：同一规则同一群命中后，
-#                   接下来 N 次命中强制沉默。专治"刚回完又回"的观感。
+#                   接下来 N 次命中强制沉默。专治“刚回完又回”的观感。
 #   pity_step     - （可选，默认 0 关闭）保底步进：连哑越多概率越高，
 #                   p_eff = probability × (1 + 连哑数 × pity_step)。
 #                   例：p=0.5、pity_step=0.2 时连哑 5 次后概率升满必回。
 #                   两个开关均按（规则, 群）独立计数，只存内存、重启即重置；
 #                   配 probability = 1 再开 suppress_after_hit 会出现
-#                   "一回一哑"的规律交替，建议与概率 < 1 搭配使用。
+#                   “一回一哑”的规律交替，建议与概率 < 1 搭配使用。
 #
-# 时区回复、LLM、贴吧、复读、接龙等系统规则的限流桶
-# 已在 quickquip/chat/config.py 中预定义：默认直接继承内置定义即可，
-# 需要调整触发概率或密度时，可像下方"系统内置被动回复的推荐概率"段
-# 那样按桶整体覆写（覆写条目需把配额字段一并写全）。
+# 时区回复、LLM、贴吧、复读、接龙等系统规则的限流桶已内置默认定义：
+# 日常直接继承内置定义即可；需要调整触发概率或密度时，可像下方
+# “系统内置被动回复的推荐概率”段那样按桶整体覆写（覆写时需把配额字段一并写全）。
 # 多条规则可共用同一个桶，发送任意一条回复都会消耗同一配额。
 # 梗文类桶保持默认 scope（group）即可；仅当桶里的规则会打外部 API 或共享池时，
 # 才考虑显式写 scope = "global"。
@@ -59,10 +58,10 @@ image_gen          = {global_limit = 10, user_limit = 2, scope = "global", windo
 #                     suppress_after_hit = 1, pity_step = 0.2}
 
 # ── 系统内置被动回复的推荐概率 ──
-# 这些桶的配额在 quickquip/chat/config.py 中预定义，这里按推荐密度覆写
-# （覆写是整条替换，global_limit / user_limit 需照抄内置值）。
-# 早晚高峰"晚安/起床了"人多，时区回复降半；被动「xxx了」压得更稀，
-# 保住"偶发乱入"的效果；bot 跟读复读降四成，别火上浇油。
+# 这些系统桶已有内置默认配额，这里按推荐密度整体覆写
+# （覆写会整条替换该桶配置，global_limit / user_limit 需一并填写）。
+# 早晚高峰“晚安／起床了”人多，时区回复降半；被动“xxx了”压得更稀，
+# 保住“偶发乱入”的效果；bot 跟读复读降四成，避免刷屏。
 timezone_wake      = {global_limit = 3, user_limit = 1, probability = 0.5}
 timezone_sleep     = {global_limit = 3, user_limit = 1, probability = 0.5}
 sts_card_le        = {global_limit = 3, user_limit = 1, probability = 0.4}
@@ -104,7 +103,7 @@ reply_template = '{current_time}，@{sender_name} 区从天降'
 rate_limit_key = 'divine_arrival'
 priority       = 100
 
-# ——— 示例：检测"XX，启动！"之类的格式 ———
+# ——— 示例：检测“XX，启动！”之类的格式 ———
 [[rules]]
 name           = 'genshin_start'
 patterns       = ['^(.+?)[，,]\s*启动[！!]*$']
@@ -112,7 +111,7 @@ reply_template = '该启动$1了，少爷'
 rate_limit_key = 'group_meme'
 priority       = 95
 
-# ——— 示例：检测"玩XX玩的" ———
+# ——— 示例：检测“玩XX玩的” ———
 [[rules]]
 name           = 'play_target'
 patterns       = ['玩(?P<target>.+?)玩的']
@@ -120,7 +119,7 @@ reply_template = '{target}怎么你了'
 rate_limit_key = 'play_target'
 priority       = 85
 
-# ——— 示例：检测"AA你的"（叠字 + 你的）→ "AA牛魔" ———
+# ——— 示例：检测“AA你的”（叠字 + 你的）→ “AA牛魔” ———
 [[rules]]
 name           = 'double_char_ni_de'
 patterns       = ['^([\u4e00-\u9fa5])(\1)你的$']
@@ -128,7 +127,7 @@ reply_template = '$1牛魔'
 rate_limit_key = 'double_char_ni_de'
 priority       = 80
 
-# ——— 示例：检测"A…A的"（首尾相同汉字夹内容）→ "…怎么你了！" ———
+# ——— 示例：检测“A…A的”（首尾相同汉字夹内容）→ “…怎么你了！” ———
 [[rules]]
 name           = 'sandwich_de'
 patterns       = ['^([\u4e00-\u9fa5])(.{2,})\1的$']
@@ -136,7 +135,7 @@ reply_template = '$2怎么你了！'
 rate_limit_key = 'sandwich_de'
 priority       = 75
 
-# ——— 示例：检测"我喜欢XX"或"喜欢XX" ———
+# ——— 示例：检测“我喜欢XX”或“喜欢XX” ———
 [[rules]]
 name           = 'like_reply'
 patterns       = ['^我喜欢(.+)$', '^喜欢(.+)$']
@@ -144,9 +143,9 @@ reply_template = '还在$1'
 rate_limit_key = 'like_reply'
 priority       = 60
 
-# ——— 示例：检测"我XX"（二字动词），过滤常见口语 ———
+# ——— 示例：检测“我XX”（二字动词），过滤常见口语 ———
 # blocked_named_groups 指定捕获组 verb 的黑名单，命中黑名单时不触发
-# probability 覆盖桶级 0.8：「我XX」匹配面比「XX，启动」泛得多，压得更低
+# probability 覆盖桶级 0.8：“我XX”匹配面比“XX，启动”泛得多，压得更低
 [[rules]]
 name           = 'i_do'
 patterns       = ['^我(?P<verb>[\u4e00-\u9fa5]{2})[！!。，,？?]*$']
@@ -185,8 +184,7 @@ verb = [
 # 结合近期消息再判断语境，适合“好啊”“竟然”等需要上下文的触发词。
 #
 # 执行时机：在普通 rules 全部未命中之后、时区回复之前尝试。
-# 仅在群聊中生效（私聊不调用），且 resolve_reply 会把最近消息列表
-# 透传进来做判定。
+# 仅在群聊中生效（私聊不启用），判定时会自动传入本群最近的消息列表。
 #
 # ── 必填字段 ──
 #   name           - 规则唯一名称
@@ -211,7 +209,7 @@ verb = [
 #
 # 模板变量和捕获组引用与 [[rules]] 完全一致。
 
-# ——— 示例：regex_context（历史里出现「请假」类词时，本句的"竟然不许"才触发）———
+# ——— 示例：regex_context（历史里出现“请假”类词时，本句的“竟然不许”才触发）———
 # [[context_rules]]
 # name               = 'leave_denied'
 # type               = 'regex_context'
@@ -222,13 +220,13 @@ verb = [
 # rate_limit_key     = 'group_meme'
 # priority           = 99
 
-# ——— 示例：llm_context（仅当语境真的是"他过江我也过江"时才触发）———
+# ——— 示例：llm_context（仅当语境真的是“他过江我也过江”时才触发）———
 # [[context_rules]]
 # name             = 'me_too_follow'
 # type             = 'llm_context'
 # patterns         = ['好啊']
 # context_window   = 6
-# llm_judge_prompt = '''群友发了"好啊"或类似赞同词。请根据最近记录判断：当前语境是否在说"他/某人做某事，我也要做同样的事"（类似"他过江我也过江"）？只输出 JSON：{"trigger": true/false}'''
+# llm_judge_prompt = '''群友发了“好啊”或类似赞同词。请根据最近记录判断：当前语境是否在说“他/某人做某事，我也要做同样的事”（类似“他过江我也过江”）？只输出 JSON：{"trigger": true/false}'''
 # llm_timeout      = 2.0
 # llm_cache_ttl    = 60
 # reply_template   = '好啊，他过江我也过江'
@@ -255,7 +253,7 @@ verb = [
 # chain[2], [4], …    — bot 依次的回复（偶数位 ≥ 2）
 #
 # 奇数长度（如 7 个元素）：最后一个 bot 回复发出后会话自动结束。
-# 偶数长度（如 8 个元素）：最后一个元素为「静默终止 token」——用户在任意
+# 偶数长度（如 8 个元素）：最后一个元素为“静默终止 token”——用户在任意
 #   时刻发出该 token，会话立即结束且 bot 不回复。
 #
 # ── 捕获组引用 ──
@@ -276,9 +274,9 @@ verb = [
 # rate_limit_key  = 'good_girl_chain_entry'
 #
 # 说明：
-#   触发：用户发送「XX是好YY吗」
+#   触发：用户发送“XX是好YY吗”
 #   $1[0] 取主语第一个字，嵌入接龙序列第 4 位
-#   第 8 位 '句号|。' 是用户步（竖线 = 或，说“句号”或"。"皆可）
+#   第 8 位 '句号|。' 是用户步（竖线表示或，说“句号”或“。”皆可）
 #   9 元素奇数长度：末位 '🤣' 是 bot 的收尾回复，发出后会话自动结束
 
 # ——— 示例：四元素接龙（末步“冲！”为静默终止词）———
@@ -403,7 +401,7 @@ probability    = 0.8
 priority       = 89
 
 [[rules]]
-# pattern 含「我在想」，日常口语命中率极高，整体压到 0.3
+# pattern 含“我在想”，日常口语命中率极高，整体压到 0.3
 name           = 'ntk_ququer'
 patterns       = ['蛐蛐儿', '有情有义', '我在想']
 reply_template = '我在想我的那些个蛐蛐儿，它们个个有情有义'
@@ -458,7 +456,7 @@ name             = 'ntk_haoa'
 type             = 'llm_context'
 patterns         = ['好啊']
 context_window   = 6
-llm_judge_prompt = '''群友发了"好啊"或类似赞同词。请根据最近记录判断：当前语境是否在说"他/某人做某事，我也要做同样的事"（类似"他过江我也过江"）？只输出 JSON：{"trigger": true/false}'''
+llm_judge_prompt = '''群友发了“好啊”或类似赞同词。请根据最近记录判断：当前语境是否在说“他/某人做某事，我也要做同样的事”（类似“他过江我也过江”）？只输出 JSON：{"trigger": true/false}'''
 reply_template   = '好啊，他过江我也过江'
 rate_limit_key   = 'new_three_kingdoms'
 priority         = 100
@@ -498,7 +496,7 @@ name             = 'ntk_diyixiongguan'
 type             = 'llm_context'
 patterns         = ['(.{1,10}?)真乃第一(.{1,10}?)', '(.{1,10}?)实乃第一(.{1,10}?)']
 context_window   = 5
-llm_judge_prompt = '''群友可能在用夸张语气夸赞某事物是"第一xx"。请判断：当前消息是否在玩"徐州城不愧为中原第一雄关"的梗，或是否适合用该台词接话？只输出 JSON：{"trigger": true/false}'''
+llm_judge_prompt = '''群友可能在用夸张语气夸赞某事物是“第一xx”。请判断：当前消息是否在玩“徐州城不愧为中原第一雄关”的梗，或是否适合用该台词接话？只输出 JSON：{"trigger": true/false}'''
 reply_template   = '徐州城不愧为中原第一雄关'
 rate_limit_key   = 'new_three_kingdoms'
 priority         = 96
@@ -508,7 +506,7 @@ name             = 'ntk_liangjian'
 type             = 'llm_context'
 patterns         = ['我有两(.{1,8}?)']
 context_window   = 5
-llm_judge_prompt = '''群友在说"我有两个xx"或持有两件某物的语境。请判断：当前消息是否适合接"一把叫仁之剑，一把叫义之剑"这个梗？只输出 JSON：{"trigger": true/false}'''
+llm_judge_prompt = '''群友在说“我有两个xx”或持有两件某物的语境。请判断：当前消息是否适合接“一把叫仁之剑，一把叫义之剑”这个梗？只输出 JSON：{"trigger": true/false}'''
 reply_template   = '一把叫仁之剑，一把叫义之剑'
 rate_limit_key   = 'new_three_kingdoms'
 priority         = 95

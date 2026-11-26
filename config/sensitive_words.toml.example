@@ -1,33 +1,24 @@
-# Sensitive word filter — deployment-specific configuration.
+# 敏感词过滤器配置示例
 #
-# Copy this public template to the ignored `config/sensitive_words.toml`
-# and fill in the categories you need for your deployment.
+# 将本模板复制为 Git 忽略的 config/sensitive_words.toml，按实际部署环境与合规要求填写词条。
+# 修改保存后，在群内执行 /llm reload 或重启 Bot 即可加载生效（详见 docs/admin/sensitive-filter.md）。
 #
-# Two severity tiers:
-#   [block.<category>]  — hit short-circuits the LLM call (input) or
-#                         substitutes a fallback (output). Use for content
-#                         where letting the message through is itself a risk.
-#   [soft.<category>]   — hits are logged for monitoring; the message still
-#                         reaches the LLM. Use for noisy / context-sensitive
-#                         terms where false positives hurt more than misses.
+# 两级词表：
+#   [block.<类别名>] — 阻断请求、替换输出或跳过统计，适用于部署环境中明确需要拦截的词条。
+#   [soft.<类别名>]  — 仅记录命中日志（quickquip.common.sensitive_filter）供观察评估，请求照常放行。
 #
-# See docs/admin/sensitive-filter.md for the recommended 17-category scaffold
-# (政治人物 / 历史敏感事件 / 领土主权 / 民族宗教 / etc.) and pointers on
-# where to source words from. This template provides generic anti-fraud and
-# anti-spam examples; tailor categories to your deployment and provider policies.
+# 覆盖范围：
+#   - 聊天与多模态文本链路：普通 LLM 输入/输出与历史回放、工具参数与结果、Skill 清单/正文/资源/脚本输出、
+#     /draw 与 /tts 及音乐生成输入、歌词输出、ASR 转写后文本、视觉转述文本、/defectify、/turmfluch 等；
+#   - 全局出口与展示兜底：全局 OneBot 文本出口守卫（outbound_api:*，拦截纯文本与合并转发节点）、
+#     长文合并转发与 PNG 长图降级发送前预扫（outbound_long:*），以及词频统计与词云（静默跳过命中 block 的消息）。
 #
-# Matching is performed on a normalized form of the input (casefold +
-# zero-width strip + whitespace strip). Add words in their canonical form;
-# trivial obfuscation like "杀 猪 盘" or zero-width insertions still hit.
-#
-# Tips:
-# - Start with a small set of relevant terms and review actual matches.
-# - Use the [soft] tier liberally for monitoring before promoting to [block].
-# - Review hit logs (logger=quickquip.common.sensitive_filter) weekly to
-#   catch false positives early.
+# 匹配规则：
+#   匹配前统一折叠大小写，并剔除零宽字符与 ASCII 空白（例如词条“杀猪盘”同样会命中“杀 猪 盘”）；
+#   拼音、谐音与同形字需作为独立词条添加。建议先以精简词表配合 [soft] 观察命中日志，确认无误伤后再升为 [block]。
 
 # ─────────────────────────────────────────────────────────────────────
-# BLOCK tier — hits short-circuit the request.
+# BLOCK 级别 —— 命中时拦截请求、替换文本或静默剔除
 # ─────────────────────────────────────────────────────────────────────
 
 [block.fraud]
@@ -73,7 +64,7 @@ words = [
 ]
 
 # ─────────────────────────────────────────────────────────────────────
-# SOFT tier — hits are logged but don't block.
+# SOFT 级别 —— 仅记录命中日志，不阻断正常请求
 # ─────────────────────────────────────────────────────────────────────
 
 [soft.spam_pattern]
@@ -94,32 +85,11 @@ words = [
 ]
 
 # ─────────────────────────────────────────────────────────────────────
-# Add your jurisdiction-specific categories below.
+# 按实际部署环境补充自定义类别
 #
-# Recommended scaffold (see docs/admin/sensitive-filter.md):
-#   [block.political_leaders]
-#   [block.political_events]
-#   [block.territorial]
-#   [block.ethnic_religion]
-#   [block.banned_organizations]
-#   [block.separatism]
-#   [block.violence_terror]
-#   [block.obscenity_minor]
-#   [block.obscenity_explicit]
-#   [block.drugs]
-#   [block.weapons]
-#   [block.hate_speech]
-#   [block.suicide_promotion]
-#   [block.private_info_doxxing]
-#   [block.discrimination]
-#
-# Maintain deployment-specific terms in the ignored configuration. Sources
-# to consider:
-#   1. Your provider's "Content Exists Risk" / safety-rejection logs
-#      (review the rejected context before selecting a term).
-#   2. Open-source compilations on GitHub, lightly filtered for relevance.
-#   3. Commercial content-moderation APIs (Aliyun / Tencent) if you need
-#      breadth without curation cost.
-#   4. Your own observation of LLM-side refusals during testing — note the
-#      exact phrasing the model rejects.
+# 类别名由部署者自由定义（如 [block.abuse]、[soft.review]），均使用 words 字符串数组。
+# 维护私有词表时可参考以下来源（完整排障与词表保护要求见 docs/admin/sensitive-filter.md）：
+#   1. 上游模型渠道返回安全拒答时的触发短语（结合上下文挑出真正触发风控的词条）；
+#   2. 测试群实际对话中出现的垃圾引流或违规话术；
+#   3. 许可证合规的公开反垃圾词库（先筛选并放入 [soft] 观察误判率，再按需移入 [block]）。
 # ─────────────────────────────────────────────────────────────────────

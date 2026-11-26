@@ -18,7 +18,7 @@
 - **OneBot V11 协议端**：部署者自行安装并管理 QQ 登录。按[接入说明](onebot-adapters.md#连接-quickquip)准备容器可达的连接。
 
 ### 2. 网络与服务器连通性
-请按所需的 CPU 架构、资源容量及网络条件选择服务器（费用按服务商当前报价核对）。在正式开始完整部署前，请先确认服务器能够正常访问以下目标：
+请按所需的 CPU 架构、资源容量及网络条件选择服务器。在正式开始完整部署前，请先确认服务器能够正常访问以下目标：
 - Docker 镜像源与 Python 包镜像源
 - QQ 协议端连接
 - 所选用的 LLM 模型 API 接口
@@ -168,7 +168,7 @@ docker compose --env-file ../.env logs -f quickquip
 
 ### 7. 登录 Web 管理后台与首次启用 LLM
 
-Compose 启动时会同时运行 `web-admin` 容器（内部运行 `python web_api.py` 监听 `0.0.0.0:5104`，宿主机侧仅绑定在 `127.0.0.1:5104`）。
+Compose 启动时会同时运行同镜像的 `env-agent`、`quickquip` 和 `web-admin` 三个容器（其中 `web-admin` 内部运行 `python web_api.py` 监听 `0.0.0.0:5104`，宿主机侧仅绑定在 `127.0.0.1:5104`）。
 
 #### 7.1 建立 SSH 隧道并登录后台
 
@@ -180,12 +180,13 @@ ssh -N -L 5104:127.0.0.1:5104 user@server
 
 保持隧道运行，在本地浏览器打开 `http://127.0.0.1:5104/ops/`，输入第 3 步在 `.env` 中设置的 `WEB_ADMIN_PASSWORD` 登录。
 
-进入后台概览页后，请按照[首次启用 LLM](llm-configuration.md#首次启用-llm)的步骤：添加一个模型渠道和模型 $\rightarrow$ 保存草稿并应用到 Bot $\rightarrow$ 等待 Bot 加载完成 $\rightarrow$ 在测试群开启 AI 并收到第一条回复。
+进入后台概览页后，请按照[首次启用 LLM](llm-configuration.md#首次启用-llm)的步骤：添加一个模型渠道和模型 → 保存草稿并应用到 Bot → 等待 Bot 加载完成 → 在测试群开启 AI 并收到第一条回复。
 
 #### 7.2 Web Admin 后台功能一览
 
 - **统计与群管**：各群消息统计、活跃用户、规则触发次数；群级规则实时 Toggle 开关；每日总结 / 每日播报群组管理。
 - **LLM 工坊与配置**：LLM 结构化配置、保存草稿／应用到 Bot、JSON 导入预览、Bot 实际加载状态监控与配置任务追踪。
+- **环境变量在线管理（只写不回显）**：在“系统 → 环境变量”页面维护根目录 `.env` 中的凭据与运行参数，已有变量值不回显，已绑定渠道的 API Key 与贴吧关键词支持热更新（详见[管理环境变量](environment.md)）。
 - **独立 TOML 配置在线编辑**：支持在线编辑 `config/generation.toml`、`config/chat_rules.toml`、`config/games.toml`、`config/awakening.toml`、`config/niuniu_text.toml`、`config/niuniu_text_safe.toml`（保存前会自动校验 TOML 语法）。
 - **敏感词状态查看（只读）**：后台仅提供敏感词过滤器的只读状态查看；`config/sensitive_words.toml` 词表文件只能通过服务器本地文件或部署流程维护，**不会**在 Web Admin 中回显或允许编辑。
 - **业务与监控面板**：记忆、对话、人格、群资料、低频唤醒、LLM 用量统计、MCP 状态、贴吧、词云、群语录、调度器监控、操作审计、金币经济与牛牛游戏面板。
@@ -320,8 +321,9 @@ bash scripts/deploy/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 `prod/docker-compose.yml` 启动时会完成以下挂载与环境配置：
 - **搜索与环境变量**：通过 `../.env` 向 Bot 和 Web Admin 注入应用环境变量，并使用第 3 步配置的 `QUICKQUIP_SEARXNG_BASE_URL` 连接独立 SearXNG 服务。
+- **环境变量代理（`env-agent`）与双通信卷**：模板默认启用在线环境变量管理（`QUICKQUIP_ENV_MANAGEMENT_ENABLED: "true"`），运行同镜像的 `env-agent` 服务并将部署根目录单独挂载到 `/host/project`。`env-agent` 不开放网络端口、也不挂载 Docker Socket，通过两个私有 Unix Socket 命名卷隔离权限：`environment-control` 供 `env-agent`、`quickquip` 和 `web-admin` 同步只读环境快照，`environment-write` 仅挂载给 `env-agent` 与 `web-admin` 执行根 `.env` 写入。
 - **配置文件挂载**：将 `../config` 只读挂载到 Bot 容器内的 `/app/config`（注：`config/managed/` 由 Bot 和 Web 共享可写）。
-- **Skill 目录挂载**：将部署根目录共享的 `skills/`（扁平安装时即项目根 `skills/`，与 `data/` 同级）挂载到容器内 `/app/skills`——其中 `quickquip` 容器为**只读**，`web-admin` 容器为**读写**（以支持在 Web 后台 Skill 页在线管理）。
+- **Skill 目录挂载**：将部署根目录共享的 `skills/`（扁平安装时即项目根 `skills/`，与 `data/` 同级）挂载到容器内 `/app/skills`——其中 `quickquip` 容器为**只读**，`web-admin` 容器为**读写**（供 Web 后台 Skill 页在线管理）。
 - **群资料与词表挂载**：将 `../llm_about`（含全局与按群覆盖的 `vocab.yaml` / `identities.yaml`）挂载到 `/app/llm_about`。
 - **持久化数据挂载**：将 `../data` 挂载到 `/app/data`（存放统计数据、规则开关、运行期数据库等）。
 - **贴吧采集与基础镜像**：直接基于预装了浏览器与系统依赖的 Playwright Python 镜像运行贴吧采集，从 `/app/data/tieba/storage_state.json` 读取跨平台登录态；构建时通过构建参数将 pip 源切到国内镜像以减少云端拉取超时，也可通过 `PLAYWRIGHT_BASE_IMAGE` 自定义适合当前网络环境的 Playwright 基础镜像。
@@ -336,19 +338,21 @@ bash scripts/deploy/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 ---
 
-### Bot 与 Web 的挂载权限
+### 服务挂载权限对照
 
-| 宿主机路径 | 容器内路径 | `web-admin` 权限 | 用途说明 |
+| 宿主机路径或命名卷 | 容器内路径 | `web-admin` 权限 | 用途说明 |
 |---|---|---|---|
 | `../data` | `/app/data` | **读写** | 业务库、日志、Trace 库等运行期数据 |
-| `../config` | `/app/config` | **读写** | 支撑独立 TOML 在线编辑与首次迁移资产提取（注：即使同处该目录，`sensitive_words.toml` 也不通过 Web 编辑器读写） |
-| `../llm_about` | `/app/llm_about` | **读写** | 支撑后台“资料”页在线编辑群词表与身份 |
-| `${QUICKQUIP_ROOT:-..}/skills`（扁平安装即 `../skills`） | `/app/skills` | **读写** | 支撑后台“Skill”页在线安装、编辑与预置包同步落盘 |
+| `../config` | `/app/config` | **读写** | 在线编辑独立 TOML 配置及首次迁移提取资产（同目录下的 `sensitive_words.toml` 不开放 Web 读写） |
+| `../llm_about` | `/app/llm_about` | **读写** | 在后台“资料”页在线编辑群词表与成员身份 |
+| `${QUICKQUIP_ROOT:-..}/skills`（扁平安装即 `../skills`） | `/app/skills` | **读写** | 在后台“Skill”页在线安装、编辑和同步预置技能包 |
+| `environment-control`（命名卷） | `/run/quickquip-environment` | **读写** | 连接 `env-agent` 只读通道同步环境变量快照 |
+| `environment-write`（命名卷） | `/run/quickquip-environment-write` | **读写** | 连接 `env-agent` 管理通道提交根 `.env` 修改 |
 | `../frontend/dist` | `/app/frontend/dist` | 只读 | 前端静态构建产物 |
 | `../web_api.py` | `/app/web_api.py` | 只读 | Web 后端入口脚本 |
-| `../src` | `/app/src` | 只读 | 支撑 Hybrid 模式源码热更新 |
+| `../src` | `/app/src` | 只读 | Hybrid 混合模式下热更新 Python 源码 |
 
-> **安全边界**：与 `web-admin` 不同，`quickquip`（Bot 主容器）对文本配置目录、`llm_about` 以及共享 `skills/` 均保持**只读挂载（`:ro`）**；只有 `config/managed/` 目录是由 Bot 和 Web 共享可写的。
+> **权限隔离边界**：`quickquip`（Bot 主容器）对 `../config`、`../llm_about` 和共享 `skills/` 均保持**只读挂载（`:ro`）**，配置类目录中仅 `config/managed/` 可写（运行期数据写入 `../data`），并通过只读快照通道 `environment-control` 获取环境变量（不挂载 `environment-write`）；`env-agent` 单独将部署根目录挂载到 `/host/project`（应用逻辑仅读写根目录 `.env` 与 `data/environment/`，不访问业务数据库），不挂载 Docker Socket，也不开放外部网络端口。
 
 ---
 
@@ -375,9 +379,9 @@ bash scripts/deploy/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 | 你修改了什么内容？ | 需要执行的生效命令（在 `prod/` 目录下） | 是否需要重建镜像？ |
 |---|---|---|
-| **仅修改了 `src/quickquip/` 或 `src/plugins/` 下的现有 Python 代码** | `docker compose --env-file ../.env restart quickquip web-admin` | **不需要**（重启即生效） |
+| **仅修改了 `src/quickquip/` 或 `src/plugins/` 下的现有 Python 业务代码** | `docker compose --env-file ../.env restart quickquip web-admin` | **不需要**（重启即生效） |
 | **仅重新构建了 `frontend/dist` 前端静态文件** | `docker restart quickquip-web-admin` | **不需要** |
-| **修改了 `pyproject.toml`、`requirements.txt`、`Dockerfile`，或在 `src/` 下新增/删除了文件** | `docker compose --env-file ../.env build quickquip`<br>`docker compose --env-file ../.env up -d quickquip web-admin` | **需要重建镜像** |
+| **修改了 `pyproject.toml`、`requirements.txt`、`Dockerfile`、`environment` 模块，或在 `src/` 下新增/删除了文件** | `docker compose --env-file ../.env build quickquip`<br>`docker compose --env-file ../.env up -d` | **需要重建镜像** |
 
 ---
 
@@ -385,7 +389,7 @@ bash scripts/deploy/deploy-v4.sh --rollback --host-alias quickquip-prod
 
 `scripts/maintenance/` 目录下随镜像分发了两个历史数据迁移回灌脚本：
 1. `backfill_record_identities.py`：为存量的记忆、语录和留言补齐正文片段与群成员引用索引（详细说明见 [record-identities.md](record-identities.md)）。
-2. `backfill_chat_archive.py`：将 v1.15.2 之前退役的旧版每日消息 / 词云 JSONL 文件（位于 `data/daily_msgs/`、`data/wordcloud_msgs/`）导入到统一的聊天记录归档库 `data/chat_archive.db` 中（导入完成且零失败后，即可安全清理旧的 JSONL 目录；Windows 懒人包用法见 [README.md](../../README.md)）。
+2. `backfill_chat_archive.py`：将 v1.15.2 之前退役的旧版每日消息 / 词云 JSONL 文件（位于 `data/daily_msgs/`、`data/wordcloud_msgs/`）导入到统一的聊天记录归档库 `data/chat_archive.db` 中（导入完成且零失败后，即可安全清理旧的 JSONL 目录；主机与 Windows 懒人包用法见[数据与资产维护](../../scripts/maintenance/README.md)）。
 
 在服务器容器内运行聊天归档回灌的命令如下：
 
@@ -401,26 +405,26 @@ docker compose --env-file ../.env exec -T quickquip python scripts/maintenance/b
 
 ## 日常维护
 
-当你手动修改了根目录 `.env` 或 Compose 编排文件后，需要在实际 Compose 所在目录重新 `up -d` 创建服务，才能让新的环境变量或卷挂载进入容器（如果只是修改了 `WEB_ADMIN_PASSWORD` 后台口令，可以只更新 `web-admin` 容器）。
+启用环境变量在线管理（生产模板默认开启）后，通过 Web Admin“系统 → 环境变量”更新已绑定渠道的 API Key 与贴吧关键词会在运行中自动热更新，无需重建容器（若通过 `qqsync push` 同步 `.env` 文件变化，工具仍会先暂停服务并按新 `.env` 重新启动容器，详见[配置同步](config-sync.md)）。当你在服务器手动修改了根目录 `.env` 中的启动期参数（如 `ONEBOT_*` 连接配置、监听端口、`WEB_ADMIN_PASSWORD`）或调整了 Compose 编排与卷挂载时，需在实际 Compose 所在目录重新执行 `up -d` 创建容器使其生效（若仅修改了 `WEB_ADMIN_PASSWORD`，可单独重建 `web-admin` 容器）。
 
 > **提示**：如果是通过 `deploy-v4` 部署的版本目录（release）结构，在服务器手动执行以下命令前，请先按[手动访问步骤](../../scripts/deploy/README.md#manual-compose-access)导出环境变量，并将下方命令中的 `--env-file ../.env` 替换为 `--env-file "$QUICKQUIP_ENV_FILE"`。
 
 ### 常用维护命令速查（平铺生产部署）
 
-先进入 `prod/`，按这次要做的事情选择一项。版本目录部署使用上面的环境变量与路径。
+进入 `prod/` 目录后，按维护场景执行对应命令：
 
 | 任务 | 命令 |
 |---|---|
-| 修改 `.env` 或 Compose 后重新创建服务 | `docker compose --env-file ../.env up -d quickquip web-admin` |
+| 修改启动期 `.env` 参数或 Compose 后重新创建服务 | `docker compose --env-file ../.env up -d` |
 | 修改已挂载 Python 源码后重启 | `docker compose --env-file ../.env restart quickquip web-admin` |
 | 查看实时日志（Ctrl+C 退出查看） | `docker compose --env-file ../.env logs -f` |
 | 停止并移除容器，保留挂载的数据目录 | `docker compose --env-file ../.env down` |
 
-依赖、Dockerfile 或 pyproject 修改后，需要先构建再启动：
+依赖、Dockerfile 或 `pyproject.toml` 修改后，需先重新构建镜像再更新全部应用服务（含 `env-agent`、`quickquip` 和 `web-admin`）：
 
 ```bash
 docker compose --env-file ../.env build quickquip
-docker compose --env-file ../.env up -d quickquip web-admin
+docker compose --env-file ../.env up -d
 ```
 
 ---
@@ -431,11 +435,11 @@ docker compose --env-file ../.env up -d quickquip web-admin
 **不需要。**
 QuickQuip 直接通过模型 API 提供对话能力，并通过 MCP 协议接入外部工具服务：
 - 内置网页搜索（`search_web`）由 SearXNG 提供；
-- Tavily 等外部扩展工具通过 MCP 接入（只需在后台将 MCP 服务配置到 `settings.mcp.servers` 后保存并应用；相关 API 凭据写入根 `.env`，宿主机路径与 sidecar 容器编排在私有 `prod/` 中维护即可，详见 [MCP 集成约定](../../docs/dev/mcp-integration.md)）。
+- Tavily 等外部扩展工具通过 MCP 接入（只需在后台将 MCP 服务配置到 `settings.mcp.servers` 后保存并应用；相关 API 凭据写入根 `.env`，宿主机路径与 sidecar 容器编排在私有 `prod/` 中维护即可，详见 [MCP 接入指南](mcp-servers.md)）。
 
 ### 2. 协议端掉线后怎么办？
 
-到协议端自己的运维入口确认 QQ 在线状态，按其说明恢复登录。回到 QuickQuip 的日志确认连接恢复。若账号在线但 Bot 未连接，核对所用 WebSocket 方向、地址与令牌。
+先在协议端自身的管理界面或日志中检查 QQ 在线状态，按协议端文档完成重连或重新扫码登录，再回到 QuickQuip 日志确认连接已恢复；若协议端显示 QQ 已在线但 QuickQuip 仍未连上，请核对双方配置的 WebSocket 方向、连接地址与访问令牌是否一致。
 
 ### 3. 如何降低 QQ 账号被风控/冻结的概率？
 - 避免使用刚注册的新号，建议使用有一定正常使用历史的 QQ 号。
@@ -455,4 +459,4 @@ QuickQuip 直接通过模型 API 提供对话能力，并通过 MCP 协议接入
 5. **查看容器报错日志**：运行 `docker compose --env-file ../.env logs -f quickquip`，检查是否有配置文件缺失或 API Key 缺失的明确报错。
 6. **重载独立资产与执行模型探活**：
    - 如果你修改的是本地人格（Persona）或词表文件，需在群内发送 `/llm reload`（或通过对应重载入口）使其生效。
-   - `/llm reload` 会在重载后自动探活当前群实际生效的 `provider/model`；如果你需要对所有渠道做全量连通性巡检，可在群内发送 `/llm probe`，或在 Web Admin 诊断页点击“**探活 Provider**”（这会对所有已配置的 provider 各发送一次 `max_tokens=1` 的真实请求，可能按渠道计费）。
+   - `/llm reload` 会在重载后自动探活当前群实际生效的 `provider/model`；如果你需要对所有渠道做全量连通性巡检，可在群内发送 `/llm probe`，或在 Web Admin 诊断页点击“**探活 Provider**”（这会对所有已配置的 provider 各发送一次 `max_tokens=16` 的真实请求，可能按渠道计费）。
