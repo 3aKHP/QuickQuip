@@ -28,6 +28,7 @@ body {
   font-family: var(--qq-font-base);
   font-size: var(--qq-text-base);
   line-height: var(--qq-line-base);
+  font-optical-sizing: auto;
   background: var(--qq-bg);
   color: var(--qq-text);
   min-height: 100vh;
@@ -373,4 +374,62 @@ code {
 
 .stat-cards--kpi {
   grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
+}
+
+/* ── Specular Pointer Glow（指针追光 1px 边缘高光；静止时完全隐形）── */
+.qq-glow-card {
+  position: relative;
+}
+
+.qq-glow-card::before,
+.qq-glow-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  opacity: var(--glow-opacity, 0);
+  transition: opacity 180ms var(--qq-ease-out);
+}
+
+/* 极浅表层漫反射微光 */
+.qq-glow-card::before {
+  background: radial-gradient(
+    220px circle at var(--mx, -999px) var(--my, -999px),
+    var(--glow-sheen, var(--qq-specular-sheen)),
+    transparent 70%
+  );
+  z-index: 0;
+}
+
+/* 1px 镜面边框追光（mask-composite 仅露出边框 1px 环；inset: 0 兼容 overflow: hidden 卡片） */
+.qq-glow-card::after {
+  inset: 0;
+  padding: 1px;
+  background: radial-gradient(
+    240px circle at var(--mx, -999px) var(--my, -999px),
+    var(--glow-color, var(--qq-specular-border)),
+    transparent 65%
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  z-index: 2;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .qq-glow-card::before,
+  .qq-glow-card::after {
+    display: none;
+  }
+}
+
+html[data-motion="reduced"] .qq-glow-card::before,
+html[data-motion="reduced"] .qq-glow-card::after {
+  display: none;
 }

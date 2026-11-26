@@ -1,3 +1,5 @@
+import { notifyApiActivity, triggerLightFieldSonar } from '../lib/lightFieldBus'
+
 export const BASE = import.meta.env.BASE_URL.replace(/\/$/, '')
 
 class ApiError extends Error {
@@ -92,11 +94,32 @@ export async function request<T = any>(path: string, options: RequestInit = {}):
     headers['Content-Type'] = 'application/json'
   }
 
-  const res = await fetch(BASE + path, {
-    credentials: 'same-origin',
-    ...options,
-    headers,
-  })
-  // 网络边界唯一断言点：parseResponse 返回 unknown，由调用方声明的 T 承担契约
-  return (await parseResponse(res)) as T
+  const method = (options.method || 'GET').toUpperCase()
+  const isMutation = method !== 'GET' && method !== 'HEAD' && method !== 'OPTIONS'
+
+  notifyApiActivity('start')
+  let ok = false
+  let aborted = false
+  try {
+    const res = await fetch(BASE + path, {
+      credentials: 'same-origin',
+      ...options,
+      headers,
+    })
+    // 网络边界唯一断言点：parseResponse 返回 unknown，由调用方声明的 T 承担契约
+    const parsed = (await parseResponse(res)) as T
+    ok = true
+    if (isMutation && !path.endsWith('/auth/logout')) {
+      triggerLightFieldSonar({ kind: 'success' })
+    }
+    return parsed
+  } catch (err) {
+    if (err instanceof Error && err.name === 'AbortError') {
+      aborted = true
+    }
+    throw err
+  } finally {
+    // 路由切换等主动 abort 不计为网络异常，避免状态条闪烁红点
+    notifyApiActivity('end', ok || aborted)
+  }
 }

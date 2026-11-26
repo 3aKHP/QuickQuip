@@ -130,9 +130,11 @@ function toggle(e: Event) {
     transition: none;
   }
 }
+</style>
 
-:global(html[data-motion="reduced"]) .ui-toggle__track,
-:global(html[data-motion="reduced"]) .ui-toggle__knob {
+<style>
+html[data-motion="reduced"] .ui-toggle__track,
+html[data-motion="reduced"] .ui-toggle__knob {
   transition: none;
 }
 </style>

@@ -1,0 +1,30 @@
+/* ==========================================================================
+   QuickQuip Self-Hosted Typography
+   - Latin / Digits: Google Sans Flex Variable (opsz + wght, SIL OFL 1.1)
+     仅引入 latin 与 latin-ext 子集，避免 nushu 子集（含 U+3002/U+4E00）抢占中文标点与汉字，
+     同时不打包未使用的冷门文字子集。
+   - CJK (Simplified Chinese): Noto Sans SC Variable (SIL OFL 1.1, 按 unicode-range 自动分片按需加载)
+   - Monospace: 保持系统等宽字体栈，不影响代码编辑器与日志视图。
+   ========================================================================== */
+
+@import "@fontsource-variable/noto-sans-sc";
+
+/* google-sans-flex-latin-ext-opsz-normal */
+@font-face {
+  font-family: "Google Sans Flex Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 1 1000;
+  src: url("@fontsource-variable/google-sans-flex/files/google-sans-flex-latin-ext-opsz-normal.woff2") format("woff2-variations");
+  unicode-range: U+0100-02BA, U+02BD-02C5, U+02C7-02CC, U+02CE-02D7, U+02DD-02FF, U+0304, U+0308, U+0329, U+1D00-1DBF, U+1E00-1E9F, U+1EF2-1EFF, U+2020, U+20A0-20AB, U+20AD-20C4, U+2113, U+2C60-2C7F, U+A720-A7FF;
+}
+
+/* google-sans-flex-latin-opsz-normal */
+@font-face {
+  font-family: "Google Sans Flex Variable";
+  font-style: normal;
+  font-display: swap;
+  font-weight: 1 1000;
+  src: url("@fontsource-variable/google-sans-flex/files/google-sans-flex-latin-opsz-normal.woff2") format("woff2-variations");
+  unicode-range: U+0000-00FF, U+0131, U+0152-0153, U+02BB-02BC, U+02C6, U+02DA, U+02DC, U+0304, U+0308, U+0329, U+2000-206F, U+20AC, U+2122, U+2191, U+2193, U+2212, U+2215, U+FEFF, U+FFFD;
+}

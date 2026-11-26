@@ -42,13 +42,13 @@
       </p>
     </section>
 
-    <div class="stat-cards stat-cards--kpi">
-      <UiStatCard label="当前保留条数" :value="kpiRows" unit="条" icon="Layers" tip="最近组装的历史窗口行数（bot 进程快照）。" />
-      <UiStatCard label="窗口 tokens" :value="kpiTokens" unit="tokens" icon="Database" tip="窗口纪元预算估算（含每行 speaker 标签开销），与请求计量同口径。" />
-      <UiStatCard label="回放估算" :value="fmtTokens(activeKey?.replay_tokens)" :sub="activeKey ? `冻结历史 ${activeKey.frozen_segments} 段` : undefined" unit="tokens" icon="Database" tip="工具历史与原生块的回放估算，单独受回放预算约束。" />
-      <UiStatCard label="信封 ≈ 每轮" :value="kpiEnvelope" unit="tok/轮" icon="Mail" tip="【轮次上下文】信封的每轮固定输入成本（时间范围内每轮均值）。" />
+    <div ref="kpiGridRef" class="stat-cards stat-cards--kpi">
+      <UiStatCard label="当前保留条数" :value="kpiRows" digit-roll unit="条" icon="Layers" tip="最近组装的历史窗口行数（bot 进程快照）。" />
+      <UiStatCard label="窗口 tokens" :value="kpiTokens" digit-roll unit="tokens" icon="Database" tip="窗口纪元预算估算（含每行 speaker 标签开销），与请求计量同口径。" />
+      <UiStatCard label="回放估算" :value="fmtTokens(activeKey?.replay_tokens)" digit-roll :sub="activeKey ? `冻结历史 ${activeKey.frozen_segments} 段` : undefined" unit="tokens" icon="Database" tip="工具历史与原生块的回放估算，单独受回放预算约束。" />
+      <UiStatCard label="信封 ≈ 每轮" :value="kpiEnvelope" digit-roll unit="tok/轮" icon="Mail" tip="【轮次上下文】信封的每轮固定输入成本（时间范围内每轮均值）。" />
       <UiStatCard label="本纪元已存活" :value="kpiAge" icon="Hourglass" :tip="epochAgeTip" />
-      <div class="kpi ring-card">
+      <div class="kpi ring-card qq-glow-card" data-glow-card>
         <div class="ring" :class="{ urgent: coldUrgent }">
           <svg viewBox="0 0 44 44">
             <circle class="ring-bg" cx="22" cy="22" r="18" />
@@ -192,6 +192,7 @@ import type { ECOption } from '../charts/echarts'
 import { pollRuntimeAction } from '../composables/useRuntimeActionPolling'
 import { useChartTheme } from '../composables/useChartTheme'
 import { useTheme } from '../composables/useTheme'
+import { usePointerGlow } from '../composables/usePointerGlow'
 
 const REASON_NAMES: Record<string, string> = {
   cold: '冷场',
@@ -254,6 +255,8 @@ const unmountController = new AbortController()
 
 const { chartTheme } = useChartTheme()
 const { theme } = useTheme()
+const kpiGridRef = ref<HTMLElement | null>(null)
+usePointerGlow(kpiGridRef)
 
 const epochColors = computed(() => {
   void theme.value
@@ -1190,6 +1193,10 @@ onUnmounted(() => {
   border: 1px solid var(--qq-border);
   border-radius: 14px;
   padding: 14px 18px;
+}
+.kpi.ring-card > * {
+  position: relative;
+  z-index: 1;
 }
 .kpi-label {
   font-size: 12.5px;

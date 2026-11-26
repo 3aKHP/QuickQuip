@@ -67,11 +67,6 @@ const classes = computed(() => [
   }
 }
 
-:global(html[data-motion="reduced"]) .ui-card--clickable:hover,
-:global(html[data-motion="reduced"]) .ui-card--clickable:focus-visible {
-  transform: none;
-}
-
 /* 语义色条 — 左侧 2px */
 .ui-card__accent {
   position: absolute;
@@ -88,4 +83,11 @@ const classes = computed(() => [
 .ui-card__accent--success { background: var(--qq-success); }
 .ui-card__accent--warn    { background: var(--qq-warn); }
 .ui-card__accent--danger  { background: var(--qq-danger); }
+</style>
+
+<style>
+html[data-motion="reduced"] .ui-card--clickable:hover,
+html[data-motion="reduced"] .ui-card--clickable:focus-visible {
+  transform: none;
+}
 </style>

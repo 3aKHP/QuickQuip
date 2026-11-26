@@ -54,8 +54,10 @@ withDefaults(defineProps<{
     opacity: 0.5;
   }
 }
+</style>
 
-:global(html[data-motion="reduced"]) .ui-loading__bar {
+<style>
+html[data-motion="reduced"] .ui-loading__bar {
   animation: none;
   opacity: 0.5;
 }

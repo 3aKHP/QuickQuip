@@ -1,7 +1,7 @@
 <template>
   <div class="app-root">
     <!-- Ambient light field -->
-    <LightField :mode="authenticated ? 'ambient' : 'showcase'" />
+    <LightField :mode="authenticated ? 'ambient' : 'showcase'" :domain="activeDomain" />
 
     <!-- Unauthenticated -->
     <LoginView
@@ -45,6 +45,15 @@
       </UiCard>
     </div>
 
+    <!-- Command Palette（全局 Cmd/Ctrl+K 快速跳转与操作） -->
+    <CommandPalette
+      v-if="authenticated"
+      :theme="theme"
+      :logout-disabled="authBusy"
+      @toggle-theme="toggleTheme"
+      @logout="handleLogout"
+    />
+
     <!-- Toast（提升至 app-root 级，登录页同样可提示；悬停暂停、点击关闭） -->
     <Transition name="toast">
       <div
@@ -65,11 +74,12 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onBeforeUnmount, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import LoginView from './views/LoginView.vue'
 import AppNav from './components/layout/AppNav.vue'
 import StatusBar from './components/layout/StatusBar.vue'
+import CommandPalette from './components/layout/CommandPalette.vue'
 import LightField from './components/background/LightField.vue'
 import UiCard from './components/ui/UiCard.vue'
 import UiIcon from './components/ui/UiIcon.vue'
@@ -77,6 +87,8 @@ import { dismissToast, pauseToast, resumeToast, toastMsg, toastType } from './to
 import { NAV_ITEMS, NAV_SECTIONS } from './config/nav'
 import { useAuth } from './composables/useAuth'
 import { useTheme } from './composables/useTheme'
+import { useCommandPalette } from './composables/useCommandPalette'
+import { triggerRouteWarp, type WarpDirection } from './lib/lightFieldBus'
 
 const {
   authReady,
@@ -91,10 +103,16 @@ const {
 } = useAuth()
 
 const { theme, loadTheme, toggleTheme } = useTheme()
+const { recordVisitedPath } = useCommandPalette()
 const route = useRoute()
 const contentEl = ref<HTMLElement | null>(null)
 const routeMotionClass = ref('route-motion-forward')
 const routeTraceKey = ref(0)
+
+const activeDomain = computed(() => {
+  const item = NAV_ITEMS.find(entry => entry.path === route.path)
+  return item?.section || 'overview'
+})
 
 function routeDepth(path: string): number {
   if (path === '/') return 0
@@ -107,15 +125,23 @@ watch(
     const nextDepth = routeDepth(nextPath)
     const prevDepth = prevPath ? routeDepth(prevPath) : nextDepth
 
+    let warpDir: WarpDirection = 'switch'
     if (nextDepth > prevDepth) {
       routeMotionClass.value = 'route-motion-forward'
+      warpDir = 'forward'
     } else if (nextDepth < prevDepth) {
       routeMotionClass.value = 'route-motion-back'
+      warpDir = 'back'
     } else {
       routeMotionClass.value = 'route-motion-switch'
+      warpDir = 'switch'
     }
 
     routeTraceKey.value += 1
+    recordVisitedPath(nextPath)
+    if (prevPath !== undefined && prevPath !== nextPath) {
+      triggerRouteWarp(warpDir)
+    }
 
     void nextTick(() => {
       contentEl.value?.scrollTo({ top: 0 })

@@ -275,9 +275,11 @@ onBeforeUnmount(() => {
     transition: none;
   }
 }
+</style>
 
-:global(html[data-motion="reduced"]) .ui-info-tip-enter-active,
-:global(html[data-motion="reduced"]) .ui-info-tip-leave-active {
+<style>
+html[data-motion="reduced"] .ui-info-tip-enter-active,
+html[data-motion="reduced"] .ui-info-tip-leave-active {
   transition: none;
 }
 </style>
