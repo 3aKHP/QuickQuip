@@ -29,6 +29,11 @@ export function createLightFieldStage(flags: StageFlags) {
   let haloY = 0
   let cx = 0
   let cy = 0
+  let lastFrameMs = 0
+
+  function resetClock() {
+    lastFrameMs = 0
+  }
 
   function onMouseMove(e: MouseEvent) {
     mouseX = e.clientX
@@ -88,6 +93,11 @@ export function createLightFieldStage(flags: StageFlags) {
 
     const dark = flags.isDark()
     const showcase = flags.isShowcase()
+    const dtMs = lastFrameMs ? Math.min(Math.max(now - lastFrameMs, 0), 50) : 16.667
+    lastFrameMs = now
+    // 归一化到 60fps 基准，保证 120Hz/240Hz 高刷屏与 60Hz 速率一致
+    const frameScale = dtMs / 16.667
+    const haloStep = 1 - Math.pow(1 - HALO_LERP, frameScale)
     const t = now * 0.001
     const w = window.innerWidth
     const h = window.innerHeight
@@ -100,8 +110,8 @@ export function createLightFieldStage(flags: StageFlags) {
     if (!dark) drawBaseWash(ctx, w, h, showcase)
     drawRays(ctx, t, w, h, px, py, dark, showcase)
 
-    haloX += (mouseX - haloX) * HALO_LERP
-    haloY += (mouseY - haloY) * HALO_LERP
+    haloX += (mouseX - haloX) * haloStep
+    haloY += (mouseY - haloY) * haloStep
     drawMouseHalo(ctx, t, haloX, haloY, dark, showcase)
 
     const alphaK = showcase ? 1 : 0.85
@@ -109,8 +119,8 @@ export function createLightFieldStage(flags: StageFlags) {
     // 先算全部粒子屏幕坐标（暗色连线要用）
     const pts: ScreenPoint[] = []
     for (const p of particles) {
-      p.x += p.vx
-      p.y += p.vy
+      p.x += p.vx * frameScale
+      p.y += p.vy * frameScale
       if (p.x < -10) p.x = w + 10
       if (p.x > w + 10) p.x = -10
       if (p.y < -10) p.y = h + 10
@@ -145,5 +155,5 @@ export function createLightFieldStage(flags: StageFlags) {
     return true
   }
 
-  return { onMouseMove, centerPointer, resize, draw }
+  return { onMouseMove, centerPointer, resetClock, resize, draw }
 }

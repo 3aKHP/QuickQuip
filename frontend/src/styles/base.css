@@ -1,5 +1,10 @@
 html {
   box-sizing: border-box;
+  color-scheme: light;
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
 }
 
 *,
@@ -8,6 +13,15 @@ html {
   box-sizing: inherit;
   margin: 0;
   padding: 0;
+}
+
+a {
+  color: var(--qq-primary-ink);
+  text-underline-offset: 2px;
+}
+
+a:hover {
+  color: var(--qq-primary);
 }
 
 body {
@@ -25,17 +39,22 @@ body {
 /* 主题切换过渡：toggleTheme 时短暂挂到 <html>，320ms 后移除。
    选择器收窄到实际承载主题色的容器，避免 320ms 窗口内全文档元素重算 transition。 */
 html.theme-anim body,
+html.theme-anim .status-bar,
 html.theme-anim .app-shell-nav,
 html.theme-anim .section-panel,
 html.theme-anim .domain-btn,
 html.theme-anim .page-link,
 html.theme-anim .mobile-bar,
 html.theme-anim .drawer,
+html.theme-anim .toast,
+html.theme-anim .ui-info-tip__bubble,
 html.theme-anim .dash-hero,
 html.theme-anim .domain-card,
 html.theme-anim .ui-card,
 html.theme-anim .ui-stat-card,
 html.theme-anim .ui-stat-strip,
+html.theme-anim .ui-empty,
+html.theme-anim .ui-skeleton,
 html.theme-anim .ui-btn,
 html.theme-anim .ui-tag,
 html.theme-anim .ui-tabs,
@@ -43,6 +62,10 @@ html.theme-anim .ui-segmented,
 html.theme-anim .ui-toggle,
 html.theme-anim .ui-page-header,
 html.theme-anim .qq-selectable,
+html.theme-anim .login-shell,
+html.theme-anim table,
+html.theme-anim thead th,
+html.theme-anim tbody td,
 html.theme-anim input,
 html.theme-anim select,
 html.theme-anim textarea {
@@ -55,17 +78,22 @@ html.theme-anim textarea {
 
 @media (prefers-reduced-motion: reduce) {
   html.theme-anim body,
+  html.theme-anim .status-bar,
   html.theme-anim .app-shell-nav,
   html.theme-anim .section-panel,
   html.theme-anim .domain-btn,
   html.theme-anim .page-link,
   html.theme-anim .mobile-bar,
   html.theme-anim .drawer,
+  html.theme-anim .toast,
+  html.theme-anim .ui-info-tip__bubble,
   html.theme-anim .dash-hero,
   html.theme-anim .domain-card,
   html.theme-anim .ui-card,
   html.theme-anim .ui-stat-card,
   html.theme-anim .ui-stat-strip,
+  html.theme-anim .ui-empty,
+  html.theme-anim .ui-skeleton,
   html.theme-anim .ui-btn,
   html.theme-anim .ui-tag,
   html.theme-anim .ui-tabs,
@@ -73,11 +101,49 @@ html.theme-anim textarea {
   html.theme-anim .ui-toggle,
   html.theme-anim .ui-page-header,
   html.theme-anim .qq-selectable,
+  html.theme-anim .login-shell,
+  html.theme-anim table,
+  html.theme-anim thead th,
+  html.theme-anim tbody td,
   html.theme-anim input,
   html.theme-anim select,
   html.theme-anim textarea {
     transition: none;
   }
+}
+
+html[data-motion="reduced"].theme-anim body,
+html[data-motion="reduced"].theme-anim .status-bar,
+html[data-motion="reduced"].theme-anim .app-shell-nav,
+html[data-motion="reduced"].theme-anim .section-panel,
+html[data-motion="reduced"].theme-anim .domain-btn,
+html[data-motion="reduced"].theme-anim .page-link,
+html[data-motion="reduced"].theme-anim .mobile-bar,
+html[data-motion="reduced"].theme-anim .drawer,
+html[data-motion="reduced"].theme-anim .toast,
+html[data-motion="reduced"].theme-anim .ui-info-tip__bubble,
+html[data-motion="reduced"].theme-anim .dash-hero,
+html[data-motion="reduced"].theme-anim .domain-card,
+html[data-motion="reduced"].theme-anim .ui-card,
+html[data-motion="reduced"].theme-anim .ui-stat-card,
+html[data-motion="reduced"].theme-anim .ui-stat-strip,
+html[data-motion="reduced"].theme-anim .ui-empty,
+html[data-motion="reduced"].theme-anim .ui-skeleton,
+html[data-motion="reduced"].theme-anim .ui-btn,
+html[data-motion="reduced"].theme-anim .ui-tag,
+html[data-motion="reduced"].theme-anim .ui-tabs,
+html[data-motion="reduced"].theme-anim .ui-segmented,
+html[data-motion="reduced"].theme-anim .ui-toggle,
+html[data-motion="reduced"].theme-anim .ui-page-header,
+html[data-motion="reduced"].theme-anim .qq-selectable,
+html[data-motion="reduced"].theme-anim .login-shell,
+html[data-motion="reduced"].theme-anim table,
+html[data-motion="reduced"].theme-anim thead th,
+html[data-motion="reduced"].theme-anim tbody td,
+html[data-motion="reduced"].theme-anim input,
+html[data-motion="reduced"].theme-anim select,
+html[data-motion="reduced"].theme-anim textarea {
+  transition: none;
 }
 
 /* Selection — QQ 蓝选区 */
@@ -149,11 +215,14 @@ input[type="text"],
 input[type="number"],
 input[type="password"],
 input[type="date"],
+input[type="time"],
+input[type="email"],
+input[type="url"],
 input[type="search"],
 select,
 textarea {
   font-family: var(--qq-font-base);
-  font-size: var(--qq-text-md);
+  font-size: var(--qq-text-base);
   background: var(--qq-surface);
   border: 1px solid var(--qq-border-strong);
   border-radius: var(--qq-radius-btn);
@@ -163,6 +232,58 @@ textarea {
   padding: 7px 11px;
   outline: none;
   transition: border-color var(--qq-transition-fast), background var(--qq-transition-fast);
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  accent-color: var(--qq-primary);
+  cursor: pointer;
+}
+
+/* 自定义暗色友好的原生复选框外观（跳过 UiToggle 内部隐藏的 checkbox） */
+input[type="checkbox"]:not(.ui-toggle__input) {
+  appearance: none;
+  -webkit-appearance: none;
+  width: 15px;
+  height: 15px;
+  min-height: 15px;
+  padding: 0;
+  flex-shrink: 0;
+  display: inline-grid;
+  place-content: center;
+  border: 1px solid var(--qq-border-strong);
+  border-radius: 4px;
+  background: var(--qq-surface-elevated);
+  vertical-align: middle;
+  transition: background var(--qq-transition-fast), border-color var(--qq-transition-fast), box-shadow var(--qq-transition-fast);
+}
+
+input[type="checkbox"]:not(.ui-toggle__input)::after {
+  content: "";
+  width: 8px;
+  height: 5px;
+  border-left: 2px solid var(--qq-on-primary);
+  border-bottom: 2px solid var(--qq-on-primary);
+  transform: translateY(-1px) rotate(-45deg) scale(0);
+  transition: transform 110ms var(--qq-ease-out);
+}
+
+input[type="checkbox"]:not(.ui-toggle__input):checked {
+  background: var(--qq-primary);
+  border-color: var(--qq-primary);
+}
+
+input[type="checkbox"]:not(.ui-toggle__input):checked::after {
+  transform: translateY(-1px) rotate(-45deg) scale(1);
+}
+
+input[type="checkbox"]:not(.ui-toggle__input):hover:not(:disabled) {
+  border-color: var(--qq-primary);
+}
+
+input[type="checkbox"]:not(.ui-toggle__input):focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 3px var(--qq-primary-soft);
 }
 
 textarea {
@@ -241,4 +362,15 @@ code {
   font-weight: 600;
   color: var(--qq-text);
   line-height: var(--qq-line-tight);
+}
+
+/* KPI 统计卡通用网格（EpochsView / LlmUsageView 共享） */
+.stat-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+  gap: var(--qq-gap-md);
+}
+
+.stat-cards--kpi {
+  grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
 }

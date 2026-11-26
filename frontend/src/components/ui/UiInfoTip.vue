@@ -2,8 +2,8 @@
   <span
     ref="rootEl"
     class="ui-info-tip"
-    @focusin="open = true"
-    @focusout="open = false"
+    @focusin="onFocusIn"
+    @focusout="onFocusOut"
   >
     <span
       ref="btnEl"
@@ -13,43 +13,40 @@
       :aria-label="ariaLabel ?? '查看说明'"
       :aria-expanded="open"
       :aria-describedby="open ? tipId : undefined"
-      @mouseenter="open = true"
-      @mouseleave="open = false"
-      @click.stop="open = true"
-      @keydown.enter.stop.prevent="open = true"
-      @keydown.space.stop.prevent="open = true"
-      @keydown.esc.stop.prevent="open = false"
+      @mouseenter="onMouseEnter"
+      @mouseleave="onMouseLeave"
+      @click.stop="onClickToggle"
+      @keydown.enter.stop.prevent="onClickToggle"
+      @keydown.space.stop.prevent="onClickToggle"
+      @keydown.esc.stop.prevent="closeAll"
     >
       <UiIcon name="CircleHelp" :size="size" />
     </span>
-    <Transition name="ui-info-tip">
-      <span
-        v-if="open"
-        :id="tipId"
-        ref="bubbleEl"
-        role="tooltip"
-        class="ui-info-tip__bubble"
-        :style="pos"
-      >
-        <slot>{{ text }}</slot>
-      </span>
-    </Transition>
+    <Teleport to="body">
+      <Transition name="ui-info-tip">
+        <span
+          v-if="open"
+          :id="tipId"
+          ref="bubbleEl"
+          role="tooltip"
+          class="ui-info-tip__bubble"
+          :class="{ 'ui-info-tip__bubble--below': placement === 'below' }"
+          :style="pos"
+        >
+          <slot>{{ text }}</slot>
+        </span>
+      </Transition>
+    </Teleport>
   </span>
 </template>
 
 <script setup lang="ts">
 /**
- * 「?」悬浮说明。hover / 键盘聚焦显示，点击固定显示（触屏主路径），
- * Esc、点击外部或页面滚动关闭。说明文案走 text 属性，复杂内容用插槽覆盖。
- *
- * 触发元素用 span[role=button][tabindex=0] 而非 <button>：本组件常被放进
- * tab、列表项等 <button> 内部，嵌套 button 违反 HTML 内容模型。
- *
- * 气泡为 position: fixed + 打开时 JS 实测像素坐标：absolute + 百分比居中
- * 会被滚动容器（.content）的溢出裁切吃掉越界部分，且个别引擎存在包含块
- * 偏移怪癖；fixed 直接脱离滚动容器，坐标由视口计算，不依赖 CSS 定位技巧。
+ * 「?」悬浮说明。hover / 键盘聚焦显示，点击可固定/收起（触屏主路径），
+ * Esc、点击外部或页面滚动关闭。通过 Teleport 挂至 body，避免被卡片 overflow
+ * 或 transform 包含块裁切与遮挡。
  */
-import { nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, ref, useId, watch } from 'vue'
 import UiIcon from './UiIcon.vue'
 
 withDefaults(defineProps<{
@@ -66,13 +63,69 @@ withDefaults(defineProps<{
 })
 
 const tipId = `ui-info-tip-${useId()}`
-const open = ref(false)
+const hovered = ref(false)
+const focused = ref(false)
+const pinned = ref(false)
+const open = computed(() => hovered.value || focused.value || pinned.value)
+const placement = ref<'above' | 'below'>('above')
 const rootEl = ref<HTMLElement | null>(null)
 const btnEl = ref<HTMLElement | null>(null)
 const bubbleEl = ref<HTMLElement | null>(null)
 const pos = ref<{ left: string; top: string; width: string }>({ left: '0px', top: '0px', width: '280px' })
 
-/** 按触发点居中放置气泡，并夹取在视口内（左右各留 8px 边距）。 */
+let disposed = false
+let listenersAttached = false
+let rafId = 0
+let hoverTimer: number | null = null
+
+function clearHoverTimer() {
+  if (hoverTimer !== null) {
+    window.clearTimeout(hoverTimer)
+    hoverTimer = null
+  }
+}
+
+function onMouseEnter() {
+  clearHoverTimer()
+  hoverTimer = window.setTimeout(() => {
+    hovered.value = true
+    hoverTimer = null
+  }, 60)
+}
+
+function onMouseLeave() {
+  clearHoverTimer()
+  hoverTimer = window.setTimeout(() => {
+    hovered.value = false
+    hoverTimer = null
+  }, 90)
+}
+
+function onFocusIn() {
+  focused.value = true
+}
+
+function onFocusOut() {
+  focused.value = false
+}
+
+function onClickToggle() {
+  clearHoverTimer()
+  pinned.value = !pinned.value
+  if (!pinned.value) {
+    hovered.value = false
+    focused.value = false
+  }
+}
+
+function closeAll() {
+  clearHoverTimer()
+  hovered.value = false
+  focused.value = false
+  pinned.value = false
+}
+
+/** 按触发点居中放置气泡，并夹取在视口安全区内（避开顶部状态栏/移动导航栏）。 */
 function place() {
   const btn = btnEl.value
   const bub = bubbleEl.value
@@ -81,43 +134,72 @@ function place() {
   const b = bub.getBoundingClientRect()
   const vw = document.documentElement.clientWidth
   const vh = document.documentElement.clientHeight
-  const width = Math.min(280, vw - 24)
+  const topSafe = vw <= 767 ? 84 : 34
+  const width = Math.min(280, Math.max(160, vw - 24))
   let left = t.left + t.width / 2 - width / 2
-  left = Math.min(Math.max(8, left), vw - width - 8)
-  const above = t.top - b.height - 8 >= 8
-  let top = above ? t.top - b.height - 8 : t.bottom + 8
-  top = Math.min(Math.max(8, top), vh - b.height - 8)
+  left = Math.min(Math.max(8, left), Math.max(8, vw - width - 8))
+  const fitsAbove = t.top - b.height - 8 >= topSafe
+  placement.value = fitsAbove ? 'above' : 'below'
+  let top = fitsAbove ? t.top - b.height - 8 : t.bottom + 8
+  const maxTop = Math.max(topSafe, vh - b.height - 8)
+  top = Math.max(topSafe, Math.min(top, maxTop))
   pos.value = { left: `${Math.round(left)}px`, top: `${Math.round(top)}px`, width: `${width}px` }
 }
 
 function onDocClick(e: MouseEvent) {
-  if (!rootEl.value?.contains(e.target as Node)) open.value = false
+  if (!rootEl.value?.contains(e.target as Node)) closeAll()
+}
+
+function onDocKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') closeAll()
 }
 
 function onScroll() {
-  open.value = false
+  closeAll()
+}
+
+function attachListeners() {
+  if (listenersAttached) return
+  listenersAttached = true
+  document.addEventListener('click', onDocClick, { capture: true })
+  document.addEventListener('keydown', onDocKeydown)
+  window.addEventListener('scroll', onScroll, { capture: true, passive: true })
+  window.addEventListener('resize', onScroll)
+}
+
+function detachListeners() {
+  if (!listenersAttached) return
+  listenersAttached = false
+  document.removeEventListener('click', onDocClick, { capture: true })
+  document.removeEventListener('keydown', onDocKeydown)
+  window.removeEventListener('scroll', onScroll, { capture: true })
+  window.removeEventListener('resize', onScroll)
 }
 
 watch(open, async (v) => {
+  if (rafId) {
+    cancelAnimationFrame(rafId)
+    rafId = 0
+  }
   if (v) {
     await nextTick()
+    if (disposed || !open.value) return
     place()
-    // 宽度收紧后行数可能变化，下一帧按最终高度复核一次纵向位置
-    requestAnimationFrame(place)
-    document.addEventListener('click', onDocClick, { capture: true })
-    window.addEventListener('scroll', onScroll, { capture: true, passive: true })
-    window.addEventListener('resize', onScroll)
+    rafId = requestAnimationFrame(() => {
+      rafId = 0
+      if (!disposed && open.value) place()
+    })
+    attachListeners()
   } else {
-    document.removeEventListener('click', onDocClick, { capture: true })
-    window.removeEventListener('scroll', onScroll, { capture: true })
-    window.removeEventListener('resize', onScroll)
+    detachListeners()
   }
 })
 
 onBeforeUnmount(() => {
-  document.removeEventListener('click', onDocClick, { capture: true })
-  window.removeEventListener('scroll', onScroll, { capture: true })
-  window.removeEventListener('resize', onScroll)
+  disposed = true
+  clearHoverTimer()
+  if (rafId) cancelAnimationFrame(rafId)
+  detachListeners()
 })
 </script>
 
@@ -153,7 +235,7 @@ onBeforeUnmount(() => {
 
 .ui-info-tip__bubble {
   position: fixed;
-  z-index: 70;
+  z-index: var(--qq-z-tooltip);
   padding: 10px 12px;
   border: 1px solid var(--qq-shell-glass-border);
   border-radius: var(--qq-radius-card);
@@ -162,22 +244,40 @@ onBeforeUnmount(() => {
     var(--qq-shell-drawer-bg);
   color: var(--qq-text);
   font-size: var(--qq-text-xs);
-  line-height: 1.7;
+  line-height: 1.65;
   text-align: left;
   white-space: normal;
-  box-shadow: var(--qq-shadow-md);
-  backdrop-filter: blur(16px) saturate(1.2);
-  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  box-shadow: var(--qq-shadow-lg);
+  backdrop-filter: blur(18px) saturate(1.2);
+  -webkit-backdrop-filter: blur(18px) saturate(1.2);
   pointer-events: none;
 }
 
 .ui-info-tip-enter-active,
 .ui-info-tip-leave-active {
-  transition: opacity 140ms var(--qq-ease-out);
+  transition: opacity 140ms var(--qq-ease-out), transform 140ms var(--qq-ease-out);
 }
 
 .ui-info-tip-enter-from,
 .ui-info-tip-leave-to {
   opacity: 0;
+  transform: translateY(4px) scale(0.98);
+}
+
+.ui-info-tip__bubble--below.ui-info-tip-enter-from,
+.ui-info-tip__bubble--below.ui-info-tip-leave-to {
+  transform: translateY(-4px) scale(0.98);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-info-tip-enter-active,
+  .ui-info-tip-leave-active {
+    transition: none;
+  }
+}
+
+:global(html[data-motion="reduced"]) .ui-info-tip-enter-active,
+:global(html[data-motion="reduced"]) .ui-info-tip-leave-active {
+  transition: none;
 }
 </style>

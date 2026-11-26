@@ -109,10 +109,14 @@ const displayValue = computed(() => {
 
 /* 渐变卡上的说明图标需反色：UiInfoTip 默认 muted 色对比度不足，
    其 hover 色 --qq-primary 与品牌渐变同色，悬停时图标会隐形 */
-.ui-stat-card--primary :deep(.ui-info-tip__btn),
+.ui-stat-card--primary :deep(.ui-info-tip__btn) {
+  color: rgba(255, 255, 255, 0.82);
+}
+
 .ui-stat-card--primary :deep(.ui-info-tip__btn:hover),
 .ui-stat-card--primary :deep(.ui-info-tip__btn:focus-visible) {
-  color: rgba(255, 255, 255, 0.82);
+  color: #ffffff;
+  box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.45);
 }
 
 .ui-stat-card__value-row {
@@ -123,10 +127,12 @@ const displayValue = computed(() => {
 }
 
 .ui-stat-card__value {
-  font-size: var(--qq-text-2xl);
+  font-size: clamp(1.25rem, 2.1vw, 1.75rem);
   font-variant-numeric: tabular-nums;
   line-height: var(--qq-line-tight);
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .ui-stat-card__unit {

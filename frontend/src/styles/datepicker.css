@@ -51,9 +51,29 @@ html .dp--theme-dark {
 }
 
 html .dp--theme-light {
+  --dp-background-color: var(--qq-surface);
+  --dp-text-color: var(--qq-text);
+  --dp-hover-color: var(--qq-surface-hover);
+  --dp-hover-text-color: var(--qq-text);
+  --dp-hover-icon-color: var(--qq-text-muted);
   --dp-primary-color: var(--qq-primary);
+  --dp-primary-disabled-color: var(--qq-primary);
   --dp-primary-text-color: var(--qq-white);
+  --dp-secondary-color: var(--qq-text-muted);
+  --dp-border-color: var(--qq-border-strong);
+  --dp-menu-border-color: var(--qq-border-strong);
+  --dp-border-color-hover: var(--qq-primary);
   --dp-border-color-focus: var(--qq-primary);
+  --dp-disabled-color: var(--qq-surface-strong);
+  --dp-disabled-color-text: var(--qq-text-muted);
+  --dp-icon-color: var(--qq-text-muted);
+  --dp-danger-color: var(--qq-danger);
   --dp-highlight-color: var(--qq-accent-soft);
   --dp-font-family: var(--qq-font-base);
+  --dp-scroll-bar-background: var(--qq-surface-strong);
+  --dp-scroll-bar-color: var(--qq-surface-hover);
+}
+
+.dp--menu-wrapper {
+  z-index: var(--qq-z-popover, 500);
 }

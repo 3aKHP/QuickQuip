@@ -30,7 +30,7 @@
             autofocus
           />
         </div>
-        <p v-if="error" class="login-card__error">{{ error }}</p>
+        <p v-if="displayError" class="login-card__error" role="alert">{{ displayError }}</p>
         <UiButton variant="primary" type="submit" :loading="submitting" class="login-card__submit">
           登录
         </UiButton>
@@ -40,12 +40,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { computed, ref, onMounted, watch } from 'vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 
-defineProps<{
+const props = defineProps<{
   submitting?: boolean
   error?: string
 }>()
@@ -55,30 +55,51 @@ const emit = defineEmits<{
 }>()
 
 const password = ref('')
+const localError = ref('')
 const inputRef = ref<HTMLInputElement>()
+
+const displayError = computed(() => localError.value || props.error || '')
+
+watch(password, () => {
+  if (localError.value) localError.value = ''
+})
 
 onMounted(() => {
   inputRef.value?.focus()
 })
 
 function handleSubmit() {
-  if (password.value.trim()) {
-    emit('submit', password.value)
+  if (!password.value.trim()) {
+    localError.value = '请输入管理员口令。'
+    inputRef.value?.focus()
+    return
   }
+  localError.value = ''
+  emit('submit', password.value)
 }
 </script>
 
 <style scoped>
 .login-shell {
-  min-height: 100vh;
+  position: relative;
+  z-index: 1;
+  height: 100%;
+  min-height: 0;
+  overflow-y: auto;
   display: grid;
   place-items: center;
   padding: var(--qq-gap-lg);
-  background: var(--qq-bg);
 }
 
 .login-card {
   width: min(100%, 400px);
+  background:
+    linear-gradient(180deg, var(--qq-shell-glass-highlight), transparent 45%),
+    var(--qq-shell-drawer-bg);
+  border-color: var(--qq-shell-glass-border);
+  backdrop-filter: blur(18px) saturate(1.22);
+  -webkit-backdrop-filter: blur(18px) saturate(1.22);
+  box-shadow: var(--qq-shadow-lg);
 }
 
 .login-card__head {

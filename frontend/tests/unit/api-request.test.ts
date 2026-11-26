@@ -71,6 +71,17 @@ describe('request', () => {
     expect(err.message).toBe('400 bad param')
   })
 
+  it('on ConfigurationRoute error extracts message and field_path when detail is absent', async () => {
+    fetchMock.mockResolvedValue(fakeResponse(422, {
+      code: 'validation_error',
+      message: 'history_limit 必须在 0 到 200 之间',
+      field_path: 'history_limit',
+    }, 'Unprocessable Entity'))
+    const err = await request('/api/group-settings/12345').catch((e: unknown) => e) as { status: number; message: string }
+    expect(err.status).toBe(422)
+    expect(err.message).toBe('422 history_limit: history_limit 必须在 0 到 200 之间')
+  })
+
   it('on non-JSON error body rejects with status and statusText', async () => {
     fetchMock.mockResolvedValue(fakeResponse(502, '<html>bad gateway</html>', 'Bad Gateway'))
     const err = await request('/api/x').catch((e: unknown) => e) as Error

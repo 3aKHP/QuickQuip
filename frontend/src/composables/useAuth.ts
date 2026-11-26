@@ -57,8 +57,10 @@ async function handleLogout(): Promise<void> {
     await apiLogout()
     authenticated.value = false
   } catch (error: unknown) {
-    // 退出请求失败时服务端会话可能仍有效，保留登录态并如实提示
     const err = error as ApiError
+    // 若登出时服务端已返回 401，unauthorizedHandler 已完成登出，不再提示矛盾的退出失败
+    if (err.status === 401) return
+    // 退出请求失败时服务端会话可能仍有效，保留登录态并如实提示
     toast(`退出失败，当前会话仍有效：${err.data?.detail || err.message || '请稍后重试'}`, 'error')
   } finally {
     authBusy.value = false
@@ -67,12 +69,14 @@ async function handleLogout(): Promise<void> {
 
 function attachUnauthorizedHandler(): void {
   setUnauthorizedHandler(() => {
-    // 仅此前已登录（会话真的失效）才提示；首访探测与登录失败的 401 不显示误导性报错
+    // 仅此前已登录（会话真的失效）才提示；并发 401 到达时不覆盖已写入的失效提示
     const wasAuthenticated = authenticated.value
     authenticated.value = false
     authReady.value = true
     authBusy.value = false
-    authError.value = wasAuthenticated ? '登录状态已失效，请重新登录。' : ''
+    if (wasAuthenticated) {
+      authError.value = '登录状态已失效，请重新登录。'
+    }
   })
 }
 
