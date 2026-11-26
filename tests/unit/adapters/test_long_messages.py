@@ -115,3 +115,63 @@ async def test_send_long_group_message_raises_without_text_spam_when_image_fails
         )
 
     assert bot.sent == []
+
+
+@pytest.mark.asyncio
+async def test_send_long_group_message_blocks_before_forward_and_image_fallback(
+    tmp_path, monkeypatch
+):
+    from quickquip.common.sensitive_filter import DEFAULT_OUTPUT_FALLBACK
+    from tests.fixtures.sensitive_filter import make_sensitive_filter
+
+    sf = make_sensitive_filter(tmp_path, "block", "违禁词")
+    monkeypatch.setattr("quickquip.common.sensitive_filter.get_filter", lambda: sf)
+
+    bot = _FallbackBot()
+    rendered = []
+    monkeypatch.setattr(
+        long_messages,
+        "render_text_to_image",
+        lambda *args, **kwargs: rendered.append(args) or b"png",
+    )
+
+    await send_long_group_message(
+        bot,
+        456,
+        "长文内容包含违禁词" * 50,
+        node_name="群聊日报",
+        log_name="daily_summary",
+    )
+
+    assert rendered == []
+    assert len(bot.sent) == 1
+    assert bot.sent[0]["group_id"] == 456
+    assert str(bot.sent[0]["message"]) == DEFAULT_OUTPUT_FALLBACK
+
+
+@pytest.mark.asyncio
+async def test_send_long_group_message_allows_soft_hit_and_falls_back_to_image(
+    tmp_path, monkeypatch
+):
+    from tests.fixtures.sensitive_filter import make_sensitive_filter
+
+    sf = make_sensitive_filter(tmp_path, "soft", "擦边词")
+    monkeypatch.setattr("quickquip.common.sensitive_filter.get_filter", lambda: sf)
+
+    bot = _FallbackBot()
+    monkeypatch.setattr(
+        long_messages,
+        "render_text_to_image",
+        lambda content, *, title="", footer="": b"\x89PNG\r\n\x1a\nok",
+    )
+
+    await send_long_group_message(
+        bot,
+        456,
+        "长文包含擦边词" * 50,
+        node_name="群聊日报",
+        log_name="daily_summary",
+    )
+
+    assert len(bot.sent) == 1
+    assert bot.sent[0]["message"][0].type == "image"
