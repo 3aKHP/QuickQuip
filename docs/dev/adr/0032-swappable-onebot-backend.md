@@ -5,12 +5,12 @@ superseded_by: []
 
 # ADR-0032：协议端作为可替换的部署变量
 
-- 记录日期为 2026-11-19，最初决定的日期未确认
-- 公开分发边界于 2026-11-21 补充
+- 记录日期：2026-11-19（2026-11-21 补充公开分发边界）
+- 原始决策日期：未确认
 
 ## 背景
 
-QuickQuip 使用 NoneBot2 接收 OneBot V11 事件和调用 OneBot 动作。QQ 登录、客户端版本与运行状态由提供 OneBot 服务的协议端维护。历次部署中，协议端的运行条件和维护情况发生过变化，项目曾因持续掉线而迁移。协议端的选择、验证和恢复需要独立于 QuickQuip 代码发布。
+QuickQuip 使用 NoneBot2 接收 OneBot V11 事件并调用接口动作，QQ 账号登录、客户端协议版本与连接保活则由外部 OneBot 协议端负责维护。历次实际部署中，协议端的运行条件与社区维护状态多次变化，项目也曾因既有协议端频繁掉线而整体迁移。协议端的选型、兼容性验证与故障恢复因此需要独立于 QuickQuip 自身的代码发布周期。
 
 ## 决定
 
@@ -33,5 +33,5 @@ QuickQuip 的公开发行物和 Compose 模板提供应用及其配套服务。�
 ## 依据与相关契约
 
 - [OneBot 连接、能力与迁移](../../admin/onebot-adapters.md)
-- [NapCat → LLBot 历史迁移](../../admin/migration-napcat-to-llbot.md)
+- [NapCat 至 LLBot 历史迁移](../../admin/migration-napcat-to-llbot.md)
 - [协议端术语](../../glossary.md#onebot-backend)

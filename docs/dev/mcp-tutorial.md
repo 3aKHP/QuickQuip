@@ -34,7 +34,7 @@ MCP 把这层关系标准化：工具提供方实现 **MCP server**，把能力�
 
 ### 1.1 四个核心概念
 
-| 概念 | 含义 | 在 QuickQuip 中的落点 |
+| 概念 | 含义 | 在 QuickQuip 中的对应实现 |
 |------|------|----------------------|
 | client | 向工具服务发送请求并接收结果的调用方 | `MCPClient`（每个 server 一个实例，`mcp/client.py`） |
 | server | 工具提供方，声明并执行工具 | GitHub MCP、arXiv MCP、Tavily MCP 等 |
@@ -60,12 +60,10 @@ QuickQuip（client）                          MCP Server
     │  ④ 结果：content（text / image / resource）    │  归一化后交给模型下一轮
 ```
 
-1. **发现与协商**：client 连上 server，确定双方共用的协议版本与会话方式；
-2. **工具清单**：`tools/list` 拉取该 server 的全部工具定义（`nextCursor` 分页循环）；
+1. **发现与协商**：client 连上 server，用 `initialize` 与 `notifications/initialized` 完成 legacy 握手，或用 `server/discover` 探测 modern 服务，确定双方共用的协议版本与会话方式；
+2. **工具清单**：`tools/list` 拉取该 server 的全部工具定义（`nextCursor` 分页循环），注册进项目工具注册表；
 3. **调用**：模型决定使用某工具后，host 通过 client 发出 `tools/call`，携带工具名与参数；
 4. **结果**：server 返回 content 列表，client 做安全归一化（§5.4）后交回工具调用循环。
-
-QuickQuip 用 `initialize` 与 `notifications/initialized` 完成 legacy 握手，用 `server/discover` 发现 modern 服务，再通过 `tools/list` 和 `tools/call` 发现和调用工具。transport 承载这些消息，项目工具注册表将发现的能力提供给模型。
 
 ---
 
@@ -90,11 +88,11 @@ QuickQuip 把 MCP 作为工具后端来源之一：MCP 工具与内置工具进�
 |----|------|---------|
 | server 级 | `include_tools` / `exclude_tools` | 桥接前，决定哪些 MCP 工具被注册 |
 | 全局级 | `settings.tools.enabled` + `enabled_mode` | 组装请求时，决定暴露给模型的工具集合 |
-| 请求加载策略 | `settings.tools.discovery_mode` | 全局配置决定首轮携带哪些工具，单次工具循环按需加载其他工具 |
+| 请求加载策略 | `settings.tools.discovery_mode` | 决定首轮携带哪些常驻工具，按需动态加载其他工具并在同一会话纪元内跨轮保留 |
 
 模型使用工具前，需开启 `settings.runtime.tool_calling_enabled`，其默认值为 `false`。全局级的行为是：`enabled = []` 时使用默认名单加全部已注册 MCP 工具；非空名单中，`enabled_mode = "append"` 在默认集合上追加所列工具，`enabled_mode = "replace"` 按所列名称精确过滤，MCP 工具同样受该名单约束。空名单在两种模式下都使用默认集合。
 
-`discovery_mode = "auto"`（默认）在可延迟工具数超过 `discovery_min_tools` 时开启发现机制：首轮请求携带 `always_loaded` 常驻工具，模型用 `tool_search` 搜索，或用 `tool_list` 查看目录、按精确名称加载。新加载的 MCP 工具在下一轮请求中生效；小工具集直接发送全部启用工具。接入大批量 MCP 工具时，先用 server 级 `include_tools` 选择能力，再通过发现机制控制工具定义体积。实现细节见[工具发现说明](tool-discovery.md)。
+`discovery_mode = "auto"`（默认）在可延迟工具数量超过 `discovery_min_tools` 或可延迟工具 Schema 估算总体积超过 `discovery_min_schema_tokens` 时开启发现机制：首轮请求携带 `always_loaded` 常驻工具与当前会话纪元已加载工具，模型用 `tool_search`（支持关键词搜索与 `select:` 精确批量加载）或 `tool_list` 查看目录并按名加载。新加载的 MCP 工具进入下一轮请求并在同一会话纪元内跨轮保留；小工具集直接发送全部已启用工具。接入大批量 MCP 工具时，先用 server 级 `include_tools` 选择能力，再通过发现机制控制工具定义体积。实现细节见[工具发现说明](tool-discovery.md)。
 
 ### 2.3 查看装载结果：`/llm mcp status`
 
@@ -107,10 +105,10 @@ MCP 状态
 - github [docker] ERROR tools=0 error=认证失败
 ```
 
-- 聊天面显示失败分类，如 `认证失败`；Web Admin 的状态页提供清洗后的错误详情；
+- 群聊／私聊命令回复显示失败分类，如 `认证失败`；Web Admin 的状态页提供清洗后的错误详情；
 - transport 后面的 `/modern`、`/auto/legacy` 等角标是双协议纪元标记（§5.1）；
 - `/llm mcp reload`（管理员）：重连全部 server，docker transport 会先强制拉取最新镜像；
-- LLM 配置通过草稿应用任务接纳；仅 MCP 配置改变时准备新资源代际。人格热重载与价格更新保持当前 MCP 连接。
+- LLM 配置通过“保存草稿 → 应用配置”生效；只有 `settings.mcp` 发生变化时才会重建 MCP 连接，修改人格或模型单价不会断开现有连接。
 
 ---
 
@@ -247,7 +245,7 @@ curl -i -sS --max-time 10 -X POST "https://mcp.example.com/mcp" \
 }
 ```
 
-机制：GET 打开一条长连接事件流，服务器发出 `endpoint` 事件告知 POST 地址（相对路径会按 SSE URL 解析），请求的响应从 `message` 事件回流。等待 `endpoint` 事件超过 `timeout_seconds` 会报「等待 endpoint 事件超时」。
+机制：GET 打开一条长连接事件流，服务器发出 `endpoint` 事件告知 POST 地址（相对路径会按 SSE URL 解析），请求的响应从 `message` 事件回流。等待 `endpoint` 事件超过 `timeout_seconds` 会报“等待 endpoint 事件超时”。
 
 验证：`curl -N "http://mcp-tavily:8080/sse"` 能看到 `event: endpoint` 行即端点存活；装载结果看 `/llm mcp status`。
 
@@ -361,9 +359,9 @@ MCP 规范自 `2026-07-28` 版起划分为两个纪元，QuickQuip 两者都支�
 | `modern` | 只走 modern；探测判定为 legacy 时报协议协商失败 |
 
 - `negotiation` 配了 `auto`/`modern` 但 `transport` 非 `http`，或 `supported_protocol_versions` 为空：保存校验返回字段错误，修复后才可保存并应用；
-- modern 版本协商取客户端声明列表与服务器 `supportedVersions` 的交集，交集为空时报「modern 版本无交集」；
-- modern 模式下收到 `InputRequiredResult`（MRTR，响应带 `inputRequests`）按「暂不支持」返回稳定错误；
-- 协商在连接资源准备时执行（进程启动、MCP 配置应用、`/llm mcp reload`）；session 过期重连沿用当前装载周期的协商结论，不重新探测。
+- modern 版本协商取客户端声明列表与服务器 `supportedVersions` 的交集，交集为空时报“modern 版本无交集”；
+- modern 模式下收到 `InputRequiredResult`（MRTR，响应带 `inputRequests`）按“暂不支持”返回稳定错误；
+- 协商在连接资源准备时执行（进程启动、MCP 配置应用、`/llm mcp reload`）；session 过期重连复用当前装载周期已确定的协商结论，不重新探测。
 
 ```json
 {
@@ -390,9 +388,9 @@ MCP 规范自 `2026-07-28` 版起划分为两个纪元，QuickQuip 两者都支�
 带 `mcp-session-id` 的请求收到 HTTP 404，说明服务器已丢弃该会话：
 
 - `tools/list` 等只读请求：有界重连，最多 2 次——重新 `initialize` 换取新 session-id；新连接不继承旧 session-id 与旧 request-id；
-- `tools/call`：**不自动重放**，直接失败并报「session 过期，未自动重放」。工具调用可能有副作用，重放会造成重复执行。
+- `tools/call`：**不自动重放**，直接失败并报“session 过期，未自动重放”，后续请求再建立新会话。工具调用可能有外部副作用，自动重放会造成重复执行。
 
-工具清单遇到会话过期时在上述次数内重连；工具调用返回失败并标记需要重连，后续请求建立新会话。反复出现会话过期时，检查服务器会话保留时间和网络状态。
+若频繁出现会话过期，请检查服务器侧的会话空闲保留时间与反向代理连接回收配置。
 
 ### 5.4 工具结果内容边界
 
@@ -414,7 +412,7 @@ MCP 规范自 `2026-07-28` 版起划分为两个纪元，QuickQuip 两者都支�
 
 **现象**：`/llm mcp status` 里某 server 显示 `ERROR`，`tools=0`。
 
-**第一步：读分类。** 聊天面的 `error=` 是失败分类标签，对应关系（`service_parts/health.py`）：`配置错误`（config）、`探活失败`（probe）、`协议握手失败`（legacy-handshake）、`协议协商失败`（modern-negotiation）、`认证失败`（auth，401/403）、`连接超时`（timeout）、`路由错误`（routing）、`传输错误`（transport）、兜底 `连接失败`。需要清洗后的原始错误文本时看 Web Admin 状态页。
+**第一步：读分类。** 命令输出中的 `error=` 是失败分类标签，对应关系（`service_parts/health.py`）：`配置错误`（config）、`探活失败`（probe）、`协议握手失败`（legacy-handshake）、`协议协商失败`（modern-negotiation）、`认证失败`（auth，401/403）、`连接超时`（timeout）、`路由错误`（routing）、`传输错误`（transport）、兜底 `连接失败`。需要清洗后的原始错误文本时看 Web Admin 状态页。
 
 **第二步：查日志。** 装载失败会记录 `Failed to initialize MCP server <id>: ...`；stdio/docker 的子进程 stderr 以 `MCP stderr [<id>]` 前缀进日志，多数启动失败（缺依赖、凭证无效、端口不通）在这里能看到 server 自己的报错。
 
@@ -425,7 +423,7 @@ MCP 规范自 `2026-07-28` 版起划分为两个纪元，QuickQuip 两者都支�
 | `url` / `command` / `image` 缺失 | 对应 transport 装载时返回配置错误，日志明示缺失字段；补齐连接配置后保存并应用 |
 | `id` 重复 | 整份配置校验失败，调整为唯一 ID 后再保存 |
 | `negotiation = "auto"/"modern"` 但 transport 非 http，或未填 `supported_protocol_versions` | 配置校验失败；http 的新纪元模式需声明非空版本列表 |
-| 两个 server 的工具归一后同名 | fail-closed，冲突绑定全部不注册，error 为「alias 冲突」 |
+| 两个 server 的工具归一后同名 | fail-closed，冲突绑定全部不注册，error 为“alias 冲突” |
 | compose 冷启动竞态 | 超时/5xx 自动重试 3 次，通常自愈；认证/4xx 不重试 |
 | 凭证无效 | 认证失败，检查 `.env` 与 `headers`/`env` 占位是否展开（展开为空串时服务器侧表现为匿名请求） |
 
