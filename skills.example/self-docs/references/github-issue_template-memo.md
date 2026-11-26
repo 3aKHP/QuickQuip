@@ -9,9 +9,9 @@ labels: [memo]
 
 <!--
   章节按题材取舍：不适用的小节直接删除，需要时增加题材小节
-  （如「调研结论」「候选方向」「逐条条目」）。
+  （如“调研结论”“候选方向”“逐条条目”）。
   AI 协作者经 API/CLI 创建 memo issue 时，以本文件为体例参照；
-  issue 关联约定见 docs/dev/branching.md「CI、Issue 与文档扫尾」。
+  issue 关联约定见 docs/dev/branching.md“CI、Issue 与文档扫尾”。
 -->
 
 ## 背景 / Source

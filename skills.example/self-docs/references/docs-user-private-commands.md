@@ -2,7 +2,7 @@
 
 # QuickQuip 私聊指令速查
 
-私聊使用 AI 前需要先开启会话；开启后你发的普通消息（文字、图片、引用回复）会直接进入 AI，不需要 `/ai` 前缀或 @机器人。会话可以存档、恢复和删除；配置与记忆由你自己管理，不需要管理员权限。
+私聊使用 AI 前需要先开启会话；开启后你发的普通消息（文字、图片、语音、引用回复、合并转发）会直接进入 AI，不需要 `/ai` 前缀或 @机器人。会话可以存档、恢复和删除；配置与记忆由你自己管理，不需要管理员权限。
 
 只想用起来的话，会这三条就够了：
 
@@ -35,8 +35,9 @@
 
 会话行为补充：
 
-- 引用一条消息追问时，当前提问与被引用内容会分开理解。引用合并转发时会尽量读取正文；转发内的原图不会作为图片附件发送，非视觉模型使用文字图注。
-- 上下文由会话纪元自动管理：AI 能回看的对话窗口随会话增长（默认上限约 6.4 万 token，冷场后自动收缩）；用 `/llm context_limit <n>` 可把本会话改为固定保留最新 n 条（上限 1024），`reset` 恢复自动管理。
+- 发送合并转发，或引用一条消息追问时，当前提问与被引用、转发的内容会分开理解。合并转发会尽量读取其中的正文；支持看图的模型会按“当前消息、被引用消息、合并转发”的顺序读取最多 5 张图片，不支持看图的模型则改读图片的文字说明。
+- 语音消息会自动转写成文字交给 AI（协议端自带文本转录时优先使用转录）。
+- 上下文默认由系统自动管理：AI 能回看的对话窗口随聊天增长（默认上限约 6.4 万 token，搁置一段时间后自动缩短）；用 `/llm context_limit <n>` 可把本会话改为固定保留最新 n 条消息（上限 1024），`reset` 恢复自动管理。
 
 ---
 
@@ -54,7 +55,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/llm providers`、`/llm models [provider]` | 列出可用的模型来源与其下模型 |
 | `/llm personas` | 列出可用人格 |
 | `/llm memory status` | 记忆注入与长期记忆概况 |
-| `/llm effort status` | 思考档位概况：当前生效结果与来源说明（自动调整或未生效时会注明原因） |
+| `/llm effort status` | 思考档位概况：当前生效结果与来源说明（自动折算或未生效时会注明原因） |
 | `/llm mcp` | 外部工具（MCP）连接状态（`mcp status` 同此） |
 | `/skill list` | 查看已安装的 Skill 与当前会话已激活的项（Skill 是部署者安装的 AI 扩展能力包，见 [Skill 说明](llm-skills.md)） |
 
@@ -67,16 +68,16 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | `/llm trigger prefix <前缀>` | 修改触发前缀（默认 `/ai`） |
 | `/llm trigger prefix_mode on / off` | 开关前缀触发 |
 | `/llm memory on / off` | 开关记忆注入 |
-| `/llm effort <档位>`（`default` / `clear` 恢复跟随渠道配置） | 本会话思考档位覆盖，六档：`low / medium / high / xhigh / max / ultra`；回复会给出实际下发结果（部分模型词表较窄会自动调整）；不配置时模型用自身默认档。切换后若回复出现 400 等 4xx 错误，说明该渠道或模型不支持此档位，用 `default` 恢复即可 |
-| `/llm delivery intermediate / final / all <on / off / reset>` | 设置回复发送方式：`intermediate` 控制是否发送多轮工具调用中的过程正文，`final` 控制是否把最终长回复按自然段拆成多条，`all` 同时设置这两项；`/llm delivery status`（或带域）查看当前值与全局默认，默认两域关闭 |
-| `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本会话改为固定保留最新 n 条（上限 1024；默认由会话纪元自动管理） |
+| `/llm effort <档位>`（`default` / `clear` 恢复跟随渠道配置） | 本会话思考档位覆盖，六档：`low / medium / high / xhigh / max / ultra`；回复会告知实际生效档位（目标模型支持的档位较少时会自动折算）；未指定时模型使用自身默认档位。切换后若回复报 400 等 4xx 错误，说明该渠道或模型不支持此档位，用 `default` 恢复即可 |
+| `/llm delivery intermediate / final / all <on / off / reset>` | 设置回复发送方式：`intermediate` 控制多轮工具调用期间是否先发送中间说明，`final` 控制是否把最终长回复按自然段拆成多条发送，`all` 同时设置这两项，默认两项均关闭；可用 `/llm delivery status`（或 `/llm delivery intermediate status`、`/llm delivery final status`）查看当前状态与全局默认 |
+| `/llm context_limit <条数>`（`reset` 或 `off` 恢复默认） | 把本会话短期上下文改为固定保留最新 n 条消息（上限 1024；默认由系统自动管理，随对话延伸、搁置后自动缩短） |
 | `/llm clear_context` | 清空短期上下文，“串台”或记错上下文时用 |
 | `/llm delete_msg` | 引用一条消息发送本命令，或 `/llm delete_msg <消息ID>`，从上下文删除该条 |
 | `/llm reload` | 重载已发布 LLM 配置（草稿通过管理后台单独应用），并重置你的上下文条数覆盖 |
 | `/llm probe` | 并发探活所有 provider |
 | `/llm mcp reload` | 拉取 MCP 镜像并重连 |
 
-私聊会话开启后会自动回应普通消息；触发设置中可调整前缀，艾特触发由群聊使用。
+私聊会话开启后普通消息可直接对话；若习惯带前缀发送（如 `/ai`），开启前缀触发时机器人会自动剥去前缀再提交内容（艾特触发仅用于群聊）。
 
 `/llm reload` 与 `/llm probe` 会重载或探测整个机器人部署的渠道。私聊用户也可以执行；探活会发送真实模型请求，可能产生费用。
 
@@ -84,7 +85,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 
 ## 3. 记忆管理
 
-长期记忆是跨会话保留的笔记。开启记忆注入后，AI 会在回复时参考；可用 `/llm memory status` 查看开关状态。
+长期记忆是跨会话保留的个人笔记，与群聊共享记忆独立存放，正文支持 Markdown 格式。开启记忆注入后，AI 会在回复时参考相关条目；同时开启工具调用时，AI 也能在对话中自主记录或更新你的偏好（下表命令则直接读写数据库，不调用模型）。可用 `/llm memory status` 查看开关状态，容量说明与后台管理方式见[记忆管理](../admin/memory.md)。
 
 | 命令 | 说明 |
 |------|------|
@@ -109,7 +110,7 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 - `/draw`、`/tts`、`/music` — 图片 / 语音 / 音乐生成
 - `/roll`、`/choose`、`/fortune`、`/vote` — 骰子、随机选择、每日运势、发起投票
 
-牛牛的三张全局榜（`牛牛长度总排行`、`牛牛深度总排行`、`牛牛绝对值总排行`，可带条数参数）私聊也可查询，详见[群内游戏指南](group-games.md)。`/reload_rules` 与 `/reload_personas`（重新加载文字规则与人格词表，通常在修改配置文件后使用）私聊同样可用。
+牛牛的三张全局榜（`牛牛长度总排行`、`牛牛深度总排行`、`牛牛绝对值总排行`，可带条数参数）私聊也可查询，详见[群内游戏指南](group-games.md)。`/reload_rules` 与 `/reload_personas`（重新加载文字聊天规则与 AI 人格配置，通常在修改配置文件后使用）私聊同样可用。
 
 ---
 
@@ -120,7 +121,9 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 | 触发 AI | `/ai` 前缀或 @机器人（需规则开启） | 开启会话后自动响应 |
 | 会话与上下文 | 群内共享上下文，用 `/llm on / off` 开关 AI | 独立会话，支持存档与恢复 |
 | AI 配置修改 | 仅管理员 | 任何人 |
-| 记忆管理 | 仅管理员 | 任何人 |
+| 记忆管理 | 仅管理员（全群共享） | 任何人（个人独立） |
+| 群语录（`/quote`）与离线留言（`/tell`） | 可用 | 不可用 |
+| 群历史查询（`/llm history`） | 可用（按群开启） | 不可用 |
 | `/stats`、`/rules` | 可用 | 不可用 |
 | `/tieba` 系列 | 可用 | 不可用 |
 | `/disable`、`/enable` | 可用（管理员） | 不可用 |
@@ -130,8 +133,6 @@ provider 指 AI 的服务来源（如 Gemini、OpenAI），一个 provider 下�
 
 ## 6. 常见问题
 
-**发消息 AI 不理我？** 先 `/llm status` 确认会话已开启；未开启则 `/start_session`。
+**发消息 AI 不理我？** 先用 `/llm status` 确认会话已开启；未开启则发送 `/start_session`。
 
 **回复很怪、像“串台”了？** 用 `/llm current` 检查当前配置；引用有问题的消息并发送 `/llm delete_msg`，可定点删除。需要重新开始对话时，用 `/llm clear_context` 清空短期上下文。
-
-长期记忆支持 Markdown 正文，群内条目由全群共享，私聊独立保存。模型自主维护需要同时开启记忆和工具调用；直接管理指令不调用模型。容量、管理页和升级方式见[记忆管理](../admin/memory.md)。

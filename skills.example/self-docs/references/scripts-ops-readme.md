@@ -2,30 +2,30 @@
 
 # Bot 巡检
 
-这些程序由仓库维护；通知配置放在 `prod/sendkey.env`，应用凭据放在根 `.env`。
+本目录存放仓库统一维护的 Bot 在线状态检查、定时告警与宿主机指标采集脚本；巡检通知密钥保存在 `prod/sendkey.env`（参考 `prod.example/sendkey.env.example`），应用运行凭据保存在根目录 `.env`。
 
 | 程序 | 执行位置与用途 |
 |---|---|
-| `check_bot_local.sh`、`check_bot.ps1` | 本地通过 SSH 查看 Bot 状态 |
-| `check_bot.sh` | 检查服务器上的 Bot 容器、正向 WebSocket 连接和 OneBot 账号状态 |
-| `cron_check_bot.sh` | 服务器定时巡检，按通知配置发送离线告警 |
-| `host_metrics_collector.py` | 服务器采集宿主机指标到 `data/host_metrics.json` |
+| `check_bot_local.sh`、`check_bot.ps1` | 在本地电脑通过 SSH 查看服务器上的 Bot 状态 |
+| `check_bot.sh` | 在服务器上检查 Bot 容器、正向 WebSocket 连接和 OneBot 账号状态 |
+| `cron_check_bot.sh` | 服务器定时巡检入口，检测到离线时按通知配置发送告警 |
+| `host_metrics_collector.py` | 服务器定时采集宿主机指标并写入 `data/host_metrics.json` |
 
-使用正向 WebSocket 的部署在 `prod/sendkey.env` 中设置 `ONEBOT_STATUS_API_URL`，填入 Bot 容器可访问的 OneBot HTTP API 根地址。HTTP 与 WebSocket 使用同一主机名。HTTP 使用独立令牌时，在该文件中填写 `ONEBOT_STATUS_API_TOKEN`。同一令牌的部署沿用 Bot 容器内的 `ONEBOT_ACCESS_TOKEN`。
+采用正向 WebSocket 连接外部协议端时，请在 `prod/sendkey.env` 中设置 `ONEBOT_STATUS_API_URL`，填入从 Bot 容器内可访问的 OneBot HTTP API 根地址（主机名需与正向 WebSocket 地址保持一致）。若协议端的 HTTP API 使用独立鉴权令牌，可同时填写 `ONEBOT_STATUS_API_TOKEN`；共用同一令牌时会自动沿用 Bot 容器内的 `ONEBOT_ACCESS_TOKEN`。
 
-`ONLINE` 表示 Bot 与配置的协议端已连接，且 OneBot 报告账号在线。配置了 `QQ_ACCOUNT` 时还会核对账号。`OFFLINE` 会触发离线通知。`UNKNOWN` 表示巡检无法判断，例如 HTTP API 拒绝鉴权，`UNCONFIGURED` 表示尚未设置巡检地址。协议端登录和恢复按其自身的部署说明操作。
+巡检输出包含四种状态：`ONLINE` 表示 Bot 已连上配置的协议端且协议端回报 QQ 账号在线（配置了 `QQ_ACCOUNT` 时还会核对登录账号是否匹配）；`OFFLINE` 表示连接断开或账号离线，定时巡检会触发告警通知；`UNKNOWN` 表示无法完成状态判定（例如 HTTP API 拒绝鉴权）；`UNCONFIGURED` 表示尚未设置 `ONEBOT_STATUS_API_URL`。协议端自身的登录与重连请按所用协议端文档操作。
 
-本地命令在项目根目录执行，连接设置取自根 `.env`，也可传 `-Server` 和 `-RemoteDir`：
+在本地电脑查看远端状态时，在项目根目录执行以下命令（默认从根目录 `.env` 读取 SSH 连接设置，也可显式传入 `-Server` 与 `-RemoteDir`）：
 
 ```bash
 bash scripts/ops/check_bot_local.sh
 ```
 
-新版部署将服务器程序安装到部署根的 `scripts/ops/`。配置 cron 时使用该目录，例如：
+使用 `deploy-v4` 发布后，服务端脚本会自动安装到服务器部署根目录下的 `scripts/ops/`。配置宿主机 `crontab` 时请指向该目录（以默认部署根目录 `/opt/QuickQuip` 为例）：
 
 ```cron
 */5 * * * * /bin/bash /opt/QuickQuip/scripts/ops/cron_check_bot.sh
 * * * * * /usr/bin/python3 /opt/QuickQuip/scripts/ops/host_metrics_collector.py
 ```
 
-已有 cron 指向旧位置时，在部署这些程序后调整为新路径。自定义部署根通过 `REMOTE_DIR`（巡检）和 `QUICKQUIP_ROOT`（指标采集）设置。完整配置与部署步骤见[部署指南](../../docs/admin/deployment.md)。
+若服务器上已有指向旧路径的定时任务，请在完成新版发布后更新为上述路径。使用自定义部署根目录时，可通过环境变量 `REMOTE_DIR`（巡检脚本）与 `QUICKQUIP_ROOT`（指标采集脚本）指定路径；完整配置与部署步骤见[云端部署指南](../../docs/admin/deployment.md)。
