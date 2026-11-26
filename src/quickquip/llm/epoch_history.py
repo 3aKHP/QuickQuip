@@ -39,12 +39,53 @@ class HistorySelection:
     frozen: FrozenHistory
     reason: str | None = None
     anchor: int | None = None
+    diff_summary: str | None = None
 
 
 def _digest(value) -> str:
     return hashlib.sha256(json.dumps(
         value, ensure_ascii=False, sort_keys=True, default=str,
     ).encode()).hexdigest()
+
+
+def _row_for_digest(row: dict[str, object]) -> dict[str, object]:
+    """Exclude assistant.message_id, which is backfilled asynchronously and never rendered."""
+    if row.get("role") == "assistant" and "message_id" in row:
+        return {k: v for k, v in row.items() if k != "message_id"}
+    return row
+
+
+_MISSING = object()
+
+
+def _summarize_history_diff(
+    previous: FrozenHistory,
+    rows: list[dict[str, object]],
+    sources: dict[str, str],
+) -> str:
+    prev_ids = list(previous.sources)
+    curr_ids = list(sources)
+    if curr_ids[:len(prev_ids)] != prev_ids:
+        for idx, prev_id in enumerate(prev_ids):
+            if idx >= len(curr_ids) or curr_ids[idx] != prev_id:
+                return (
+                    f"prefix_mismatch prev_len={len(prev_ids)} "
+                    f"curr_len={len(curr_ids)} first_id={prev_id}"
+                )
+    prev_by_id = {str(r["id"]): _row_for_digest(r) for r in previous.rows}
+    curr_by_id = {str(r["id"]): _row_for_digest(r) for r in rows}
+    for key, prev_digest in previous.sources.items():
+        if sources.get(key) != prev_digest:
+            p_row = prev_by_id.get(key, {})
+            c_row = curr_by_id.get(key, {})
+            fields = sorted(
+                f for f in set(p_row) | set(c_row)
+                if p_row.get(f, _MISSING) != c_row.get(f, _MISSING)
+            )
+            if fields:
+                return f"row={key} role={c_row.get('role', '')} fields={','.join(fields)}"
+            return f"row={key} loop={c_row.get('agent_loop_id')} kind=loop_or_archive"
+    return "unknown"
 
 
 def history_units(rows: list[dict[str, object]]) -> list[list[dict[str, object]]]:
@@ -93,7 +134,7 @@ def select_history(
     def sources_for(selected_rows):
         return {
             str(row["id"]): _digest((
-                row,
+                _row_for_digest(row),
                 loop_sources.get(str(row.get("agent_loop_id"))),
                 str(row.get("agent_loop_id")) in archive_loop_ids,
             )) for row in selected_rows
@@ -101,12 +142,14 @@ def select_history(
 
     sources = sources_for(rows)
     reason = None
+    diff_summary = None
     if previous is not None:
         if previous.profile != profile:
             reason = "profile"
         elif (list(sources)[:len(previous.sources)] != list(previous.sources)
               or any(sources.get(k) != v for k, v in previous.sources.items())):
             reason = "history"
+            diff_summary = _summarize_history_diff(previous, rows, sources)
     if reason or rebuild_budget is not None:
         previous = None
     segments = deepcopy(previous.segments) if previous else {}
@@ -139,6 +182,7 @@ def select_history(
     anchor = None
     if total > budget or rebuild_budget is not None:
         reason = "budget"
+        diff_summary = None
         limit = min(budget, rebuild_budget) if rebuild_budget is not None else budget
         target_tokens = max(1, int(limit * target_ratio))
         retained = []
@@ -170,5 +214,8 @@ def select_history(
         total = sum(_estimate_messages_tokens(v, effort=effort) for v in segments.values())
         sources = sources_for(rows)
     return HistorySelection(
-        FrozenHistory(profile, sources, segments, total, deepcopy(rows)), reason, anchor,
+        FrozenHistory(profile, sources, segments, total, deepcopy(rows)),
+        reason,
+        anchor,
+        diff_summary,
     )

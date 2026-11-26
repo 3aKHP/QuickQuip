@@ -280,3 +280,27 @@ def test_unavailable_session_archive_raises(unavailable_store: LLMStore) -> None
         unavailable_store.create_session_archive("u", 1)
     with pytest.raises(RuntimeError, match="数据库不可用"):
         unavailable_store.archive_conversation_messages("u", 1)
+
+
+def test_update_last_assistant_message_id_does_not_backfill_older_row(store: LLMStore) -> None:
+    # 空群与空入参均安全空操作
+    store.update_last_assistant_message_id("1001", "msg_0")
+    store.append_conversation_message("1001", "u1", "user", "q1")
+    store.append_conversation_message("1001", "bot", "assistant", "a1")
+    store.append_conversation_message("1001", "u1", "user", "q2")
+    store.append_conversation_message("1001", "bot", "assistant", "a2", message_id="msg_2")
+
+    store.update_last_assistant_message_id("1001", "msg_late")
+    rows = store.list_conversation_messages_since("1001", 0, limit=10)
+    assistants = [r for r in rows if r["role"] == "assistant"]
+    assert assistants[0]["message_id"] == ""
+    assert assistants[1]["message_id"] == "msg_2"
+
+    # 空串入参不会把最新行写脏，且 message_id="" 仍允许后续有效回填
+    store.append_conversation_message("1001", "bot", "assistant", "a3", message_id="")
+    store.update_last_assistant_message_id("1001", "   ")
+    store.update_last_assistant_message_id("1001", "msg_3")
+    rows_after = store.list_conversation_messages_since("1001", 0, limit=10)
+    assistants_after = [r for r in rows_after if r["role"] == "assistant"]
+    assert assistants_after[0]["message_id"] == ""
+    assert assistants_after[2]["message_id"] == "msg_3"

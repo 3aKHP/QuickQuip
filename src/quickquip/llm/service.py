@@ -1001,9 +1001,9 @@ class LLMService(
             )
             self._skill_activations.clear_scope(scope_key)
             logger.info(
-                "epoch history rebuilt scope=%s epoch=%s reason=%s replay_tokens=%d",
+                "epoch history rebuilt scope=%s epoch=%s reason=%s replay_tokens=%d diff=%s",
                 scope_key, self._epochs.current_id(key), selection.reason,
-                selection.frozen.replay_tokens,
+                selection.frozen.replay_tokens, selection.diff_summary or "-",
             )
         history[:] = selection.frozen.rows
         self._epochs.install_history(key, selection.frozen)
