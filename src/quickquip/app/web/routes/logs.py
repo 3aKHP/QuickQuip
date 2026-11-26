@@ -60,60 +60,96 @@ def _encode_sse_data(payload: str) -> str:
     return "".join(f"data: {line}\n" for line in payload.splitlines() or [""]) + "\n"
 
 
-def _stream_log_lines(tail: int) -> StreamingResponse:
-    def event_stream():
+def _parse_log_cursor(raw: str) -> tuple[str, int] | None:
+    if ":" not in raw:
+        return None
+    name, offset_text = raw.rsplit(":", 1)
+    if (
+        not _LOG_FILE_RE.match(name)
+        or not offset_text
+        or not offset_text.isascii()
+        or not offset_text.isdigit()
+        or len(offset_text) > 18
+    ):
+        return None
+    return name, int(offset_text)
+
+
+def _read_log_chunk(path: Path, offset: int) -> tuple[str, int]:
+    try:
+        size = path.stat().st_size
+        if offset > size:
+            offset = 0
+        with path.open("r", encoding="utf-8", errors="replace") as f:
+            f.seek(offset)
+            chunk = f.read()
+            return chunk, f.tell()
+    except OSError:
+        return "", offset
+
+
+def _stream_log_lines(request: Request, tail: int) -> StreamingResponse:
+    resume_cursor = _parse_log_cursor(request.headers.get("last-event-id", "").strip())
+
+    async def event_stream():
+        nonlocal resume_cursor
         current_path: Path | None = None
         offset = 0
         sent_initial = False
         last_heartbeat = time.monotonic()
 
-        while True:
-            latest = _latest_log_file()
+        while not await request.is_disconnected():
+            latest = await asyncio.to_thread(_latest_log_file)
             if latest != current_path:
                 current_path = latest
                 offset = 0
                 sent_initial = False
+                if current_path is not None:
+                    yield f"event: file\ndata: {current_path.name}\n\n"
+                    if resume_cursor and resume_cursor[0] == current_path.name:
+                        offset = resume_cursor[1]
+                        sent_initial = True
+                        resume_cursor = None
 
             if current_path is None or not current_path.exists():
                 if time.monotonic() - last_heartbeat >= _STREAM_HEARTBEAT_SECONDS:
                     yield ": heartbeat\n\n"
                     last_heartbeat = time.monotonic()
-                time.sleep(_STREAM_POLL_SECONDS)
+                await asyncio.sleep(_STREAM_POLL_SECONDS)
                 continue
 
             if not sent_initial:
-                for line in _tail_lines(current_path, tail):
-                    yield _encode_sse_data(line)
+                lines = await asyncio.to_thread(_tail_lines, current_path, tail)
                 try:
                     offset = current_path.stat().st_size
                 except OSError:
                     offset = 0
+                for idx, line in enumerate(lines):
+                    prefix = f"id: {current_path.name}:{offset}\n" if idx == len(lines) - 1 else ""
+                    yield f"{prefix}{_encode_sse_data(line)}"
                 sent_initial = True
                 last_heartbeat = time.monotonic()
                 continue
 
-            chunk = ""
-            try:
-                size = current_path.stat().st_size
-                if offset > size:
-                    offset = 0
-                with current_path.open("r", encoding="utf-8", errors="replace") as f:
-                    f.seek(offset)
-                    chunk = f.read()
-                    offset = f.tell()
-            except OSError:
-                chunk = ""
+            chunk, next_offset = await asyncio.to_thread(_read_log_chunk, current_path, offset)
+            offset = next_offset
 
             if chunk:
-                for line in chunk.splitlines():
-                    yield _encode_sse_data(line)
+                chunk_lines = chunk.splitlines()
+                for idx, line in enumerate(chunk_lines):
+                    prefix = (
+                        f"id: {current_path.name}:{offset}\n"
+                        if idx == len(chunk_lines) - 1
+                        else ""
+                    )
+                    yield f"{prefix}{_encode_sse_data(line)}"
                 last_heartbeat = time.monotonic()
                 continue
 
             if time.monotonic() - last_heartbeat >= _STREAM_HEARTBEAT_SECONDS:
                 yield ": heartbeat\n\n"
                 last_heartbeat = time.monotonic()
-            time.sleep(_STREAM_POLL_SECONDS)
+            await asyncio.sleep(_STREAM_POLL_SECONDS)
 
     return StreamingResponse(
         event_stream(),
@@ -194,8 +230,8 @@ def download_log_file(name: str):
 
 
 @router.get("/logs/stream")
-def stream_logs(tail: int = Query(default=200, ge=1, le=_MAX_TAIL_LINES)):
-    return _stream_log_lines(tail)
+def stream_logs(request: Request, tail: int = Query(default=200, ge=1, le=_MAX_TAIL_LINES)):
+    return _stream_log_lines(request, tail)
 
 
 @router.get("/logs/trace/stream")

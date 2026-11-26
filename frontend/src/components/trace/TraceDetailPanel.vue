@@ -6,7 +6,7 @@
         <strong>{{ detail?.provider_id || '调用详情' }}</strong>
         <code v-if="detail">{{ detail.call_id }}</code>
       </div>
-      <UiButton icon="X" size="sm" variant="ghost" title="关闭详情" @click="$emit('close')" />
+      <UiButton icon="X" size="sm" variant="ghost" title="关闭详情" aria-label="关闭详情" @click="$emit('close')" />
     </div>
 
     <UiLoading v-if="loading" text="读取原始传输文本..." />
@@ -16,7 +16,7 @@
         <div><dt>Status</dt><dd>{{ detail.response_status ?? detail.state }}</dd></div>
         <div><dt>Duration</dt><dd>{{ formatDuration(detail.duration_ms) }}</dd></div>
         <div><dt>Wire Bytes<UiInfoTip text="请求字节数 + 线上响应字节数（流式响应按 SSE 原文计）。" /></dt><dd>{{ formatBytes(detail.request_bytes + (detail.response_raw_bytes || detail.response_bytes)) }}</dd></div>
-        <div><dt>Agent Loop</dt><dd>{{ detail.agent_loop_id.slice(0, 8) }}</dd></div>
+        <div><dt>Agent Loop</dt><dd>{{ (detail.agent_loop_id || '').slice(0, 8) || '-' }}</dd></div>
         <div><dt>HTTP Step</dt><dd>#{{ detail.loop_sequence }}</dd></div>
       </dl>
 
@@ -26,28 +26,33 @@
       </div>
 
       <div class="segment" role="tablist" aria-label="传输方向">
-        <button :class="{ active: direction === 'request' }" @click="direction = 'request'">Request</button>
-        <button :class="{ active: direction === 'response' }" @click="direction = 'response'">Response</button>
+        <button type="button" role="tab" :aria-selected="direction === 'request'" :class="{ active: direction === 'request' }" @click="direction = 'request'">Request</button>
+        <button type="button" role="tab" :aria-selected="direction === 'response'" :class="{ active: direction === 'response' }" @click="direction = 'response'">Response</button>
       </div>
 
       <div class="payload-toolbar">
         <div class="segment segment--small" role="tablist" aria-label="内容类型">
-          <button :class="{ active: contentKind === 'body' }" @click="contentKind = 'body'">JSON</button>
-          <button :class="{ active: contentKind === 'headers' }" @click="contentKind = 'headers'">Headers</button>
+          <button type="button" role="tab" :aria-selected="contentKind === 'body'" :class="{ active: contentKind === 'body' }" @click="contentKind = 'body'">JSON</button>
+          <button type="button" role="tab" :aria-selected="contentKind === 'headers'" :class="{ active: contentKind === 'headers' }" @click="contentKind = 'headers'">Headers</button>
         </div>
         <div v-if="contentKind === 'body'" class="segment segment--view" role="tablist" aria-label="正文视图">
-          <button :class="{ active: bodyView === 'formatted' }" @click="bodyView = 'formatted'">
+          <button type="button" role="tab" :aria-selected="bodyView === 'formatted'" :class="{ active: bodyView === 'formatted' }" @click="bodyView = 'formatted'">
             {{ formattedLabel }}
           </button>
-          <button :class="{ active: bodyView === 'raw' }" @click="bodyView = 'raw'">
+          <button type="button" role="tab" :aria-selected="bodyView === 'raw'" :class="{ active: bodyView === 'raw' }" @click="bodyView = 'raw'">
             {{ rawLabel }}
           </button>
         </div>
-        <UiInfoTip v-if="contentKind === 'body'" text="流式响应的两种视图：「组合 JSON」是客户端把 SSE 事件重建出的完整响应对象，「SSE 原文」是未加工的传输文本。" />
+        <UiInfoTip v-if="contentKind === 'body' && direction === 'response' && detail.stream" text="流式响应的两种视图：「组合 JSON」是客户端把 SSE 事件重建出的完整响应对象，「SSE 原文」是未加工的传输文本。" />
         <div class="payload-actions">
-          <UiButton icon="Copy" size="sm" variant="ghost" title="复制当前文本" @click="copyCurrent" />
-          <UiButton icon="Download" size="sm" variant="ghost" title="下载当前文本" @click="downloadCurrent" />
+          <UiButton :icon="copied ? 'Check' : 'Copy'" size="sm" variant="ghost" title="复制当前文本" aria-label="复制当前文本" :disabled="!currentText" @click="copyCurrent" />
+          <UiButton icon="Download" size="sm" variant="ghost" title="下载当前文本" aria-label="下载当前文本" :disabled="!currentText" @click="downloadCurrent" />
         </div>
+      </div>
+
+      <div v-if="isOversizedFormat" class="oversize-bar">
+        <span>正文超过 512 KB（{{ formatBytes(rawSourceText.length) }}），默认以原文展示避免主线程卡顿。</span>
+        <UiButton size="sm" variant="ghost" @click="forceFormat = true">仍要格式化</UiButton>
       </div>
 
       <pre class="payload">{{ currentText || emptyText }}</pre>
@@ -62,7 +67,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import type { TraceCallDetail } from '../../api/logs'
 import UiButton from '../ui/UiButton.vue'
 import UiEmpty from '../ui/UiEmpty.vue'
@@ -78,14 +83,23 @@ const props = defineProps<{
 
 defineEmits<{ close: [] }>()
 
+const FORMAT_AUTO_LIMIT = 512 * 1024
 const direction = ref<'request' | 'response'>('request')
 const contentKind = ref<'body' | 'headers'>('body')
 const bodyView = ref<'formatted' | 'raw'>('formatted')
+const forceFormat = ref(false)
+const copied = ref(false)
+let copyTimer: number | null = null
 
 watch(() => props.detail?.call_id, () => {
   direction.value = 'request'
   contentKind.value = 'body'
   bodyView.value = 'formatted'
+  forceFormat.value = false
+})
+
+watch([direction, contentKind, bodyView], () => {
+  forceFormat.value = false
 })
 
 function formatJson(value: string): string {
@@ -97,19 +111,31 @@ function formatJson(value: string): string {
   }
 }
 
-const currentText = computed(() => {
+const rawSourceText = computed(() => {
   if (!props.detail) return ''
   if (direction.value === 'request') {
-    if (contentKind.value === 'headers') return props.detail.request_headers
-    return bodyView.value === 'formatted'
-      ? formatJson(props.detail.request_text)
-      : props.detail.request_text
+    return contentKind.value === 'headers' ? props.detail.request_headers : props.detail.request_text
   }
   if (contentKind.value === 'headers') return props.detail.response_headers
-  if (bodyView.value === 'formatted') return formatJson(props.detail.response_text)
-  return props.detail.stream && props.detail.response_raw_text
-    ? props.detail.response_raw_text
-    : props.detail.response_text
+  if (bodyView.value === 'raw' && props.detail.stream && props.detail.response_raw_text) {
+    return props.detail.response_raw_text
+  }
+  return props.detail.response_text
+})
+
+const isOversizedFormat = computed(() => (
+  contentKind.value === 'body'
+  && bodyView.value === 'formatted'
+  && !forceFormat.value
+  && rawSourceText.value.length > FORMAT_AUTO_LIMIT
+))
+
+const currentText = computed(() => {
+  if (!rawSourceText.value) return ''
+  if (contentKind.value === 'headers' || bodyView.value === 'raw' || isOversizedFormat.value) {
+    return rawSourceText.value
+  }
+  return formatJson(rawSourceText.value)
 })
 
 const formattedLabel = computed(() => direction.value === 'response' && props.detail?.stream
@@ -135,9 +161,29 @@ function formatDuration(value: number | null): string {
   return value < 1000 ? `${value.toFixed(0)} ms` : `${(value / 1000).toFixed(2)} s`
 }
 
+function fallbackCopy(text: string): boolean {
+  const ta = document.createElement('textarea')
+  ta.value = text
+  ta.style.position = 'fixed'
+  ta.style.opacity = '0'
+  document.body.appendChild(ta)
+  ta.select()
+  const ok = document.execCommand('copy')
+  document.body.removeChild(ta)
+  return ok
+}
+
 async function copyCurrent() {
+  if (!currentText.value) return
   try {
-    await navigator.clipboard.writeText(currentText.value)
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(currentText.value)
+    } else if (!fallbackCopy(currentText.value)) {
+      throw new Error('当前环境不支持剪贴板写入')
+    }
+    copied.value = true
+    if (copyTimer !== null) window.clearTimeout(copyTimer)
+    copyTimer = window.setTimeout(() => { copied.value = false; copyTimer = null }, 1500)
     toast('已复制传输文本')
   } catch (error: unknown) {
     toast((error as Error).message || '复制失败', 'error')
@@ -145,15 +191,23 @@ async function copyCurrent() {
 }
 
 function downloadCurrent() {
-  if (!props.detail) return
+  if (!props.detail || !currentText.value) return
   const blob = new Blob([currentText.value], { type: 'text/plain;charset=utf-8' })
   const url = URL.createObjectURL(blob)
   const link = document.createElement('a')
   link.href = url
-  link.download = `${props.detail.call_id}-${direction.value}-${contentKind.value}-${bodyView.value}.txt`
+  const suffix = contentKind.value === 'headers' ? 'headers' : `${contentKind.value}-${bodyView.value}`
+  link.download = `${props.detail.call_id}-${direction.value}-${suffix}.txt`
   link.click()
-  URL.revokeObjectURL(url)
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000)
 }
+
+onBeforeUnmount(() => {
+  if (copyTimer !== null) {
+    window.clearTimeout(copyTimer)
+    copyTimer = null
+  }
+})
 </script>
 
 <style scoped>
@@ -252,6 +306,19 @@ dt {
 .segment--view { grid-template-columns: repeat(2, minmax(88px, auto)); margin-left: auto; }
 .segment--view button { min-height: 26px; padding: 0 9px; font-size: var(--qq-text-xs); }
 .payload-actions { display: flex; gap: 2px; }
+
+.oversize-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--qq-gap-sm);
+  margin-bottom: var(--qq-gap-xs);
+  padding: 6px 10px;
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-warn-soft);
+  color: var(--qq-warn);
+  font-size: var(--qq-text-xs);
+}
 
 .payload {
   min-height: 360px;

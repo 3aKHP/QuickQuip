@@ -36,6 +36,7 @@ class ScheduledMessageCreate(BaseModel):
     enabled: bool = True
     kind: str = "text"  # text 固定文案 | llm LLM 任务指令
     recurring: bool = True  # False 为一次性任务，触发后自动删除
+    run_at: str | None = None  # 可选 ISO 8601 北京时间，用于跨年一次性任务
 
 
 class ScheduledMessageUpdate(BaseModel):
@@ -45,6 +46,7 @@ class ScheduledMessageUpdate(BaseModel):
     enabled: bool | None = None
     kind: str | None = None
     recurring: bool | None = None
+    run_at: str | None = None
 
 
 def _validate_kind(kind: str) -> None:
@@ -70,7 +72,7 @@ def create_scheduled_message(body: ScheduledMessageCreate, request: Request):
         validate_cron(body.cron)
         _validate_kind(body.kind)
         if not body.recurring:
-            validate_one_off_schedule(body.cron)
+            validate_one_off_schedule(body.cron, body.run_at or "")
         job = _get_store().add(
             cron=body.cron,
             group_ids=body.group_ids,
@@ -79,6 +81,7 @@ def create_scheduled_message(body: ScheduledMessageCreate, request: Request):
             kind=body.kind,
             recurring=body.recurring,
             origin="web",
+            run_at=body.run_at or "",
         )
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -108,16 +111,36 @@ def update_scheduled_message(job_id: str, body: ScheduledMessageUpdate, request:
             raise HTTPException(status_code=400, detail=str(e))
     if "kind" in fields and fields["kind"] is not None:
         _validate_kind(fields["kind"])
-    if "cron" in fields or "recurring" in fields:
-        # 仅在 cron/recurring 变动时校验一次性任务的未来触发时间，
+    cron_updated = fields.get("cron") is not None
+    recurring_updated = fields.get("recurring") is not None
+    run_at_in_fields = "run_at" in fields
+    if run_at_in_fields and fields["run_at"] is None:
+        if before.run_at:
+            fields["run_at"] = ""
+        else:
+            del fields["run_at"]
+            run_at_in_fields = False
+    if cron_updated or recurring_updated or run_at_in_fields:
+        # 仅在调度字段变动时校验一次性任务的未来触发时间，
         # 避免改文案等无关字段被存量过期任务阻塞。
-        effective_cron = fields.get("cron") or before.cron
-        effective_recurring = fields.get("recurring")
-        if effective_recurring is None:
-            effective_recurring = before.recurring
-        if not effective_recurring:
+        effective_cron = fields["cron"] if cron_updated else before.cron
+        effective_recurring = (
+            fields["recurring"] if recurring_updated else before.recurring
+        )
+        if effective_recurring:
+            if before.run_at:
+                fields["run_at"] = ""
+            else:
+                fields.pop("run_at", None)
+        else:
+            if cron_updated and not run_at_in_fields and before.run_at:
+                # 更新 cron 且未传新 run_at 时清空旧 run_at，避免旧日期覆盖新 cron
+                fields["run_at"] = ""
+            effective_run_at = (
+                fields["run_at"] if "run_at" in fields else before.run_at
+            )
             try:
-                validate_one_off_schedule(effective_cron)
+                validate_one_off_schedule(effective_cron, effective_run_at or "")
             except ValueError as e:
                 raise HTTPException(status_code=400, detail=str(e))
     try:

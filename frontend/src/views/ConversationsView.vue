@@ -8,13 +8,25 @@
         <UiLoading v-if="listing && !conversations.length" />
         <UiEmpty v-else-if="!conversations.length" icon="BookOpen" title="暂无对话记录" />
         <div v-else class="list-scroll">
-          <button v-for="c in conversations" :key="c.group_id" class="list-item qq-selectable" :class="{ active: c.group_id === selectedKey }" @click="selectConversation(c.group_id)">
-            <div class="list-item-head">
-              <UiTag size="sm" :variant="typeVariant(c.type)">{{ typeLabel(c.type) }}</UiTag><UiInfoTip v-if="c.type === 'archive'" text="私聊会话用 /end_session 结束后，消息整体转存为归档（archive:QQ号:编号），之后可在私聊用 /resume_session 恢复继续聊；归档会话只读，本页不能删除其中消息。" />
-              <span class="mono list-item-id">{{ displayGroupId(c) }}</span>
-            </div>
-            <div class="list-item-meta"><span>{{ c.count }} 条</span><span>·</span><span>{{ formatTime(c.latest) }}</span></div>
-          </button>
+          <div
+            v-for="c in conversations"
+            :key="c.group_id"
+            class="list-item qq-selectable"
+            :class="{ active: c.group_id === selectedKey }"
+          >
+            <button type="button" class="list-item__btn" @click="selectConversation(c.group_id)">
+              <div class="list-item-head">
+                <UiTag size="sm" :variant="typeVariant(c.type)">{{ typeLabel(c.type) }}</UiTag>
+                <span class="mono list-item-id" :title="displayGroupId(c)">{{ displayGroupId(c) }}</span>
+              </div>
+              <div class="list-item-meta"><span>{{ c.count }} 条</span><span>·</span><span>{{ formatTime(c.latest) }}</span></div>
+            </button>
+            <UiInfoTip
+              v-if="c.type === 'archive'"
+              class="list-item__tip"
+              text="私聊会话用 /end_session 结束后，消息整体转存为归档（archive:QQ号:编号），之后可在私聊用 /resume_session 恢复继续聊；归档会话只读，本页不能删除其中消息。"
+            />
+          </div>
         </div>
       </nav>
 
@@ -22,8 +34,9 @@
         <div v-if="!selectedKey" class="hint-panel"><UiEmpty icon="BookOpen" title="选择一个会话查看消息" /></div>
         <template v-else>
           <div class="filter-bar">
-            <span class="mono selected-id">{{ selectedKey }}</span>
+            <span class="mono selected-id" :title="selectedKey">{{ selectedKey }}</span>
             <UiInfoTip text="消息头括号内的名字是消息落库时定格的规范化昵称：群友后来改名，历史上下文仍保持旧名，以维持 LLM 前缀稳定、利于缓存命中。" />
+            <span class="role-legend">角色<UiInfoTip text="user 是群友/用户消息，assistant 是机器人的 LLM 回复，tool 是 LLM 调用工具（如联网搜索）的返回记录，仅在工具调用开启时产生。" /></span>
             <input v-model="keyword" placeholder="按内容关键词过滤" class="filter-input" @keyup.enter="reload" />
             <UiButton icon="Search" :loading="loadingMessages" @click="reload">查询</UiButton>
             <UiButton v-if="keyword" variant="ghost" icon="X" @click="clearKeyword">清空</UiButton>
@@ -35,17 +48,30 @@
             <div v-else class="messages-scroll">
               <div v-for="m in messages" :key="m.id" class="msg" :class="`msg--${m.role}`">
                 <div class="msg-head">
-                  <UiTag size="sm" :variant="roleVariant(m.role)">{{ m.role }}</UiTag><UiInfoTip text="user 是群友/用户消息，assistant 是机器人的 LLM 回复，tool 是 LLM 调用工具（如联网搜索）的返回记录，仅在工具调用开启时产生。" />
+                  <UiTag size="sm" :variant="roleVariant(m.role)">{{ m.role }}</UiTag>
                   <span v-if="m.sender_name" class="sender">{{ m.sender_name }}</span>
                   <span v-else-if="m.user_id" class="mono sender">uid {{ m.user_id }}</span>
                   <span v-if="m.canonical_name && m.canonical_name !== m.sender_name" class="canonical">（{{ m.canonical_name }}）</span>
                   <span class="mono msg-id">#{{ m.id }}</span>
                   <span class="msg-time">{{ formatTime(m.created_at) }}</span>
-                  <button v-if="!selectedKey.startsWith('archive:')" class="msg-delete" title="删除此条" :disabled="deletion.get(selectedKey, m.id)?.state !== undefined && deletion.get(selectedKey, m.id)?.state !== 'failed'" @click="onDelete(m)"><UiIcon name="Trash2" :size="13" /></button>
+                  <button v-if="!selectedKey.startsWith('archive:')" type="button" class="msg-delete" title="删除此条" :disabled="deletion.get(selectedKey, m.id)?.state !== undefined && deletion.get(selectedKey, m.id)?.state !== 'failed'" @click="onDelete(m)"><UiIcon name="Trash2" :size="13" /></button>
                 </div>
                 <div v-if="deletion.get(selectedKey, m.id)" class="deletion-status" role="status">
                   <span>{{ deletion.get(selectedKey, m.id)?.message }}</span>
-                  <button v-if="deletion.get(selectedKey, m.id)?.state === 'unknown' && deletion.get(selectedKey, m.id)?.actionId" class="msg-delete" title="重新查询删除结果" @click="deletion.resume(selectedKey, m.id)"><UiIcon name="RefreshCw" :size="14" /></button>
+                  <button
+                    v-if="deletion.get(selectedKey, m.id)?.state === 'unknown' && deletion.get(selectedKey, m.id)?.actionId"
+                    type="button"
+                    class="msg-delete"
+                    title="重新查询删除结果"
+                    @click="deletion.resume(selectedKey, m.id)"
+                  ><UiIcon name="RefreshCw" :size="14" /></button>
+                  <button
+                    v-if="deletion.get(selectedKey, m.id)?.state === 'unknown' || deletion.get(selectedKey, m.id)?.state === 'failed'"
+                    type="button"
+                    class="msg-delete"
+                    title="清除状态提示"
+                    @click="deletion.dismiss(selectedKey, m.id)"
+                  ><UiIcon name="X" :size="14" /></button>
                 </div>
                 <div class="msg-body">{{ m.content }}</div>
               </div>
@@ -85,7 +111,8 @@ let listRequest = 0
 let disposed = false
 onUnmounted(() => { disposed = true; messageRequest++; listRequest++ })
 const deletion = useConversationDeletion(async scope => {
-  await Promise.all([loadConversations(), selectedKey.value === scope ? reload() : Promise.resolve()])
+  await loadConversations()
+  if (selectedKey.value === scope) await reload()
 })
 
 function typeLabel(type: string): string { return { group: '群聊', private: '私聊', archive: '归档' }[type] || type }
@@ -100,7 +127,15 @@ async function loadConversations() {
   listError.value = null
   try {
     const data = await listConversations()
-    if (requestId === listRequest && !disposed) conversations.value = data.conversations
+    if (requestId === listRequest && !disposed) {
+      conversations.value = data.conversations
+      if (selectedKey.value && !conversations.value.some(c => c.group_id === selectedKey.value)) {
+        selectedKey.value = ''
+        messages.value = []
+        hasMore.value = false
+        loadError.value = null
+      }
+    }
   } catch (e: unknown) {
     if (requestId === listRequest && !disposed) listError.value = (e as Error).message
   } finally {
@@ -131,6 +166,7 @@ async function loadMore() {
   if (!messages.value.length || loadingMessages.value || loadingMore.value || reachedSoftCap.value) return
   const requestId = ++messageRequest
   loadingMore.value = true
+  loadError.value = null
   try {
     const data = await fetchMessages(selectedKey.value, { beforeId: messages.value[messages.value.length - 1].id, keyword: keyword.value || undefined, limit: PAGE_SIZE })
     if (requestId !== messageRequest || disposed) return
@@ -143,10 +179,18 @@ async function loadMore() {
   }
 }
 function clearKeyword() { keyword.value = ''; reload() }
-async function refreshAll() { await Promise.all([loadConversations(), reload()]) }
+async function refreshAll() {
+  deletion.clear()
+  await loadConversations()
+  if (selectedKey.value) await reload()
+}
 async function onDelete(m: ConversationMessage) {
   const scope = selectedKey.value
-  const prompt = m.role === 'user' ? `删除消息 #${m.id} 及其关联对话轮？` : `删除消息 #${m.id}？`
+  const prompt = m.role === 'user'
+    ? `删除消息 #${m.id} 及其关联对话轮？`
+    : m.role === 'assistant'
+      ? `删除助手消息 #${m.id} 将同时移除该完整对话轮及其投递记录，确定继续？`
+      : `删除消息 #${m.id}？`
   if (confirm(prompt)) await deletion.remove(scope, m.id)
 }
 loadConversations()
@@ -164,16 +208,19 @@ loadConversations()
 .list-panel { width: 260px; flex-shrink: 0; align-self: flex-start; position: sticky; top: var(--qq-gap-lg); max-height: calc(100vh - var(--qq-gap-lg) * 2); background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); display: flex; flex-direction: column; overflow: hidden; }
 .list-scroll { overflow-y: auto; flex: 1; }
 
-.list-item { display: block; width: 100%; text-align: left; padding: var(--qq-gap-sm) var(--qq-gap-md); border: none; border-radius: 0; background: transparent; cursor: pointer; font-family: var(--qq-font-base); transition: background var(--qq-transition-fast); }
-.list-item-head { display: flex; align-items: center; gap: var(--qq-gap-xs); margin-bottom: 2px; }
-.list-item-id { color: var(--qq-text); font-size: var(--qq-text-sm); }
+.list-item { display: flex; align-items: flex-start; gap: 4px; width: 100%; padding: var(--qq-gap-sm) var(--qq-gap-md); transition: background var(--qq-transition-fast); }
+.list-item__btn { flex: 1; min-width: 0; display: block; width: 100%; padding: 0; text-align: left; border: none; border-radius: 0; background: transparent; cursor: pointer; font-family: var(--qq-font-base); }
+.list-item__tip { margin-top: 2px; flex-shrink: 0; }
+.list-item-head { display: flex; align-items: center; gap: var(--qq-gap-xs); margin-bottom: 2px; min-width: 0; }
+.list-item-id { color: var(--qq-text); font-size: var(--qq-text-sm); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .list-item-meta { font-size: var(--qq-text-xs); color: var(--qq-text-muted); display: flex; gap: 4px; }
 
 .main-col { display: flex; flex-direction: column; flex: 1; min-width: 0; gap: var(--qq-gap-sm); }
 .hint-panel { flex: 1; display: flex; align-items: center; justify-content: center; background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); }
 
 .filter-bar { display: flex; align-items: center; gap: var(--qq-gap-sm); padding: var(--qq-gap-sm) var(--qq-gap-md); background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); flex-wrap: wrap; }
-.selected-id { font-size: var(--qq-text-sm); color: var(--qq-text-muted); white-space: nowrap; }
+.selected-id { max-width: 240px; font-size: var(--qq-text-sm); color: var(--qq-text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.role-legend { display: inline-flex; align-items: center; gap: 4px; font-size: var(--qq-text-xs); color: var(--qq-text-muted); white-space: nowrap; }
 .filter-input { flex: 1; min-width: 180px; }
 
 .messages-panel { background: var(--qq-surface); border-radius: var(--qq-radius-card); box-shadow: var(--qq-shadow-card); overflow: hidden; display: flex; flex-direction: column; }

@@ -103,13 +103,27 @@
     <section class="panel">
       <div class="panel-heading">
         <h3>信封构成 <span class="meta">{{ envelopeTimeLabel }}</span></h3>
-        <div class="legend">
-          <span v-for="item in envelopeLegend" :key="item.key">
+        <div class="legend legend--interactive">
+          <span
+            v-for="item in envelopeLegend"
+            :key="item.key"
+            class="legend-item"
+            :class="{
+              'is-active': envelopeHoveredKey === item.key,
+              'is-dimmed': envelopeHoveredKey != null && envelopeHoveredKey !== item.key,
+            }"
+            @mouseenter="envelopeHoveredKey = item.key"
+            @mouseleave="envelopeHoveredKey = null"
+          >
             <i :style="{ background: `var(--qq-env-${item.key})` }" />{{ item.name }} <b>{{ item.value }}</b>
           </span>
         </div>
       </div>
-      <EnvelopeCompositionBar :parts="envelopeParts" />
+      <EnvelopeCompositionBar
+        :parts="envelopeParts"
+        :active-key="envelopeHoveredKey"
+        @hover="envelopeHoveredKey = $event"
+      />
     </section>
 
     <section class="panel">
@@ -227,12 +241,16 @@ const selectedTime = ref<number | null>(null)
 const nowTick = ref(Date.now())
 const playing = ref(false)
 const activeEventIndex = ref(-1)
+const envelopeHoveredKey = ref<string | null>(null)
 
 let disposed = false
+let timelineSeq = 0
+let windowSeq = 0
 let scrubTimer: ReturnType<typeof setTimeout> | null = null
 let playTimer: ReturnType<typeof setInterval> | null = null
 let snapshotTimer: ReturnType<typeof setInterval> | null = null
 let tickTimer: ReturnType<typeof setInterval> | null = null
+const unmountController = new AbortController()
 
 const { chartTheme } = useChartTheme()
 const { theme } = useTheme()
@@ -314,15 +332,25 @@ function ensureDefaultGroup() {
   void reloadTimeline()
 }
 
+function cancelScrubAndPlay() {
+  stopPlay()
+  if (scrubTimer) {
+    clearTimeout(scrubTimer)
+    scrubTimer = null
+  }
+}
+
 function onGroupChange() {
+  cancelScrubAndPlay()
   const key = defaultKeyForGroup()
   activeKeyId.value = key ? `${key.provider_id}/${key.model}` : ''
-  reloadTimeline()
+  void reloadTimeline()
 }
 
 function selectKey(key: EpochKeySnapshot) {
+  cancelScrubAndPlay()
   activeKeyId.value = `${key.provider_id}/${key.model}`
-  reloadTimeline()
+  void reloadTimeline()
 }
 
 // ── 快照（实时态） ─────────────────────────────────────────────
@@ -347,9 +375,11 @@ async function refreshSnapshot(auto = false) {
   if (!auto) snapshotLoading.value = true
   try {
     const queued = await requestEpochSnapshot()
+    if (disposed) return
     const data = await pollRuntimeAction(queued.action.id, {
       validate: validateSnapshot,
       isCancelled: () => disposed,
+      signal: unmountController.signal,
     })
     if (disposed) return
     snapshot.value = data
@@ -367,19 +397,24 @@ async function refreshSnapshot(auto = false) {
 // ── 时间轴与窗口 ───────────────────────────────────────────────
 
 async function reloadTimeline() {
+  cancelScrubAndPlay()
   if (!groupKey.value) return
+  const seq = ++timelineSeq
   error.value = ''
   try {
-    timeline.value = await fetchEpochTimeline(groupKey.value, {
+    const result = await fetchEpochTimeline(groupKey.value, {
       provider: activeKey.value?.provider_id,
       model: activeKey.value?.model,
       range: range.value,
     })
-    const points = timeline.value.points
+    if (disposed || seq !== timelineSeq) return
+    timeline.value = result
+    const points = result.points
     selectedTime.value = points.length ? pointTs(points[points.length - 1]) : null
     activeEventIndex.value = -1
     await loadWindowAt(selectedTime.value)
   } catch (caught) {
+    if (disposed || seq !== timelineSeq) return
     timeline.value = null
     error.value = caught instanceof Error ? caught.message : '时间轴加载失败'
   }
@@ -395,9 +430,11 @@ function eventTs(event: EpochEvent): number {
 
 const events = computed<EpochEvent[]>(() => timeline.value?.events ?? [])
 
-/** 该时刻生效的锚点（events 真值；clear 事件 new_anchor_id 为 null = 锚点抹除归 0，待重新初始化） */
+/** 该时刻生效的锚点（events 真值；时间窗首事件之前取首事件 old_anchor_id，无事件回退快照锚点） */
 function anchorAt(timeMs: number): number {
-  let anchor = 0
+  let anchor = events.value.length
+    ? (events.value[0].old_anchor_id ?? 0)
+    : (activeKey.value?.anchor_id ?? 0)
   for (const event of events.value) {
     if (eventTs(event) <= timeMs) anchor = event.new_anchor_id ?? 0
   }
@@ -411,15 +448,19 @@ const currentAnchorId = computed(() => {
 
 async function loadWindowAt(timeMs: number | null) {
   if (!groupKey.value) return
+  const seq = ++windowSeq
   const anchor = timeMs == null ? (activeKey.value?.anchor_id ?? 0) : anchorAt(timeMs)
   const beforeTs = timeMs == null ? undefined : new Date(timeMs).toISOString()
   try {
-    windowData.value = await fetchEpochWindow(groupKey.value, anchor, {
+    const result = await fetchEpochWindow(groupKey.value, anchor, {
       beforeTs,
       before: 26,
       limit: 1024,
     })
+    if (disposed || seq !== windowSeq) return
+    windowData.value = result
   } catch {
+    if (disposed || seq !== windowSeq) return
     windowData.value = null
   }
 }
@@ -536,11 +577,21 @@ watch(snapshot, () => {
   snapshotFetchedAt.value = Date.now()
 })
 
-const coldUrgent = computed(() => coldRemaining.value != null && coldRemaining.value < 60)
+const coldBelowTrigger = computed(() => {
+  const key = activeKey.value
+  const params = key?.params
+  if (!key || !params || params.cold_trigger_tokens <= 0 || key.window_tokens == null) return false
+  return key.window_tokens < params.cold_trigger_tokens
+})
+
+const coldUrgent = computed(() =>
+  coldRemaining.value != null && coldRemaining.value < 60 && !coldBelowTrigger.value,
+)
 
 const coldLabel = computed(() => {
   const remaining = coldRemaining.value
   if (remaining == null) return '—'
+  if (remaining === 0) return coldBelowTrigger.value ? '未达' : '就绪'
   if (remaining >= 60) return `${Math.ceil(remaining / 60)}m`
   return `${remaining}s`
 })
@@ -548,6 +599,13 @@ const coldLabel = computed(() => {
 const coldText = computed(() => {
   const remaining = coldRemaining.value
   if (remaining == null) return '无数据'
+  if (remaining === 0) {
+    const trigger = activeKey.value?.params?.cold_trigger_tokens
+    if (coldBelowTrigger.value && trigger != null) {
+      return `未达触发线（< ${fmtTokens(trigger)}）`
+    }
+    return '已达空闲时长（待下轮触发）'
+  }
   if (remaining >= 60) return `约 ${Math.ceil(remaining / 60)} 分钟`
   return `${remaining} 秒（即将推进）`
 })
@@ -673,8 +731,9 @@ function eventStory(event: EpochEvent): string {
   const evictedTokens = event.evicted_tokens ?? 0
   const before = cliffY(eventTs(event), false)
   const after = cliffY(eventTs(event), true)
+  const fmtCliff = (value: number) => (mode.value === 'rows' ? `${value} 条` : fmtTokens(value))
   const dropNote =
-    before != null && after != null ? `<br>窗口 ${fmtTokens(before)} → ${fmtTokens(after)}` : ''
+    before != null && after != null ? `<br>窗口 ${fmtCliff(before)} → ${fmtCliff(after)}` : ''
   return `<b style="color:${reasonColor(event.reason)}">${formatTime(eventTs(event), 'HH:mm')} ${reason}推进</b><br>` +
     `${evictedRows} 条出窗 · 释放 ${fmtTokens(evictedTokens)}${dropNote}`
 }
@@ -730,16 +789,35 @@ const chartOption = computed(() => {
     }
   }
 
+  const spans = epochSpans()
+  const totalRange = points.length >= 2 ? Math.max(1, points[points.length - 1].ms - points[0].ms) : 1
+  const minLabelGap = totalRange * 0.048
+  let lastLabeledMid = Number.NEGATIVE_INFINITY
   const markArea = {
     silent: true,
-    data: epochSpans().map(span => [
-      {
-        xAxis: span.from,
-        itemStyle: { color: `${span.color}12` },
-        label: { show: true, formatter: `E${span.index}`, position: 'insideTop', color: t.textMuted, fontSize: 10.5 },
-      },
-      { xAxis: span.to },
-    ]),
+    data: spans.map((span, idx) => {
+      const spanWidth = span.to - span.from
+      const mid = (span.from + span.to) / 2
+      const isLast = idx === spans.length - 1
+      const showLabel =
+        spanWidth >= totalRange * 0.036
+        && (mid - lastLabeledMid >= minLabelGap || (isLast && spanWidth >= totalRange * 0.05))
+      if (showLabel) lastLabeledMid = mid
+      return [
+        {
+          xAxis: span.from,
+          itemStyle: { color: `${span.color}12` },
+          label: {
+            show: showLabel,
+            formatter: `E${span.index}`,
+            position: 'insideTop',
+            color: t.textMuted,
+            fontSize: 10.5,
+          },
+        },
+        { xAxis: span.to },
+      ]
+    }),
   }
   const markLine = {
     silent: true,
@@ -796,24 +874,26 @@ const chartOption = computed(() => {
       ]
 
   const cliffEvents = events.value
-  const cliffSeries = cliffEvents
+  const cliffList = cliffEvents
     .filter(event => event.reason !== 'init' && event.reason !== 'clear')
-    .map(event => {
+    .map((event, idx) => {
       const before = cliffY(eventTs(event), false)
       const after = cliffY(eventTs(event), true)
       const data: Array<[number, number]> =
         before != null && after != null ? [[eventTs(event), before], [eventTs(event), after]] : []
-      return {
-        name: '推进',
-        type: 'line' as const,
-        z: 5,
-        symbol: 'none' as const,
-        lineStyle: { color: reasonColor(event.reason), width: 2.5 },
-        data,
-        tooltip: { formatter: () => eventStory(event) },
-      }
+      return { event, id: `cliff-${idx}`, data }
     })
-    .filter(series => series.data.length > 0)
+    .filter(item => item.data.length > 0)
+  const cliffEventById = new Map(cliffList.map(item => [item.id, item.event]))
+  const cliffSeries = cliffList.map(item => ({
+    id: item.id,
+    name: '推进',
+    type: 'line' as const,
+    z: 5,
+    symbol: 'none' as const,
+    lineStyle: { color: reasonColor(item.event.reason), width: 2.5 },
+    data: item.data,
+  }))
 
   const markerEvents = cliffEvents
     .map(event => ({ event, after: cliffY(eventTs(event), true) }))
@@ -828,7 +908,6 @@ const chartOption = computed(() => {
       value: [eventTs(item.event), item.after] as [number, number],
       itemStyle: { color: reasonColor(item.event.reason), borderColor: t.surface, borderWidth: 2 },
     })),
-    tooltip: { formatter: (params: { dataIndex: number }) => eventStory(markerEvents[params.dataIndex].event) },
   }
 
   const cursorSeries = {
@@ -860,18 +939,37 @@ const chartOption = computed(() => {
       borderColor: t.tooltip.borderColor,
       textStyle: { color: t.text, fontSize: 12.5 },
       formatter(params: unknown) {
-        const list = Array.isArray(params) ? params : [params]
+        const list = (Array.isArray(params) ? params : [params]) as Array<{
+          seriesId?: string
+          seriesName?: string
+          dataIndex?: number
+          value?: [number, number]
+        }>
+        const markerItem = list.find(item => item.seriesId === 'markers')
+        const markerEvent =
+          markerItem != null && markerItem.dataIndex != null
+            ? markerEvents[markerItem.dataIndex]?.event ?? null
+            : null
+        const cliffItem = list.find(item => item.seriesId && cliffEventById.has(item.seriesId))
+        const cliffEvent = cliffItem?.seriesId ? cliffEventById.get(cliffItem.seriesId) ?? null : null
         const first = list.find(item => item.seriesId === 'main' || item.seriesName === '纪元窗口')
-        if (!first) return ''
+        if (!first) {
+          const directEvent = markerEvent ?? cliffEvent
+          return directEvent ? eventStory(directEvent) : ''
+        }
         const [ms, value] = first.value as [number, number]
         let html = `<b>${formatTime(ms, 'MM-dd HH:mm')}</b>　窗口 <b>${isRows ? `${value} 条` : fmtTokens(value)}</b>`
         if (isStack) {
           const envItem = list.find(item => item.seriesName === '信封')
-          const envValue = envItem ? (envItem.value as [number, number])[1] : 0
+          const envValue = envItem?.value ? envItem.value[1] : 0
           html = `<b>${formatTime(ms, 'MM-dd HH:mm')}</b>　纪元窗口 <b>${fmtTokens(value)}</b> + 信封 <b>${envValue}</b> = 输入 <b>${fmtTokens(value + envValue)}</b>`
         }
-        const near = events.value.find(event => Math.abs(eventTs(event) - ms) < 60_000)
-        if (near) html += `<br>${eventStory(near)}`
+        const matchedEvent =
+          markerEvent
+          ?? cliffEvent
+          ?? events.value.find(event => Math.abs(eventTs(event) - ms) < 60_000)
+          ?? null
+        if (matchedEvent) html += `<br>${eventStory(matchedEvent)}`
         return html
       },
     },
@@ -889,7 +987,7 @@ const chartOption = computed(() => {
       splitLine: t.splitLine,
     },
     dataZoom: [
-      { type: 'inside' },
+      { type: 'inside', zoomOnMouseWheel: 'ctrl', moveOnMouseMove: true, moveOnMouseWheel: false },
       {
         type: 'slider',
         height: 26,
@@ -917,24 +1015,25 @@ onMounted(async () => {
     // 隐藏标签页不向 bot action queue 提交快照任务
     if (!document.hidden) void refreshSnapshot(true)
   }, SNAPSHOT_AUTO_MS)
-  // 快照优先：refreshSnapshot 内部 ensureDefaultGroup 选快照里最活跃的键；
-  // 键空（bot 重启后尚无 chat）时退到会话列表回退选中
-  await refreshSnapshot()
-  try {
-    // 归档会话无纪元语义（路由拒绝 archive: 键），不进选择器与回退
-    conversations.value = (await listConversations()).conversations.filter(
-      item => item.type !== 'archive',
-    )
-  } catch {
-    // 会话列表失败不阻断快照流；选择器保持空态
-  }
-  ensureDefaultGroup()
+  // 并行启动会话列表与快照：bot 离线时立即用 SQLite 历史列表渲染时间轴与窗口，无需苦等快照超时
+  const convTask = listConversations()
+    .then(res => {
+      if (disposed) return
+      // 归档会话无纪元语义（路由拒绝 archive: 键），不进选择器与回退
+      conversations.value = res.conversations.filter(item => item.type !== 'archive')
+      ensureDefaultGroup()
+    })
+    .catch(() => {
+      // 会话列表失败不阻断快照流；选择器保持空态
+    })
+  const snapTask = refreshSnapshot()
+  await Promise.allSettled([convTask, snapTask])
 })
 
 onUnmounted(() => {
   disposed = true
-  stopPlay()
-  if (scrubTimer) clearTimeout(scrubTimer)
+  unmountController.abort()
+  cancelScrubAndPlay()
   if (snapshotTimer) clearInterval(snapshotTimer)
   if (tickTimer) clearInterval(tickTimer)
 })
@@ -1008,6 +1107,33 @@ onUnmounted(() => {
   color: var(--qq-text);
   font-weight: 600;
 }
+.stat-cards {
+  display: grid;
+  gap: var(--qq-gap-sm);
+}
+.stat-cards--kpi {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+@media (max-width: 900px) {
+  .stat-cards--kpi {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+@media (max-width: 520px) {
+  .stat-cards--kpi {
+    grid-template-columns: 1fr;
+  }
+}
+.legend-item {
+  cursor: default;
+  transition: opacity 0.18s ease, color 0.18s ease;
+}
+.legend-item.is-dimmed {
+  opacity: 0.4;
+}
+.legend-item.is-active {
+  color: var(--qq-text);
+}
 .selectors {
   display: flex;
   align-items: center;
@@ -1021,6 +1147,8 @@ onUnmounted(() => {
   background: var(--qq-surface);
   color: var(--qq-text);
   font-size: 13px;
+  max-width: 100%;
+  min-width: 0;
 }
 .key-chips {
   display: flex;
@@ -1112,6 +1240,7 @@ onUnmounted(() => {
 .event-nav {
   display: flex;
   gap: 8px;
+  flex-wrap: wrap;
   margin-left: auto;
 }
 .chips {

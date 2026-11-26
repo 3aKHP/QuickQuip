@@ -22,10 +22,13 @@
         <option value="">全部模型</option>
         <option v-for="item in dimensionOptions.model" :key="item" :value="item">{{ item }}</option>
       </select>
-      <select v-model="filters.feature" aria-label="功能筛选" @change="reload">
-        <option value="">全部功能</option>
-        <option v-for="item in dimensionOptions.feature" :key="item" :value="item">{{ item }}</option>
-      </select><UiInfoTip text="调用场景标签，由发起调用的功能模块写入（如群聊回复、日报、简报）；写入时未标记场景的调用归入「(未归因)」。" />
+      <span class="filter-pair">
+        <select v-model="filters.feature" aria-label="功能筛选" @change="reload">
+          <option value="">全部功能</option>
+          <option v-for="item in dimensionOptions.feature" :key="item" :value="item">{{ item }}</option>
+        </select>
+        <UiInfoTip text="调用场景标签，由发起调用的功能模块写入（如群聊回复、日报、简报）；写入时未标记场景的调用归入「(未归因)」。" />
+      </span>
       <select v-model="filters.group" aria-label="群筛选" @change="reload">
         <option value="">全部群</option>
         <option v-for="item in dimensionOptions.group" :key="item" :value="item">{{ item }}</option>
@@ -34,12 +37,15 @@
         <option value="">全部人格</option>
         <option v-for="item in dimensionOptions.persona" :key="item" :value="item">{{ item }}</option>
       </select>
-      <select v-model="filters.state" aria-label="状态筛选" @change="reload">
-        <option value="">全部状态</option>
-        <option value="ok">成功</option>
-        <option value="error">错误</option>
-        <option value="cancelled">取消</option>
-      </select><UiInfoTip text="「取消」指请求在执行中被中断，未拿到响应、不计 token 与成本；「错误」为调用失败。" />
+      <span class="filter-pair">
+        <select v-model="filters.state" aria-label="状态筛选" @change="reload">
+          <option value="">全部状态</option>
+          <option value="ok">成功</option>
+          <option value="error">错误</option>
+          <option value="cancelled">取消</option>
+        </select>
+        <UiInfoTip text="「取消」指请求在执行中被中断，未拿到响应、不计 token 与成本；「错误」为调用失败。" />
+      </span>
     </div>
 
     <UiLoading v-if="loading && !data" />
@@ -78,7 +84,10 @@
       <section class="panel">
         <div class="panel-heading">
           <h3>维度分布</h3>
-          <UiSegmented :model-value="breakdown" :options="breakdownOptions" aria-label="分布维度" @update:model-value="value => breakdown = value" />
+          <div class="panel-controls">
+            <UiSegmented :model-value="breakdownMetric" :options="breakdownMetricOptions" aria-label="分布指标" @update:model-value="value => breakdownMetric = value" />
+            <UiSegmented :model-value="breakdown" :options="breakdownOptions" aria-label="分布维度" @update:model-value="value => breakdown = value" />
+          </div>
         </div>
         <p class="hint"><UiIcon name="MousePointerClick" :size="13" /> 点击条形可将该维度值填入上方筛选器</p>
         <EChart v-if="breakdownItems.length" :option="barOption" :height="barHeight" @click="onBarClick" />
@@ -92,11 +101,18 @@
         </div>
         <UiEmpty v-if="!events.length && !eventsLoading" icon="ListChecks" title="暂无请求" />
         <div v-else class="event-list">
-          <button v-for="event in events" :key="event.id" class="event-row" @click="toggleEvent(event.id)">
-            <span class="event-main"><strong>{{ event.model }}</strong><small>{{ event.provider_id }} · {{ event.feature || '未归因' }}</small></span>
-            <span class="event-metrics"><span>{{ fmtNum(event.total_tokens ?? 0) }} tok</span><span>${{ fmtCost(event.cost_usd) }}</span><span :class="`state-${event.state}`">{{ stateLabel(event.state) }}</span></span>
-            <UiIcon :name="expandedId === event.id ? 'ChevronDown' : 'ChevronRight'" :size="16" />
-            <div v-if="expandedId === event.id" class="event-detail" @click.stop>
+          <div v-for="event in events" :key="event.id" class="event-item">
+            <button
+              type="button"
+              class="event-row"
+              :aria-expanded="expandedId === event.id"
+              @click="toggleEvent(event.id)"
+            >
+              <span class="event-main"><strong>{{ event.model }}</strong><small>{{ event.provider_id }} · {{ event.feature || '未归因' }}</small></span>
+              <span class="event-metrics"><span>{{ fmtNum(event.total_tokens ?? 0) }} tok</span><span>${{ fmtCost(event.cost_usd) }}</span><span :class="`state-${event.state}`">{{ stateLabel(event.state) }}</span></span>
+              <UiIcon :name="expandedId === event.id ? 'ChevronDown' : 'ChevronRight'" :size="16" />
+            </button>
+            <div v-if="expandedId === event.id" class="event-detail">
               <dl>
                 <div><dt>时间</dt><dd>{{ formatTs(event.ts) }}</dd></div>
                 <div><dt>人格</dt><dd>{{ event.persona_id || UNATTRIBUTED_KEY }}</dd></div>
@@ -115,7 +131,7 @@
                 <div v-if="event.error_message"><dt>错误</dt><dd class="error">{{ event.error_message }}</dd></div>
               </dl>
             </div>
-          </button>
+          </div>
         </div>
         <UiButton v-if="nextCursor" class="load-more" size="sm" variant="ghost" icon="ChevronDown" :loading="eventsLoading" @click="loadMore">加载更多</UiButton>
       </section>
@@ -125,7 +141,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, onUnmounted, reactive, ref } from 'vue'
 import EChart from '../components/ui/EChart.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
@@ -152,6 +168,7 @@ import {
 } from '../api/llmUsage'
 
 type BreakdownKey = 'provider' | 'model' | 'feature' | 'group' | 'persona'
+type BreakdownMetric = 'cost' | 'tokens' | 'calls' | 'errors'
 
 /** 「未定价」口径唯一定义：统计卡片与事件详情「定价」行共用，避免同页两份文案漂移 */
 const UNPRICED_DEF = '「未定价」= 价表缺少该渠道的该模型：token 照常计量、成本按 0 估算'
@@ -170,16 +187,60 @@ const loading = ref(false)
 const eventsLoading = ref(false)
 const error = ref('')
 const breakdown = ref<BreakdownKey>('provider')
+const breakdownMetric = ref<BreakdownMetric>('cost')
 const filters = reactive<UsageFilters>({ provider: '', model: '', feature: '', group: '', persona: '', state: '' })
+
+const isNarrow = ref(typeof window !== 'undefined' ? window.innerWidth <= 640 : false)
+let narrowQuery: MediaQueryList | null = null
+let onNarrowChange: ((e: MediaQueryListEvent) => void) | null = null
+
+let disposed = false
+let reloadSeq = 0
+let timelineSeq = 0
+let eventsSeq = 0
+let dimensionsSeq = 0
 
 const avgRows = computed(() => {
   if (!data.value) return []
   const bar = (v: number | null | undefined) => `${Math.min(100, Math.max(0, (v ?? 0) * 100)).toFixed(1)}%`
+  const hasCoverage = (v: number | null | undefined) => (v ?? 0) > 0
   return [
-    { label: '轮次信封', value: `≈${fmtNum(Math.round(data.value.avg_envelope_tokens ?? 0))}`, unit: 'tok/轮', barWidth: bar(data.value.envelope_coverage), coverage: pct(data.value.envelope_coverage ?? 0), note: '每轮全价 · 估算', tip: '每轮注入 user 消息头部的【轮次上下文】信封：时间、节日、参与成员、记忆与词表命中等逐轮变化的内容。逐轮重渲染、不吃缓存，按全价计。' },
-    { label: '纪元窗口', value: `≈${fmtNum(Math.round(data.value.avg_epoch_history_tokens ?? 0))}`, unit: 'tok/轮', barWidth: bar(data.value.epoch_coverage), coverage: pct(data.value.epoch_coverage ?? 0), note: 'history 段 · 估算', tip: '会话纪元读取的历史消息窗口（纪元锚点至最新消息）的 token 估算，是每轮上下文的主体；锚点随冷场或触顶前移而收缩。' },
-    { label: '图片附件', value: `≈${(data.value.avg_media_image_count ?? 0).toFixed(1)}`, unit: '张/轮', barWidth: bar(data.value.media_coverage), coverage: pct(data.value.media_coverage ?? 0), note: '当轮实际附带 · VLM', tip: 'VLM 请求当轮实际随请求附带的图片数，取自组装后的请求（每请求上限 5 张）。' },
-    { label: '现场补丁', value: `≈${fmtNum(Math.round(data.value.avg_patch_tokens ?? 0))}`, unit: 'tok/轮', barWidth: bar(data.value.patch_coverage), coverage: pct(data.value.patch_coverage ?? 0), note: '均值即预算利用率', tip: '每轮追加的【现场】补丁 token，与补丁预算同单位，均值可直接读作预算利用率；不计入纪元上下文预算。' },
+    {
+      label: '轮次信封',
+      value: hasCoverage(data.value.envelope_coverage) ? `≈${fmtNum(Math.round(data.value.avg_envelope_tokens ?? 0))}` : '—',
+      unit: hasCoverage(data.value.envelope_coverage) ? 'tok/轮' : '',
+      barWidth: bar(data.value.envelope_coverage),
+      coverage: pct(data.value.envelope_coverage ?? 0),
+      note: '每轮全价 · 估算',
+      tip: '每轮注入 user 消息头部的【轮次上下文】信封：时间、节日、参与成员、记忆与词表命中等逐轮变化的内容。逐轮重渲染、不吃缓存，按全价计。',
+    },
+    {
+      label: '纪元窗口',
+      value: hasCoverage(data.value.epoch_coverage) ? `≈${fmtNum(Math.round(data.value.avg_epoch_history_tokens ?? 0))}` : '—',
+      unit: hasCoverage(data.value.epoch_coverage) ? 'tok/轮' : '',
+      barWidth: bar(data.value.epoch_coverage),
+      coverage: pct(data.value.epoch_coverage ?? 0),
+      note: 'history 段 · 估算',
+      tip: '会话纪元读取的历史消息窗口（纪元锚点至最新消息）的 token 估算，是每轮上下文的主体；锚点随冷场或触顶前移而收缩。',
+    },
+    {
+      label: '图片附件',
+      value: hasCoverage(data.value.media_coverage) ? `≈${(data.value.avg_media_image_count ?? 0).toFixed(1)}` : '—',
+      unit: hasCoverage(data.value.media_coverage) ? '张/轮' : '',
+      barWidth: bar(data.value.media_coverage),
+      coverage: pct(data.value.media_coverage ?? 0),
+      note: '当轮实际附带 · VLM',
+      tip: 'VLM 请求当轮实际随请求附带的图片数，取自组装后的请求（每请求上限 5 张）。',
+    },
+    {
+      label: '现场补丁',
+      value: hasCoverage(data.value.patch_coverage) ? `≈${fmtNum(Math.round(data.value.avg_patch_tokens ?? 0))}` : '—',
+      unit: hasCoverage(data.value.patch_coverage) ? 'tok/轮' : '',
+      barWidth: bar(data.value.patch_coverage),
+      coverage: pct(data.value.patch_coverage ?? 0),
+      note: '均值即预算利用率',
+      tip: '每轮追加的【现场】补丁 token，与补丁预算同单位，均值可直接读作预算利用率；不计入纪元上下文预算。',
+    },
   ]
 })
 
@@ -205,6 +266,12 @@ const breakdownOptions: UiSegmentedOption<BreakdownKey>[] = [
   { value: 'group', label: '群' },
   { value: 'persona', label: '人格' },
 ]
+const breakdownMetricOptions: UiSegmentedOption<BreakdownMetric>[] = [
+  { value: 'cost', label: '成本' },
+  { value: 'tokens', label: 'Tokens' },
+  { value: 'calls', label: '请求数' },
+  { value: 'errors', label: '错误数' },
+]
 
 /** 维度筛选选项：独立 dimensions 端点下发，仅随 range 变化，不受页面筛选影响 */
 const dimensionOptions = reactive<{ provider: string[]; model: string[]; feature: string[]; group: string[]; persona: string[] }>({
@@ -215,18 +282,26 @@ const dimensionOptions = reactive<{ provider: string[]; model: string[]; feature
   persona: [],
 })
 
+function withSelected(list: string[], current?: string): string[] {
+  if (current && !list.includes(current)) return [current, ...list]
+  return list
+}
+
 async function loadDimensions() {
+  const seq = ++dimensionsSeq
   try {
     const requested = range.value
     const result = await fetchLlmUsageDimensions(requested)
-    if (requested !== range.value) return // 快速切换 range 时丢弃过期响应
+    if (disposed || seq !== dimensionsSeq || requested !== range.value) return
     dimensions.value = result
-    dimensionOptions.provider = result.providers
-    dimensionOptions.model = result.models
-    dimensionOptions.feature = result.features
-    dimensionOptions.group = result.groups
-    dimensionOptions.persona = result.personas
-  } catch (e) { error.value = (e as Error).message || String(e) }
+    dimensionOptions.provider = withSelected(result.providers, filters.provider)
+    dimensionOptions.model = withSelected(result.models, filters.model)
+    dimensionOptions.feature = withSelected(result.features, filters.feature)
+    dimensionOptions.group = withSelected(result.groups, filters.group)
+    dimensionOptions.persona = withSelected(result.personas, filters.persona)
+  } catch (e) {
+    if (!disposed && seq === dimensionsSeq) error.value = (e as Error).message || String(e)
+  }
 }
 
 /** 后端把 NULL 维度值映射为该标签；它不是可筛选的真实值。
@@ -236,14 +311,15 @@ const UNATTRIBUTED_KEY = computed(() => dimensions.value?.unattributed_label ?? 
 const breakdownItems = computed<UsageBucket[]>(() => {
   if (!data.value) return []
   const key = `by_${breakdown.value}` as 'by_provider' | 'by_model' | 'by_feature' | 'by_group' | 'by_persona'
-  return data.value[key]
+  const field = breakdownMetric.value
+  return [...data.value[key]].sort((a, b) => b[field] - a[field])
 })
 
 const trendOption = computed<ECOption>(() => {
   const t = chartTheme.value
   const points = timeline.value
   return {
-    grid: { left: 8, right: 16, top: 24, bottom: 8, containLabel: true },
+    grid: { left: 8, right: isNarrow.value ? 8 : 16, top: 24, bottom: 8, containLabel: true },
     tooltip: {
       trigger: 'axis',
       ...t.tooltip,
@@ -263,7 +339,9 @@ const trendOption = computed<ECOption>(() => {
       axisLabel: { ...t.axisLabel, formatter: (value: number) => fmtAxis(value) },
       splitLine: t.splitLine,
     },
-    dataZoom: points.length > 31 ? [{ type: 'inside' }] : [],
+    dataZoom: points.length > 31
+      ? [{ type: 'inside', zoomOnMouseWheel: 'ctrl', moveOnMouseWheel: false }]
+      : [],
     series: [{
       type: 'line',
       data: points.map(point => point.value),
@@ -279,39 +357,65 @@ const trendOption = computed<ECOption>(() => {
 
 const BAR_LIMIT = 12
 
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;')
+}
+
+function breakdownMetricLabel(kind: BreakdownMetric): string {
+  return ({ cost: '成本', tokens: 'Tokens', calls: '请求数', errors: '错误数' })[kind]
+}
+
+function formatBreakdownValue(value: number, kind: BreakdownMetric): string {
+  if (kind === 'cost') return `$${fmtCost(value)}`
+  if (kind === 'tokens') return `${fmtCompact(value)} tok`
+  return `${fmtNum(value)} 次`
+}
+
+function formatBreakdownAxis(value: number, kind: BreakdownMetric): string {
+  if (kind === 'cost') return `$${fmtCompact(value)}`
+  return fmtCompact(value)
+}
+
 const barOption = computed<ECOption>(() => {
   const t = chartTheme.value
+  const kind = breakdownMetric.value
   const items = [...breakdownItems.value].slice(0, BAR_LIMIT).reverse()
-  const total = breakdownItems.value.reduce((sum, item) => sum + item.cost, 0)
-  const share = (cost: number) => total > 0 ? `${(cost / total * 100).toFixed(1)}%` : '0%'
+  const total = breakdownItems.value.reduce((sum, item) => sum + item[kind], 0)
+  const share = (value: number) => total > 0 ? `${(value / total * 100).toFixed(1)}%` : '0%'
   return {
-    grid: { left: 8, right: 96, top: 8, bottom: 8, containLabel: true },
+    grid: { left: 8, right: isNarrow.value ? 68 : 112, top: 8, bottom: 8, containLabel: true },
     tooltip: {
       trigger: 'item',
       ...t.tooltip,
       formatter: params => {
         const item = Array.isArray(params) ? params[0] : params
         if (!item) return ''
-        const cost = Number(item.value ?? 0)
-        return `${item.name}<br/>成本 $${fmtCost(cost)}（${share(cost)}）<br/>${item.name === UNATTRIBUTED_KEY.value ? '未归因调用，不支持筛选' : '点击填入筛选器'}`
+        const rawName = String(item.name ?? '')
+        const value = Number(item.value ?? 0)
+        const valueStr = kind === 'tokens' ? `${fmtNum(value)} tok` : formatBreakdownValue(value, kind)
+        return `${escapeHtml(rawName)}<br/>${breakdownMetricLabel(kind)} ${valueStr}（${share(value)}）<br/>${rawName === UNATTRIBUTED_KEY.value ? '未归因调用，不支持筛选' : '点击填入筛选器'}`
       },
     },
     xAxis: {
       type: 'value',
-      // 分布图数据恒为成本，formatter 与趋势指标解耦，固定带 $ 前缀
-      axisLabel: { ...t.axisLabel, formatter: (value: number) => `$${fmtCompact(value)}` },
+      axisLabel: { ...t.axisLabel, formatter: (value: number) => formatBreakdownAxis(value, kind) },
       splitLine: t.splitLine,
     },
     yAxis: {
       type: 'category',
       data: items.map(item => item.key),
       axisLine: t.axisLine,
-      axisLabel: { ...t.axisLabel, width: 120, overflow: 'truncate' as const },
+      axisLabel: { ...t.axisLabel, width: isNarrow.value ? 76 : 120, overflow: 'truncate' as const },
       axisTick: { show: false },
     },
     series: [{
       type: 'bar',
-      data: items.map(item => item.cost),
+      data: items.map(item => item[kind]),
       barMaxWidth: 16,
       itemStyle: { color: t.primary, borderRadius: [0, 3, 3, 0] },
       emphasis: { itemStyle: { color: t.cyan } },
@@ -320,7 +424,7 @@ const barOption = computed<ECOption>(() => {
         position: 'right' as const,
         color: t.textMuted,
         fontSize: 11,
-        formatter: params => `$${fmtCost(Number(params.value ?? 0))} · ${share(Number(params.value ?? 0))}`,
+        formatter: params => `${formatBreakdownValue(Number(params.value ?? 0), kind)} · ${share(Number(params.value ?? 0))}`,
       },
     }],
   }
@@ -374,24 +478,43 @@ function onBarClick(params: ECElementEvent) {
 }
 
 async function loadTimeline() {
-  try { timeline.value = await fetchLlmUsageTimeline(range.value, metric.value, filters) } catch (e) { error.value = (e as Error).message || String(e) }
+  const seq = ++timelineSeq
+  try {
+    const result = await fetchLlmUsageTimeline(range.value, metric.value, filters)
+    if (disposed || seq !== timelineSeq) return
+    timeline.value = result
+  } catch (e) {
+    if (!disposed && seq === timelineSeq) error.value = (e as Error).message || String(e)
+  }
 }
 async function loadEvents(reset = true) {
+  const seq = ++eventsSeq
   eventsLoading.value = true
   try {
     const result = await fetchLlmUsageEvents(range.value, filters, reset ? undefined : nextCursor.value || undefined)
+    if (disposed || seq !== eventsSeq) return
     events.value = reset ? result.items : [...events.value, ...result.items]
     nextCursor.value = result.next_cursor
-  } catch (e) { error.value = (e as Error).message || String(e) } finally { eventsLoading.value = false }
+  } catch (e) {
+    if (!disposed && seq === eventsSeq) error.value = (e as Error).message || String(e)
+  } finally {
+    if (!disposed && seq === eventsSeq) eventsLoading.value = false
+  }
 }
 async function reload() {
+  const seq = ++reloadSeq
   loading.value = true
   error.value = ''
   expandedId.value = null
   try {
     const [summary] = await Promise.all([fetchLlmUsageSummary(range.value, filters), loadTimeline(), loadEvents()])
+    if (disposed || seq !== reloadSeq) return
     data.value = summary
-  } catch (e) { error.value = (e as Error).message || String(e) } finally { loading.value = false }
+  } catch (e) {
+    if (!disposed && seq === reloadSeq) error.value = (e as Error).message || String(e)
+  } finally {
+    if (!disposed && seq === reloadSeq) loading.value = false
+  }
 }
 
 function changeRange(value: string) {
@@ -404,8 +527,21 @@ function loadMore() { return loadEvents(false) }
 function toggleEvent(id: number) { expandedId.value = expandedId.value === id ? null : id }
 
 onMounted(() => {
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    narrowQuery = window.matchMedia('(max-width: 640px)')
+    isNarrow.value = narrowQuery.matches
+    onNarrowChange = (e: MediaQueryListEvent) => { isNarrow.value = e.matches }
+    narrowQuery.addEventListener('change', onNarrowChange)
+  }
   void loadDimensions()
   reload()
+})
+
+onUnmounted(() => {
+  disposed = true
+  if (narrowQuery && onNarrowChange) {
+    narrowQuery.removeEventListener('change', onNarrowChange)
+  }
 })
 </script>
 
@@ -421,8 +557,10 @@ onMounted(() => {
     max-width: calc(100vw - 2 * var(--qq-gap-md));
   }
 }
-.filters { display: flex; flex-wrap: wrap; gap: var(--qq-gap-sm); }
+.filters { display: flex; flex-wrap: wrap; align-items: center; gap: var(--qq-gap-sm); }
 .filters select { min-width: 130px; font-size: var(--qq-text-sm); }
+.filter-pair { display: inline-flex; align-items: center; gap: 4px; }
+.panel-controls { display: flex; align-items: center; gap: var(--qq-gap-xs); flex-wrap: wrap; }
 .bounds-note, .muted { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 .stat-cards { display: grid; gap: var(--qq-gap-sm); }
 .stat-cards--kpi { grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); }
@@ -445,14 +583,15 @@ onMounted(() => {
 .panel-heading h3 { margin: 0; font-size: var(--qq-text-md); }
 .hint { display: flex; align-items: center; gap: 5px; margin: calc(-1 * var(--qq-gap-sm)) 0 var(--qq-gap-sm); color: var(--qq-text-quiet); font-size: var(--qq-text-xs); }
 .event-list { display: flex; flex-direction: column; }
-.event-row { position: relative; display: grid; grid-template-columns: 1fr auto 18px; gap: var(--qq-gap-sm); align-items: center; padding: 11px 2px; border: 0; border-bottom: 1px solid var(--qq-border); background: transparent; color: var(--qq-text); text-align: left; cursor: pointer; }
+.event-item { border-bottom: 1px solid var(--qq-border); }
+.event-row { position: relative; width: 100%; display: grid; grid-template-columns: 1fr auto 18px; gap: var(--qq-gap-sm); align-items: center; padding: 11px 2px; border: 0; background: transparent; color: var(--qq-text); text-align: left; cursor: pointer; }
 .event-row:hover { background: var(--qq-surface-strong); }
 .event-main, .event-metrics { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
 .event-main strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .event-main small, .event-metrics { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 .event-metrics { flex-direction: row; gap: var(--qq-gap-md); white-space: nowrap; font-variant-numeric: tabular-nums; }
 .state-ok { color: var(--qq-success); } .state-error { color: var(--qq-danger); } .state-cancelled { color: var(--qq-warn); }
-.event-detail { grid-column: 1 / -1; padding: var(--qq-gap-sm) 0 2px; cursor: default; }
+.event-detail { padding: 0 2px var(--qq-gap-sm); cursor: text; user-select: text; }
 .event-detail dl { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 8px 20px; margin: 0; padding: var(--qq-gap-sm); border-left: 2px solid var(--qq-primary); background: var(--qq-surface-strong); }
 .event-detail dl div { display: flex; gap: 8px; font-size: var(--qq-text-sm); } .event-detail dt { color: var(--qq-text-muted); flex-shrink: 0; } .event-detail dd { margin: 0; word-break: break-word; font-variant-numeric: tabular-nums; }
 .load-more { align-self: center; margin-top: var(--qq-gap-sm); }

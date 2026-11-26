@@ -60,7 +60,7 @@ export interface TiebaThreadDetail extends TiebaThread {
 
 export function tiebaImgProxyUrl(url: string) {
   if (!url) return ''
-  return `/ops/api/tieba/imgproxy?url=${encodeURIComponent(url)}`
+  return `${BASE}/api/tieba/imgproxy?url=${encodeURIComponent(url)}`
 }
 
 export interface TiebaSyncStream {
@@ -112,12 +112,19 @@ export function startTiebaSync(
           buffer = buffer.slice(sep + 2)
           sep = buffer.indexOf('\n\n')
           const data = frame.startsWith('data: ') ? frame.slice(6) : null
-          if (data === '[done]') return
+          if (data === '[done]') {
+            await reader.cancel().catch(() => {})
+            return
+          }
           if (data && !aborted) onMessage(data)
         }
       }
     })
-    .catch(() => {})
+    .catch((err: unknown) => {
+      if (!aborted) {
+        onMessage(`✕ 同步连接中断：${err instanceof Error ? err.message : String(err)}`)
+      }
+    })
     .finally(fireDone)
 
   return {

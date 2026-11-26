@@ -241,3 +241,56 @@ def test_update_message_only_on_stale_one_off_not_blocked(store):
         "sm_stale", sm.ScheduledMessageUpdate(message="新文案"), object()
     )
     assert updated["message"] == "新文案"
+
+
+def test_update_cron_only_on_cross_year_one_off_clears_stale_run_at(store):
+    """更新跨年一次性任务的 cron 而不传 run_at 时，应清空旧 run_at 并校验新 cron。"""
+    pytest.importorskip("apscheduler")
+    created = sm.create_scheduled_message(
+        _create_body(
+            cron="30 9 15 1 *",
+            recurring=False,
+            run_at="2099-01-15T09:30:00+08:00",
+        ),
+        object(),
+    )
+    assert created["run_at"] == "2099-01-15T09:30:00+08:00"
+
+    # 用过去的 cron 且不传 run_at 应被新 cron 校验拒绝，而非借旧 run_at 蒙混过关
+    with pytest.raises(HTTPException) as exc:
+        sm.update_scheduled_message(
+            created["id"],
+            sm.ScheduledMessageUpdate(cron=past_one_shot_cron()),
+            object(),
+        )
+    assert exc.value.status_code == 400
+
+    # 用未来的 cron 且不传 run_at 应成功并清空旧 run_at
+    future = future_one_shot_cron()
+    updated = sm.update_scheduled_message(
+        created["id"],
+        sm.ScheduledMessageUpdate(cron=future),
+        object(),
+    )
+    assert updated["cron"] == future
+    assert "run_at" not in updated
+
+
+def test_update_null_schedule_fields_on_recurring_is_noop(store, enqueued, monkeypatch):
+    """recurring=True 任务提交 null 的 cron/run_at 应保持空操作语义。"""
+    created = sm.create_scheduled_message(_create_body(), object())
+    before = store.get(created["id"]).to_dict()
+    audit_calls: list[dict] = []
+    monkeypatch.setattr(
+        sm.audit_logger, "log", lambda *a, **k: audit_calls.append(k)
+    )
+
+    updated = sm.update_scheduled_message(
+        created["id"],
+        sm.ScheduledMessageUpdate(cron=None, run_at=None),
+        object(),
+    )
+
+    assert updated == before
+    assert audit_calls == []
+    assert enqueued == [("scheduler_reload", {})]

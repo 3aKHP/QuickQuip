@@ -3,6 +3,7 @@ import logging
 
 from fastapi import APIRouter, HTTPException, Query, Request
 
+from quickquip.app.web.audit import audit_logger
 from quickquip.chat.group_quotes import GroupQuoteStore, attach_sender_display
 
 router = APIRouter()
@@ -70,4 +71,10 @@ async def delete_quote(quote_id: int, request: Request):
     store: GroupQuoteStore = group_quote_store
     if not store.delete(quote_id):
         raise HTTPException(404, "quote not found")
+    audit_logger.log(
+        request,
+        action="delete",
+        target_type="quote",
+        target_id=str(quote_id),
+    )
     return {"ok": True}

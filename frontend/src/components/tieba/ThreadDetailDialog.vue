@@ -1,25 +1,35 @@
 <template>
-  <div class="detail-overlay" @click.self="emit('close')">
-    <UiCard padding="lg" shadow="lg" class="detail-card">
-      <div class="detail-head">
-        <span class="mono">#{{ detail.tid }} · {{ detail.forum_keyword }}吧</span>
-        <button class="detail-close" @click="emit('close')"><UiIcon name="X" :size="18" /></button>
-      </div>
-      <h3 class="detail-title">{{ detail.title }}</h3>
-      <div class="detail-meta">
-        <span v-if="detail.author_name">{{ detail.author_name }}</span>
-        <span>· {{ formatTime(detail.last_seen_at) }}</span>
-        <a :href="detail.thread_url" target="_blank" rel="noreferrer" class="detail-link">在贴吧打开</a>
-      </div>
-      <div class="detail-content">{{ detail.main_post_text || '（正文为空）' }}</div>
-      <div v-if="detail.image_urls && detail.image_urls.length" class="detail-images">
-        <img v-for="(src, i) in detail.image_urls" :key="i" :src="tiebaImgProxyUrl(src)" loading="lazy" />
-      </div>
-    </UiCard>
-  </div>
+  <Teleport to="body">
+    <div
+      class="detail-overlay"
+      role="dialog"
+      aria-modal="true"
+      :aria-label="detail.title || '帖子详情'"
+      @click.self="emit('close')"
+    >
+      <UiCard padding="lg" shadow="lg" class="detail-card">
+        <div class="detail-head">
+          <span class="mono">#{{ detail.tid }} · {{ detail.forum_keyword }}吧</span>
+          <button type="button" class="detail-close" aria-label="关闭帖子详情" @click="emit('close')"><UiIcon name="X" :size="18" /></button>
+        </div>
+        <h3 class="detail-title">{{ detail.title }}</h3>
+        <div class="detail-meta">
+          <span v-if="detail.author_name">{{ detail.author_name }}</span>
+          <span v-if="detail.author_name && detail.last_seen_at">·</span>
+          <span v-if="detail.last_seen_at">{{ formatTime(detail.last_seen_at) }}</span>
+          <a :href="detail.thread_url" target="_blank" rel="noreferrer" class="detail-link">在贴吧打开</a>
+        </div>
+        <div class="detail-content">{{ detail.main_post_text || '（正文为空）' }}</div>
+        <div v-if="detail.image_urls && detail.image_urls.length" class="detail-images">
+          <img v-for="(src, i) in detail.image_urls" :key="i" :src="tiebaImgProxyUrl(src)" :alt="`${detail.title} 配图 ${i + 1}`" loading="lazy" />
+        </div>
+      </UiCard>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
+import { onBeforeUnmount, onMounted } from 'vue'
 import UiCard from '../ui/UiCard.vue'
 import UiIcon from '../ui/UiIcon.vue'
 import { tiebaImgProxyUrl } from '../../api/tieba'
@@ -32,6 +42,16 @@ defineProps<{
 const emit = defineEmits<{
   close: []
 }>()
+
+function onKeydown(e: KeyboardEvent) {
+  if (e.key === 'Escape') {
+    e.preventDefault()
+    emit('close')
+  }
+}
+
+onMounted(() => window.addEventListener('keydown', onKeydown))
+onBeforeUnmount(() => window.removeEventListener('keydown', onKeydown))
 
 function formatTime(ts: number): string {
   if (!ts) return ''
@@ -50,17 +70,17 @@ function formatTime(ts: number): string {
   inset: 0;
   background: var(--qq-overlay-strong);
   display: flex;
-  align-items: flex-start;
+  align-items: center;
   justify-content: center;
-  z-index: 9998;
+  z-index: var(--qq-z-modal);
   padding: var(--qq-gap-lg);
-  overflow-y: auto;
 }
 
 .detail-card {
   width: min(720px, 100%);
   max-height: calc(100vh - 64px);
   overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .detail-head {

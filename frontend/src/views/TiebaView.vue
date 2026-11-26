@@ -135,6 +135,8 @@ const loadingMore = ref(false)
 const reachedSoftCap = computed(() => threads.value.length >= LIST_SOFT_CAP)
 
 const detail = ref<TiebaThread | null>(null)
+let threadsSeq = 0
+let detailSeq = 0
 
 const STATUS_MAP: Record<string, string> = { ok: '正常', running: '同步中', error: '错误', idle: '未同步' }
 const VARIANT_MAP: Record<string, 'info' | 'success' | 'warn' | 'danger'> = { ok: 'success', running: 'info', error: 'danger', idle: 'info' }
@@ -189,41 +191,50 @@ async function selectForum(forum: string) {
 
 async function reload() {
   if (!selectedForum.value) return
+  const seq = ++threadsSeq
+  const forum = selectedForum.value
   loadingThreads.value = true
+  loadingMore.value = false
   threads.value = []
   total.value = 0
   hasMore.value = false
   try {
-    const data = await fetchTiebaThreads(selectedForum.value, {
+    const data = await fetchTiebaThreads(forum, {
       keyword: keyword.value || undefined,
       limit: PAGE_SIZE,
       offset: 0,
     })
+    if (seq !== threadsSeq || selectedForum.value !== forum) return
     threads.value = data.threads || []
     total.value = data.total || 0
     hasMore.value = !!data.has_more
   } catch (e: unknown) {
+    if (seq !== threadsSeq) return
     toast((e as Error).message, 'error')
   } finally {
-    loadingThreads.value = false
+    if (seq === threadsSeq) loadingThreads.value = false
   }
 }
 
 async function loadMore() {
-  if (!hasMore.value || reachedSoftCap.value) return
+  if (!hasMore.value || reachedSoftCap.value || loadingMore.value) return
+  const seq = threadsSeq
+  const forum = selectedForum.value
   loadingMore.value = true
   try {
-    const data = await fetchTiebaThreads(selectedForum.value, {
+    const data = await fetchTiebaThreads(forum, {
       keyword: keyword.value || undefined,
       limit: PAGE_SIZE,
       offset: threads.value.length,
     })
+    if (seq !== threadsSeq || selectedForum.value !== forum) return
     threads.value.push(...(data.threads || []))
     hasMore.value = !!data.has_more
   } catch (e: unknown) {
+    if (seq !== threadsSeq) return
     toast((e as Error).message, 'error')
   } finally {
-    loadingMore.value = false
+    if (seq === threadsSeq) loadingMore.value = false
   }
 }
 
@@ -233,9 +244,14 @@ function clearKeyword() {
 }
 
 async function openDetail(tid: string) {
+  const seq = ++detailSeq
+  const forum = selectedForum.value
   try {
-    detail.value = await fetchTiebaThread(selectedForum.value, tid)
+    const loaded = await fetchTiebaThread(forum, tid)
+    if (seq !== detailSeq || selectedForum.value !== forum) return
+    detail.value = loaded
   } catch (e: unknown) {
+    if (seq !== detailSeq) return
     toast((e as Error).message, 'error')
   }
 }

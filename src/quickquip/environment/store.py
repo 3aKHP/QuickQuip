@@ -204,7 +204,11 @@ class Store:
                                       hashlib.sha256).hexdigest()
                     if previous.get('_digest') != digest:
                         raise EnvironmentError('Request ID already used for different changes')
-                    return {k: v for k, v in previous.items() if not k.startswith('_')}
+                    return {
+                        **{k: v for k, v in previous.items() if not k.startswith('_')},
+                        'consumers': self._consumers(),
+                        'states': self._statuses(state, raw, previous.get('changes', [])),
+                    }
             if body.get('expected_version') != state['version']:
                 raise EnvironmentError('Environment changed; refresh before saving')
             operations = self._json('operations.json', {})

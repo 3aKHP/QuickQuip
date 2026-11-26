@@ -6,9 +6,17 @@
           v-for="block in blocks"
           :key="block.key"
           class="seg"
-          :class="`seg-${block.key}`"
+          :class="[
+            `seg-${block.key}`,
+            {
+              'is-active': hoveredKey === block.key,
+              'is-dimmed': hoveredKey != null && hoveredKey !== block.key,
+            },
+          ]"
           :style="{ flexGrow: Math.max(block.tokens, 4) }"
           :title="block.title"
+          @mouseenter="onEnter(block.key)"
+          @mouseleave="onLeave"
         >
           <em v-if="block.label">{{ block.label }}</em>
         </div>
@@ -30,12 +38,30 @@
  * 空段整段省略。数据只来自 epoch_snapshot 的实时缓存——信封组装时渲染、
  * 不落库是前缀缓存契约，历史时刻只展示"最近一封"。
  */
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ENVELOPE_SEGMENTS } from '../../api/epochs'
 
 const props = defineProps<{
   parts: Record<string, number> | null
+  activeKey?: string | null
 }>()
+
+const emit = defineEmits<{
+  hover: [key: string | null]
+}>()
+
+const localHover = ref<string | null>(null)
+const hoveredKey = computed(() => props.activeKey ?? localHover.value)
+
+function onEnter(key: string) {
+  localHover.value = key
+  emit('hover', key)
+}
+
+function onLeave() {
+  localHover.value = null
+  emit('hover', null)
+}
 
 const total = computed(() =>
   ENVELOPE_SEGMENTS.reduce((sum, meta) => sum + (props.parts?.[meta.key] ?? 0), 0),
@@ -85,8 +111,16 @@ defineExpose({ total })
   justify-content: center;
   overflow: hidden;
   border-radius: 4px;
+  flex: 0 1 0%;
   min-width: 4px;
-  transition: flex-grow 0.6s ease;
+  transition: flex-grow 0.6s ease, opacity 0.18s ease, filter 0.18s ease;
+}
+.seg.is-dimmed {
+  opacity: 0.36;
+  filter: saturate(0.7);
+}
+.seg.is-active {
+  filter: brightness(1.06);
 }
 .seg em {
   font-style: normal;

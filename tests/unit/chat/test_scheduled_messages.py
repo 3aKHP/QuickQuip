@@ -183,3 +183,41 @@ def test_recurring_conversion_recovers_after_second_file_write_fails(tmp_path, m
     jobs = recovered.list()
     assert len(jobs) == 1 and jobs[0].id == job.id and not jobs[0].recurring
     assert not recovered.intent_path.exists()
+
+
+def test_cross_year_one_off_run_at_persists_and_validates(tmp_path):
+    """带 run_at 的跨年一次性任务支持任意未来年份，过去时间仍拒绝；周期任务不写 run_at。"""
+    from datetime import datetime, timedelta
+    from zoneinfo import ZoneInfo
+
+    from quickquip.common.constants import BEIJING_TIMEZONE
+
+    store = ScheduledMessageStore(tmp_path / "scheduled_messages.json")
+    next_year = datetime.now(ZoneInfo(BEIJING_TIMEZONE)).year + 1
+    run_at = f"{next_year}-01-15T09:30:00+08:00"
+    job = store.add(
+        cron="30 9 15 1 *",
+        group_ids=["12345"],
+        message="跨年提醒",
+        recurring=False,
+        run_at=run_at,
+    )
+    assert job.run_at == run_at
+    assert store.get(job.id).run_at == run_at
+    assert job.to_dict()["run_at"] == run_at
+
+    # 过去的 run_at 被拒绝
+    past_dt = datetime.now(ZoneInfo(BEIJING_TIMEZONE)) - timedelta(hours=1)
+    past = past_dt.isoformat(timespec="seconds")
+    with pytest.raises(ValueError, match="未来"):
+        store.add(
+            cron="0 9 1 1 *",
+            group_ids=["12345"],
+            message="过去提醒",
+            recurring=False,
+            run_at=past,
+        )
+
+    # 周期任务不序列化 run_at（向后兼容旧格式）
+    rec = store.add(cron="0 8 * * *", group_ids=["12345"], message="每天早安", recurring=True)
+    assert "run_at" not in rec.to_dict()

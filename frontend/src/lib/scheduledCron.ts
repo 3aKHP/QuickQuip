@@ -84,10 +84,34 @@ const INT_RE = /^\d+$/
 const inRange = (v: string, lo: number, hi: number) =>
   INT_RE.test(v) && Number(v) >= lo && Number(v) <= hi
 
-/** 5 段 cron → 简易模式字段；无法用简易模式表达时返回 null。
+/** 从 ISO 字符串（如 2027-01-15T09:00:00+08:00）提取北京时间 YYYY-MM-DDTHH:MM。 */
+export function runAtToLocalInput(runAt?: string | null): string {
+  if (!runAt) return ''
+  const m = runAt.trim().match(/^(\d{4}-\d{2}-\d{2})T(\d{2}:\d{2})/)
+  return m ? `${m[1]}T${m[2]}` : ''
+}
+
+/** YYYY-MM-DDTHH:MM → 北京时间 ISO 8601 字符串（带 +08:00，支持跨年持久化）。 */
+export function localInputToRunAt(onceAt: string): string {
+  const t = parseLocalInput(onceAt)
+  if (!t) return ''
+  return `${t[0]}-${pad(t[1])}-${pad(t[2])}T${pad(t[3])}:${pad(t[4])}:00+08:00`
+}
+
+/** 5 段 cron（及可选 run_at）→ 简易模式字段；无法用简易模式表达时返回 null。
  *  拒绝的情形：字段非纯整数（步进/列表/范围）、数值越界、不存在的日历日期
  *  （如 2 月 31 日）、recurring=true 且钉死月/日（"每年重复"语义）。 */
-export function parseCronToSimple(cron: string, recurring: boolean): SimpleFields | null {
+export function parseCronToSimple(cron: string, recurring: boolean, runAt?: string | null): SimpleFields | null {
+  if (!recurring && runAt) {
+    const local = runAtToLocalInput(runAt)
+    if (local) {
+      return {
+        ...DEFAULT_SIMPLE_FIELDS,
+        frequency: 'once',
+        onceAt: local,
+      }
+    }
+  }
   const parts = cron.trim().split(/\s+/)
   if (parts.length !== 5) return null
   const [mi, h, d, mo, w] = parts
@@ -98,26 +122,24 @@ export function parseCronToSimple(cron: string, recurring: boolean): SimpleField
   if (inRange(d, 1, 31) && mo === '*' && w === '*') return { ...base, frequency: 'monthly', dayOfMonth: Number(d) }
   if (inRange(d, 1, 31) && inRange(mo, 1, 12) && w === '*') {
     if (recurring) return null // 钉死月/日的周期任务 = 每年重复，简易模式无此选项
-    // cron 不含年份：按北京钟面判断今年该时刻是否已过，已过（含恰为当前分钟）则取明年
-    const [bjY, bjMo, bjD, bjH, bjMi] = beijingWallClock()
-    const tail = [Number(mo), Number(d), Number(h), Number(mi)]
-    const nowTail = [bjMo, bjD, bjH, bjMi]
-    let year = bjY
-    let passed = true
-    for (let i = 0; i < 4; i++) {
-      if (tail[i] !== nowTail[i]) {
-        passed = tail[i] < nowTail[i]
-        break
-      }
-    }
-    if (passed) year += 1
-    // 日历真实性校验（如平年 2 月 29 日）：无法表达则回落高级模式
-    if (Number(d) > new Date(year, Number(mo), 0).getDate()) return null
+    // 无 run_at 的存量 cron 不含年份：默认保留今年日期，不悄悄滚到明年
+    const [bjY] = beijingWallClock()
+    if (Number(d) > new Date(bjY, Number(mo), 0).getDate()) return null
     return {
       ...base,
       frequency: 'once',
-      onceAt: `${year}-${pad(Number(mo))}-${pad(Number(d))}T${pad(Number(h))}:${pad(Number(mi))}`,
+      onceAt: `${bjY}-${pad(Number(mo))}-${pad(Number(d))}T${pad(Number(h))}:${pad(Number(mi))}`,
     }
   }
   return null
+}
+
+/** 人类可读的调度描述（列表副标题）。 */
+export function describeSchedule(cron: string, recurring: boolean, runAt?: string | null): string {
+  const parsed = parseCronToSimple(cron, recurring, runAt)
+  if (!parsed) return recurring ? '自定义周期' : '自定义一次性'
+  if (parsed.frequency === 'daily') return `每天 ${parsed.time}`
+  if (parsed.frequency === 'weekly') return `每${WEEKDAY_NAMES[parsed.weekday] ?? ''} ${parsed.time}`
+  if (parsed.frequency === 'monthly') return `每月 ${parsed.dayOfMonth} 号 ${parsed.time}`
+  return parsed.onceAt ? `单次 ${parsed.onceAt.replace('T', ' ')}` : '仅一次'
 }

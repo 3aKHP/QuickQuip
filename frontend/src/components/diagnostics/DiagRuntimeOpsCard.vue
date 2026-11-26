@@ -26,12 +26,12 @@
         <span>Scope</span>
         <input v-model="contextScope" placeholder="群号或 private:USER_ID" />
       </label>
-      <UiButton icon="Eraser" variant="danger" :disabled="!contextScope" :loading="runtimeLoading === 'clear'" @click="clearContext">清空上下文</UiButton>
+      <UiButton icon="Eraser" variant="danger" :disabled="!contextScope.trim()" :loading="runtimeLoading === 'clear'" @click="clearContext">清空上下文</UiButton>
       <label class="inline-field">
         <span>Message ID</span>
         <input v-model="contextMessageId" placeholder="OneBot message_id" />
       </label>
-      <UiButton icon="Trash2" variant="danger" :disabled="!contextScope || !contextMessageId" :loading="runtimeLoading === 'delete-msg'" @click="deleteContextMessage">删除消息</UiButton>
+      <UiButton icon="Trash2" variant="danger" :disabled="!contextScope.trim() || !contextMessageId.trim()" :loading="runtimeLoading === 'delete-msg'" @click="deleteContextMessage">删除消息</UiButton>
     </div>
 
     <div v-if="runtimeError" class="error-block">{{ runtimeError }}</div>
@@ -56,8 +56,13 @@
             <span class="action-time">{{ formatActionTime(item.updated_at || item.created_at) }}</span>
           </div>
           <div v-if="item.error" class="action-error">{{ item.error }}</div>
-          <pre v-else-if="item.result?.text" class="action-result">{{ item.result.text }}</pre>
-          <pre v-else-if="item.result" class="action-result">{{ prettyJson(item.result) }}</pre>
+          <template v-else-if="actionResultText(item)">
+            <details v-if="isLargeResult(item)" class="action-detail">
+              <summary>查看结果（{{ actionResultText(item).length }} 字符）</summary>
+              <pre class="action-result">{{ actionResultText(item) }}</pre>
+            </details>
+            <pre v-else class="action-result">{{ actionResultText(item) }}</pre>
+          </template>
         </div>
       </div>
     </div>
@@ -109,6 +114,16 @@ function prettyJson(obj: unknown): string {
   }
 }
 
+function actionResultText(item: RuntimeAction): string {
+  if (!item.result) return ''
+  if (typeof item.result.text === 'string' && item.result.text) return item.result.text
+  return prettyJson(item.result)
+}
+
+function isLargeResult(item: RuntimeAction): boolean {
+  return item.action_type === 'epoch_snapshot' || actionResultText(item).length > 300
+}
+
 function actionLabel(actionType: string): string {
   return ({
     llm_reload: '重载 LLM',
@@ -116,11 +131,15 @@ function actionLabel(actionType: string): string {
     personas_reload: '重载人格',
     rules_reload: '重载规则',
     awakening_reload: '重载唤醒',
+    scheduler_reload: '重载定时任务',
     clear_context: '清空上下文',
     delete_context_message: '删除上下文消息',
+    delete_conversation_row: '删除对话记录',
     health_check: '健康检查',
     summary_now: '立即总结',
     briefing_now: '立即播报',
+    period_report_now: '立即生成周期总结',
+    epoch_snapshot: '纪元快照',
   } as Record<string, string>)[actionType] || actionType
 }
 
@@ -156,7 +175,7 @@ async function loadActions() {
   actionsLoading.value = true
   try {
     const data = await fetchLlmRuntimeActions(20)
-    actions.value = data.actions || []
+    actions.value = (data.actions || []).filter(item => item.action_type !== 'epoch_snapshot')
   } catch (e: unknown) {
     runtimeError.value = (e as Error).message
   } finally {
@@ -266,6 +285,7 @@ async function deleteContextMessage() {
   const scope = contextScope.value.trim()
   const messageId = contextMessageId.value.trim()
   if (!scope || !messageId) return
+  if (!confirm(`删除会话 ${scope} 中的消息 ${messageId}？`)) return
   runtimeLoading.value = 'delete-msg'
   runtimeError.value = null
   try {
@@ -416,8 +436,21 @@ onMounted(() => {
   word-break: break-word;
 }
 
+.action-detail {
+  margin-top: 4px;
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-xs);
+}
+
+.action-detail summary {
+  cursor: pointer;
+  user-select: none;
+}
+
 .action-result {
   margin: 4px 0 0;
+  max-height: 220px;
+  overflow: auto;
   color: var(--qq-text-muted);
   font-family: var(--qq-font-mono);
   font-size: var(--qq-text-xs);
@@ -468,6 +501,16 @@ onMounted(() => {
   .diag-card__icon {
     width: 32px;
     height: 32px;
+  }
+
+  .inline-field {
+    width: 100%;
+  }
+
+  .inline-field input {
+    width: 100%;
+    flex: 1;
+    min-width: 0;
   }
 }
 </style>

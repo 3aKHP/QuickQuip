@@ -10,7 +10,12 @@
 
     <div class="form-row">
       <div class="field grow">
-        <label>测试样本（`标签 | 文本`）</label>
+        <div class="field-head">
+          <label>测试样本（`标签 | 文本`）</label>
+          <span class="sample-counter" :class="{ 'sample-counter--over': overLimit }">
+            {{ sampleCount }} / {{ MAX_SAMPLES }} 条
+          </span>
+        </div>
         <textarea
           v-model="regressionInput"
           rows="8"
@@ -20,12 +25,21 @@
     </div>
 
     <div class="form-actions">
-      <UiButton icon="Play" :loading="regressionLoading" @click="runRegress">运行</UiButton>
+      <UiButton icon="Play" :loading="regressionLoading" :disabled="overLimit || sampleCount === 0" @click="runRegress">运行</UiButton>
+      <span v-if="overLimit" class="sample-hint">超出单次 {{ MAX_SAMPLES }} 条上限，请精简后再运行</span>
+      <span v-else-if="emptyTextCount > 0" class="sample-hint">有 {{ emptyTextCount }} 行缺少文本内容</span>
     </div>
 
     <div v-if="regressionError" class="error-block">{{ regressionError }}</div>
 
-    <div v-if="regressionResults.length" class="regression-results">
+    <UiEmpty
+      v-if="hasRun && !regressionLoading && !regressionError && !regressionResults.length"
+      icon="ListChecks"
+      title="未返回回归结果"
+      description="本次运行返回 0 条结果，请检查输入样本或当前规则配置。"
+    />
+
+    <div v-else-if="regressionResults.length" class="regression-results">
       <div v-for="(r, i) in regressionResults" :key="i" class="regression-item" :class="{ matched: r.matched }">
         <div class="regression-head">
           <span class="regression-label">{{ r.label || `#${i + 1}` }}</span>
@@ -35,7 +49,7 @@
         <div v-if="r.rules.length" class="regression-rules">
           <div v-for="(rule, j) in r.rules" :key="j" class="regression-rule">
             <span class="rule-name">{{ rule.name }}</span>
-            <span class="rule-patterns">{{ rule.patterns.join(' | ') }}</span>
+            <span class="rule-patterns" :title="rule.patterns.join(' | ')">{{ rule.patterns.join(' | ') }}</span>
             <span class="rule-prio">P{{ rule.priority }}</span>
           </div>
         </div>
@@ -45,39 +59,63 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import UiButton from '../ui/UiButton.vue'
 import UiCard from '../ui/UiCard.vue'
+import UiEmpty from '../ui/UiEmpty.vue'
 import UiIcon from '../ui/UiIcon.vue'
 import UiInfoTip from '../ui/UiInfoTip.vue'
 import UiTag from '../ui/UiTag.vue'
 import { runRegression } from '../../api/diagnostics'
 import type { RegressionResult } from '../../api/diagnostics'
 
+const MAX_SAMPLES = 20
+
 const regressionLoading = ref(false)
 const regressionError = ref<string | null>(null)
 const regressionResults = ref<RegressionResult[]>([])
 const regressionInput = ref('')
+const hasRun = ref(false)
 
-async function runRegress() {
-  regressionLoading.value = true
-  regressionError.value = null
-  regressionResults.value = []
-  try {
-    const lines = regressionInput.value.split('\n').filter(line => line.trim())
-    if (!lines.length) {
-      regressionError.value = '请至少输入一条测试样本'
-      return
-    }
-    const samples = lines.map(line => {
+const parsedSamples = computed(() =>
+  regressionInput.value
+    .split('\n')
+    .map(line => line.trim())
+    .filter(Boolean)
+    .map(line => {
       const pipe = line.indexOf('|')
       if (pipe >= 0) {
         return { label: line.slice(0, pipe).trim(), text: line.slice(pipe + 1).trim() }
       }
-      return { label: '', text: line.trim() }
-    })
+      return { label: '', text: line }
+    }),
+)
+const sampleCount = computed(() => parsedSamples.value.length)
+const overLimit = computed(() => sampleCount.value > MAX_SAMPLES)
+const emptyTextCount = computed(() => parsedSamples.value.filter(sample => !sample.text).length)
+
+async function runRegress() {
+  regressionError.value = null
+  regressionResults.value = []
+  hasRun.value = false
+  const samples = parsedSamples.value
+  if (!samples.length) {
+    regressionError.value = '请至少输入一条测试样本'
+    return
+  }
+  if (samples.length > MAX_SAMPLES) {
+    regressionError.value = `单次最多运行 ${MAX_SAMPLES} 条测试样本，当前 ${samples.length} 条`
+    return
+  }
+  if (samples.some(sample => !sample.text)) {
+    regressionError.value = '存在文本为空的样本（格式为「标签 | 文本」或直接输入文本），请补充文本内容'
+    return
+  }
+  regressionLoading.value = true
+  try {
     const data = await runRegression(samples)
     regressionResults.value = data.samples || []
+    hasRun.value = true
   } catch (e: unknown) {
     regressionError.value = (e as Error).message
   } finally {
@@ -157,10 +195,30 @@ async function runRegress() {
   min-width: 220px;
 }
 
+.field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--qq-gap-xs);
+}
+
 .field label {
   color: var(--qq-text-muted);
   font-size: var(--qq-text-xs);
   font-weight: 600;
+}
+
+.sample-counter {
+  color: var(--qq-text-muted);
+  font-family: var(--qq-font-mono);
+  font-size: var(--qq-text-xs);
+  font-variant-numeric: tabular-nums;
+}
+
+.sample-counter--over,
+.sample-hint {
+  color: var(--qq-danger);
+  font-size: var(--qq-text-xs);
 }
 
 textarea {

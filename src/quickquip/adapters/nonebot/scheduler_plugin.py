@@ -246,15 +246,28 @@ def reload_scheduled_message_jobs(store: ScheduledMessageStore | None = None) ->
         if not job.enabled:
             continue
         try:
-            cron_kwargs = parse_cron(job.cron, fallback_hour="0")
-            scheduler.add_job(
-                _make_send_task(job, bot_getter, store),
-                "cron",
-                id=f"{_JOB_ID_PREFIX}{job.id}",
-                name=f"{_JOB_ID_PREFIX}{job.id}",
-                replace_existing=True,
-                **cron_kwargs,
-            )
+            if not job.recurring and job.run_at:
+                from quickquip.chat.scheduled_messages import parse_run_at
+
+                run_dt = parse_run_at(job.run_at)
+                scheduler.add_job(
+                    _make_send_task(job, bot_getter, store),
+                    "date",
+                    run_date=run_dt,
+                    id=f"{_JOB_ID_PREFIX}{job.id}",
+                    name=f"{_JOB_ID_PREFIX}{job.id}",
+                    replace_existing=True,
+                )
+            else:
+                cron_kwargs = parse_cron(job.cron, fallback_hour="0")
+                scheduler.add_job(
+                    _make_send_task(job, bot_getter, store),
+                    "cron",
+                    id=f"{_JOB_ID_PREFIX}{job.id}",
+                    name=f"{_JOB_ID_PREFIX}{job.id}",
+                    replace_existing=True,
+                    **cron_kwargs,
+                )
             count += 1
         except Exception:
             logger.warning("scheduled_msg: failed to register job %s", job.id, exc_info=True)

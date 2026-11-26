@@ -3,12 +3,15 @@ from __future__ import annotations
 import json
 import sqlite3
 import uuid
+from collections.abc import Collection
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
 
 from quickquip.common.paths import WEB_ADMIN_ACTIONS_DB_PATH
+
+_INTERNAL_ACTION_TYPES: tuple[str, ...] = ("epoch_snapshot",)
 
 
 def _utc_now() -> str:
@@ -183,20 +186,46 @@ class WebAdminActionQueue:
                 (_utc_now(), error[:2000], action_id),
             )
 
-    def list_recent(self, limit: int = 20) -> list[dict[str, Any]]:
+    def list_recent(
+        self,
+        limit: int = 20,
+        *,
+        exclude_actions: Collection[str] | None = None,
+        include_internal: bool = False,
+    ) -> list[dict[str, Any]]:
         self._ensure_schema()
         limit = max(1, min(int(limit), 100))
+        excluded: list[str] = []
+        if not include_internal:
+            excluded.extend(_INTERNAL_ACTION_TYPES)
+        if exclude_actions:
+            excluded.extend(str(name) for name in exclude_actions if name)
+        excluded = list(dict.fromkeys(excluded))
         with self._connect() as conn:
-            rows = conn.execute(
-                """
-                SELECT *
-                FROM web_admin_actions
-                -- rowid 决胜：紧循环入队会产生相同微秒时间戳，最近列表须按入队次序稳定
-                ORDER BY created_at DESC, rowid DESC
-                LIMIT ?
-                """,
-                (limit,),
-            ).fetchall()
+            if excluded:
+                placeholders = ", ".join("?" for _ in excluded)
+                rows = conn.execute(
+                    f"""
+                    SELECT *
+                    FROM web_admin_actions
+                    WHERE action_type NOT IN ({placeholders})
+                    -- rowid 决胜：紧循环入队会产生相同微秒时间戳，最近列表须按入队次序稳定
+                    ORDER BY created_at DESC, rowid DESC
+                    LIMIT ?
+                    """,
+                    (*excluded, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    """
+                    SELECT *
+                    FROM web_admin_actions
+                    -- rowid 决胜：紧循环入队会产生相同微秒时间戳，最近列表须按入队次序稳定
+                    ORDER BY created_at DESC, rowid DESC
+                    LIMIT ?
+                    """,
+                    (limit,),
+                ).fetchall()
         return [asdict(self._row_to_action(row)) for row in rows]
 
     def clear_finished(self) -> int:
