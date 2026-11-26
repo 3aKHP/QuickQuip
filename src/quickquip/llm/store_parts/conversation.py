@@ -305,20 +305,26 @@ class ConversationStoreMixin:
     def update_last_assistant_message_id(self, group_id: int | str, message_id: str) -> None:
         if self._unavailable:
             raise RuntimeError("LLM存储 数据库不可用")
+        cleaned = str(message_id or "").strip()
+        if not cleaned:
+            return
         with self._connect() as conn:
             row = conn.execute(
                 """
-                SELECT id FROM conversation_messages
-                WHERE group_id = ? AND role = 'assistant' AND message_id IS NULL
+                SELECT id, message_id FROM conversation_messages
+                WHERE group_id = ? AND role = 'assistant'
                 ORDER BY id DESC
                 LIMIT 1
                 """,
                 (str(group_id),),
             ).fetchone()
-            if row is not None:
+            if row is not None and not row["message_id"]:
                 conn.execute(
-                    "UPDATE conversation_messages SET message_id = ? WHERE id = ?",
-                    (str(message_id), row["id"]),
+                    """
+                    UPDATE conversation_messages SET message_id = ?
+                    WHERE id = ? AND (message_id IS NULL OR message_id = '')
+                    """,
+                    (cleaned, row["id"]),
                 )
 
     def get_earliest_message_time(self, group_id: str) -> str:

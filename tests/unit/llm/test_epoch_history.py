@@ -143,3 +143,48 @@ def test_hosted_only_search_enters_frozen_native_history_and_can_be_disabled():
     assert disabled.reason == "profile"
     assert all(m.native_content is None for m in disabled.frozen.segments["loop_0"])
     assert first.frozen.segments["loop_0"][1].native_content == blocks
+
+
+@pytest.mark.parametrize("initial_mid", [None, "", "__MISSING__"])
+def test_assistant_message_id_backfill_does_not_rebuild_history(initial_mid):
+    loops, rows = _sources(1)
+    if initial_mid != "__MISSING__":
+        rows[1]["message_id"] = initial_mid
+    first = _select(loops, rows)
+
+    updated_rows = deepcopy(rows)
+    updated_rows[1]["message_id"] = "987654"
+    second = _select(loops, updated_rows, previous=first.frozen)
+    assert second.reason is None
+    assert second.diff_summary is None
+
+
+def test_user_message_id_and_content_change_report_history_diff_summary():
+    loops, rows = _sources(1)
+    rows[0]["message_id"] = "111"
+    first = _select(loops, rows)
+
+    changed_user = deepcopy(rows)
+    changed_user[0]["message_id"] = "222"
+    rebuilt_user = _select(loops, changed_user, previous=first.frozen)
+    assert rebuilt_user.reason == "history"
+    assert rebuilt_user.diff_summary == "row=1 role=user fields=message_id"
+
+    changed_assistant = deepcopy(rows)
+    changed_assistant[1]["content"] = "edited"
+    rebuilt_assistant = _select(loops, changed_assistant, previous=first.frozen)
+    assert rebuilt_assistant.reason == "history"
+    assert rebuilt_assistant.diff_summary == "row=2 role=assistant fields=content"
+
+    changed_loop = [replace(loops[0], replay_revision=loops[0].replay_revision + 1)]
+    rebuilt_loop = _select(changed_loop, rows, previous=first.frozen)
+    assert rebuilt_loop.reason == "history"
+    assert rebuilt_loop.diff_summary == "row=1 loop=loop_0 kind=loop_or_archive"
+
+    archived = _select(loops, rows, previous=first.frozen, archive_loop_ids=frozenset({"loop_0"}))
+    assert archived.reason == "history"
+    assert archived.diff_summary == "row=1 loop=loop_0 kind=loop_or_archive"
+
+    truncated = _select(loops, rows[1:], previous=first.frozen)
+    assert truncated.reason == "history"
+    assert truncated.diff_summary == "prefix_mismatch prev_len=2 curr_len=1 first_id=1"
