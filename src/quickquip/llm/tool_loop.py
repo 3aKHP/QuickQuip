@@ -37,6 +37,7 @@ async def run_tool_call_loop(
     turn_recorder=None,
     request_guard=None,
     on_provider_activity=None,
+    on_tools_loaded: Callable[[list[str]], None] | None = None,
     result_space_probe: Callable[[LLMRequest], int] | None = None,
 ):
 
@@ -374,6 +375,8 @@ async def run_tool_call_loop(
                         f"{'、'.join(not_loaded)}。请先使用已加载的工具。"
                     )
                 if newly_loaded:
+                    if on_tools_loaded is not None:
+                        on_tools_loaded(newly_loaded)
                     logger.info(
                         "LLM tool discovery loaded tools: provider=%s model=%s names=%s",
                         provider.id,
@@ -383,6 +386,8 @@ async def run_tool_call_loop(
             if tool_discovery_enabled and call.name == tool_list_name and not result.is_error:
                 newly_loaded = discovery.load_from_list_call(call)
                 if newly_loaded:
+                    if on_tools_loaded is not None:
+                        on_tools_loaded(newly_loaded)
                     logger.info(
                         "LLM tool list loaded tools: provider=%s model=%s names=%s",
                         provider.id,

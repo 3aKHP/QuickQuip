@@ -477,3 +477,42 @@ def test_record_epoch_event_cleans_up_expired(store: LLMStore) -> None:
     _record_hot(store, 1)
 
     assert [e["reason"] for e in store.list_epoch_events("1001")] == ["hot"]
+
+
+def test_epoch_sticky_tools_preserve_order_cap_and_clear_on_transitions(store: LLMStore) -> None:
+    mgr = EpochManager()
+    params = EpochParams()
+    key_a = EpochKey("1001", "p1", "m1")
+    key_b = EpochKey("1001", "p1", "m2")
+    mgr.maybe_advance(key_a, store=store, params=params)
+    mgr.maybe_advance(key_b, store=store, params=params)
+    eid_a = mgr.current_id(key_a)
+
+    # Stale epoch_id ignored; valid epoch_id preserves order, dedupes, and respects cap
+    mgr.remember_loaded_tools(key_a, ["tool_x"], epoch_id="stale-id", max_tools=3)
+    assert mgr.loaded_tools(key_a) == ()
+
+    mgr.remember_loaded_tools(key_a, ["tool_b", "tool_a", "tool_b"], epoch_id=eid_a, max_tools=3)
+    mgr.remember_loaded_tools(key_a, ["tool_c", "tool_d"], epoch_id=eid_a, max_tools=3)
+    assert mgr.loaded_tools(key_a) == ("tool_b", "tool_a", "tool_c")
+    assert mgr.loaded_tools(key_b) == ()
+
+    # Rebuild clears sticky tools
+    mgr.rebuild(key_a, store=store, reason="history")
+    assert mgr.loaded_tools(key_a) == ()
+
+    # Persona switch (advance_to_cold_water) clears sticky tools AND rotates epoch_id
+    eid_a2 = mgr.current_id(key_a)
+    mgr.remember_loaded_tools(key_a, ["tool_x"], epoch_id=eid_a2)
+    assert mgr.loaded_tools(key_a) == ("tool_x",)
+    mgr.advance_to_cold_water(key_a, store=store, params=params)
+    assert mgr.loaded_tools(key_a) == ()
+    assert mgr.current_id(key_a) != eid_a2
+    # In-flight tool load from old persona is rejected
+    mgr.remember_loaded_tools(key_a, ["tool_stale"], epoch_id=eid_a2)
+    assert mgr.loaded_tools(key_a) == ()
+
+    # reset_scope clears all keys in scope
+    mgr.remember_loaded_tools(key_b, ["tool_y"], epoch_id=mgr.current_id(key_b))
+    mgr.reset_scope("1001", store=store)
+    assert mgr.loaded_tools(key_b) == ()

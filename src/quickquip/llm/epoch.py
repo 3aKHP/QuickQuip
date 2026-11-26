@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 import uuid
 from typing import TYPE_CHECKING
@@ -63,6 +63,8 @@ class EpochState:
     id: str = field(default_factory=lambda: create_epoch_id())
     history: FrozenHistory | None = None
     released: bool = False
+    # 纪元内已动态发现并装载的工具名（保序去重），纪元重建或重置时清空。
+    loaded_tool_names: list[str] = field(default_factory=list)
 
 
 @dataclass(frozen=True, slots=True)
@@ -195,6 +197,33 @@ class EpochManager:
         state = self._states.get(key)
         return state.id if state is not None else None
 
+    def loaded_tools(self, key: EpochKey) -> tuple[str, ...]:
+        """返回当前纪元已粘性保留的动态工具名（只读保序快照）。"""
+        state = self._states.get(key)
+        return tuple(state.loaded_tool_names) if state is not None else ()
+
+    def remember_loaded_tools(
+        self,
+        key: EpochKey,
+        names: Sequence[str],
+        *,
+        epoch_id: str | None = None,
+        max_tools: int | None = None,
+    ) -> None:
+        """把本轮新装载的工具按序记住到当前纪元；过期 epoch_id 忽略。"""
+        state = self._states.get(key)
+        if state is None or (epoch_id is not None and state.id != epoch_id):
+            return
+        cap = max(1, min(max_tools, 64)) if max_tools is not None else None
+        existing = set(state.loaded_tool_names)
+        for name in names:
+            if not name or name in existing:
+                continue
+            if cap is not None and len(state.loaded_tool_names) >= cap:
+                break
+            state.loaded_tool_names.append(name)
+            existing.add(name)
+
     def snapshot(self) -> list[dict[str, object]]:
         """全量锚点状态的值拷贝导出（epoch_snapshot action 消费）。
 
@@ -211,6 +240,7 @@ class EpochManager:
                 "epoch_id": state.id,
                 "frozen_segments": state.history.segment_count if state.history else 0,
                 "replay_tokens": state.history.replay_tokens if state.history else 0,
+                "loaded_tools": len(state.loaded_tool_names),
             }
             # list() 先把 items 原子快照（C 层循环不释放 GIL）：epoch_snapshot
             # 经 asyncio.to_thread 在 worker 线程执行，迭代期间事件循环线程
@@ -288,7 +318,11 @@ class EpochManager:
                 event = self._advance(
                     state, store, key, candidate, reason=reason, epoch_tokens=total
                 )
-        # persona 切换后缓存重新烧入，T 从切换点重新计。
+        # persona 切换后缓存重新烧入，T 从切换点重新计；清空旧人格粘性工具，
+        # 未触发 _advance 时同样轮换 epoch_id 以拦截旧人格在途请求的回写。
+        if event is None:
+            state.id = create_epoch_id()
+        state.loaded_tool_names.clear()
         state.last_activity_at = self._clock()
         return event
 
@@ -366,6 +400,7 @@ class EpochManager:
         state.anchor_id = self._pair_align(store, key.scope_key, candidate_anchor)
         state.id = create_epoch_id()
         state.history = None
+        state.loaded_tool_names.clear()
         logger.info(
             "epoch advance scope=%s provider=%s model=%s reason=%s anchor=%d->%d tokens=%d",
             key.scope_key,

@@ -373,3 +373,78 @@ def test_config_parses_budget_and_retention_fields(tmp_path: Path):
     service = LLMService(**paths)
     assert service.config.runtime.request_input_token_budget == 50000
     assert service.config.runtime.agent_record_retention_days == 14
+
+
+async def test_epoch_sticky_tools_persist_across_turns_and_keep_system_prompt_stable(
+    tmp_path: Path, patch_provider_builder, monkeypatch
+):
+    from quickquip.llm.tools import LLMToolCall
+
+    service = _store_service(tmp_path)
+    monkeypatch.setattr(service.config.tools, "discovery_mode", "on")
+
+    seen_requests: list[LLMRequest] = []
+
+    class _StickyToolClient:
+        async def complete(self, request: LLMRequest) -> LLMResponse:
+            seen_requests.append(request)
+            if len(seen_requests) == 1:
+                return LLMResponse(
+                    text="",
+                    model=request.model,
+                    tool_calls=[
+                        LLMToolCall(
+                            id="call_search_1",
+                            name="tool_search",
+                            arguments_json='{"query": "select:get_llm_status"}',
+                        )
+                    ],
+                )
+            return LLMResponse(text="完成", model=request.model)
+
+    patch_provider_builder(lambda provider: _StickyToolClient())
+
+    await service.generate_reply(
+        group_id=1001, user_id="2002", sender_name="镜子", prompt="第一轮加载状态工具"
+    )
+    await service.generate_reply(
+        group_id=1001, user_id="2002", sender_name="镜子", prompt="第二轮继续"
+    )
+
+    assert len(seen_requests) == 3
+    turn1_start, turn1_after_search, turn2_start = seen_requests
+    assert "get_llm_status" not in [s.name for s in turn1_start.tools]
+    assert "get_llm_status" in [s.name for s in turn1_after_search.tools]
+    assert [s.name for s in turn2_start.tools] == [s.name for s in turn1_after_search.tools]
+    # system_prompt 必须逐字节保持不变（不混入粘性工具）
+    assert turn2_start.system_prompt == turn1_start.system_prompt
+    # 第二轮尾部信封延迟列表不再重复公告已粘性工具
+    assert "get_llm_status" not in turn2_start.messages[-1].content
+
+    # 清空上下文后重置纪元，粘性工具清零
+    service.clear_group_context(1001)
+    await service.generate_reply(
+        group_id=1001, user_id="2002", sender_name="镜子", prompt="清空后第三轮"
+    )
+    assert "get_llm_status" not in [s.name for s in seen_requests[-1].tools]
+
+
+def test_sticky_tools_cap_and_deferred_names_stay_complementary(tmp_path: Path, monkeypatch):
+    service = _store_service(tmp_path)
+    monkeypatch.setattr(service.config.tools, "discovery_mode", "on")
+    always = service._get_always_loaded_tool_names(chat_type="group", provider_id="fake")
+    # 设总上限为常驻数 + 1，传入 2 个粘性工具：第 1 个装载，第 2 个因超限回到延迟名单
+    monkeypatch.setattr(service.config.tools, "discovery_max_loaded_tools", len(always) + 1)
+    extras = ["get_llm_status", "search_recent_messages", "nonexistent_tool"]
+    specs = service._get_enabled_tool_specs(
+        chat_type="group", provider_id="fake", extra_loaded_names=extras
+    )
+    loaded_names = {s.name for s in specs}
+    deferred = service._get_deferred_tool_names(
+        chat_type="group", provider_id="fake", extra_loaded_names=extras
+    )
+    assert "get_llm_status" in loaded_names
+    assert "get_llm_status" not in deferred
+    assert "search_recent_messages" not in loaded_names
+    assert "search_recent_messages" in deferred
+    assert "nonexistent_tool" not in loaded_names
