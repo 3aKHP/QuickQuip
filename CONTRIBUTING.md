@@ -24,7 +24,7 @@ uv pip install -e .
 .venv/Scripts/python.exe -m pytest -n auto
 ```
 
-运行命令使用本平台虚拟环境内的 Python；也可激活虚拟环境后使用 `python`。
+运行命令使用本平台虚拟环境内的 Python；也可激活虚拟环境后使用 `python`。安装下方 `pre-push` 钩子或开发 Web Admin 前端时，还需准备 Node.js（版本见根目录 [`.node-version`](.node-version)）与 `pnpm`，并在 `frontend/` 目录下执行一次 `pnpm install`（详见 [`frontend/README.md`](frontend/README.md)）。
 
 **Windows AI 协作配置：** 仓库里的 `CLAUDE.md` 使用 Linux 命令。Windows 协作者可以复制平台覆盖模板，再按本机环境调整：
 

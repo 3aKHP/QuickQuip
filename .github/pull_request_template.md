@@ -1,7 +1,7 @@
 <!--
-  一个 PR 只承载一个主要意图（docs/dev/branching.md「硬规则」）。
+  一个 PR 只承载一个主要意图（docs/dev/branching.md“硬规则”）。
 
-  分级——保留适用的一项（docs/dev/branching.md「变更分级工作流」）：
+  分级——保留适用的一项（docs/dev/branching.md“变更分级工作流”）：
     Quick PR        Bot Review 一轮
     Standard PR     未参与实现的独立 CR + Bot Review，并行
     Huge PR         先在本地私有工作区写专题计划；全量 Tier 2 Deep-CR
@@ -16,7 +16,7 @@
   引入或调整项目概念、架构约束时，在 Summary 或 Notes 中关联对应术语或 ADR。
 
   feat/fix/refactor：把本地 changelog 草稿正文附进本 PR 描述，
-  便于 review（CONTRIBUTING.md「CHANGELOG 流程」）。
+  便于 review（CONTRIBUTING.md“CHANGELOG 流程”）。
 -->
 
 Grade: Quick PR

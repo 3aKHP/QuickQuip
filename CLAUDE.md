@@ -29,13 +29,13 @@ QuickQuip 是基于 NoneBot2 + OneBot V11 的轻量 QQ 群聊机器人。规则�
 
 - **Linux 环境（WSL2）**。Shell 用 bash，路径分隔符 `/`
 - **环境与依赖用 uv 管理**。`.venv` 由 `uv venv` 创建（Linux 布局 `.venv/bin/`），依赖用 `uv pip install` 安装。**日常运行直接用 `.venv/bin/python`**（或激活 `.venv/bin/activate` 后直接 `python`）；不把 `uv run` 用于日常命令，以免触发 uv 项目模式生成 `uv.lock`（已永久 gitignore）。跨平台 pre-push hook 例外，仍用 `uv run`
-- **项目采用 src layout**：源码位于 `src/quickquip/` 和 `src/plugins/`，开发时需 `uv pip install -e .`（可编辑安装）或设 `PYTHONPATH=src`
+- **项目采用 src layout**：源码位于 `src/quickquip/` 和 `src/plugins/`，首次搭建环境时按下方“常用命令”完成可编辑安装（或设 `PYTHONPATH=src`）
 - **不主动 push**。即使刚 commit 完，也等用户明确说“请推”
 - **不 squash merge**。合并 PR 用 `gh pr merge --merge`，保留完整分支历史
 
 ### 私有目录边界
 
-- `prod.example/` 分发生产配置模板；`prod/` 保存真实配置与登录资产，不提交。通用程序从受追踪的 `scripts/` 执行。
+- `prod.example/` 分发生产配置模板；`prod/` 保存私有 Compose 编排、`sendkey.env` 及可选私有部署钩子，不提交版本控制（OneBot 登录态由外部协议端独立维护）。通用程序从受追踪的 `scripts/` 执行。
 - 根目录 `.env` 是 QuickQuip 应用层唯一涉密凭证来源；`prod/sendkey.env` 只供运维巡检/通知脚本使用。
 - 本地开发辅助目录（草稿/沙箱/私有材料）由开发者自行建立并排除，机制见 [`CONTRIBUTING.md`](CONTRIBUTING.md)。
 
@@ -75,25 +75,27 @@ uv pip install -e .                                # 可编辑安装（src layou
 ```
 src/
 ├── quickquip/
-│   ├── chat/          # 规则引擎：text_rules, repeat_detector, chain_game, context_rules, wordcloud, daily_summary/briefing, awakening/
-│   ├── common/        # 共享工具：rate_limit, persistence, message_deduper, sensitive_filter
-│   ├── llm/           # LLM 运行时：provider, service, config, store, mcp, skills, tool_registry, tool_loop, prompting, settings
-│   ├── games/         # 游戏系统：niuniu, blackjack, russian_roulette, number_bomb, economy, scores, registry
-│   ├── generation/    # 多模态生成：image, audio, music, asr, svg
-│   ├── tieba/         # 贴吧爬虫（Playwright）
-│   ├── search/        # 联网搜索（SearXNG）
-│   ├── sts/           # 杀戮尖塔公式化回复（lexicon、formulas）
+│   ├── chat/              # 规则引擎：text_rules, repeat_detector, chain_game, context_rules, wordcloud, daily_summary/briefing, awakening/
+│   ├── common/            # 共享工具：rate_limit, persistence, message_deduper, sensitive_filter
+│   ├── configuration/     # 受管配置归属、逻辑快照、字段合并与持久化写入
+│   ├── config_workspace/  # qqconf 本地配置工作副本展开、合并与恢复
+│   ├── config_sync/       # qqsync 跨环境配置同步、生效与部署事务
+│   ├── environment/       # 根 .env 环境变量目录、只写更新与 env-agent 通信
+│   ├── llm/               # LLM 运行时：provider, service, config, store, mcp, skills, tool_registry, tool_loop, prompting, settings
+│   ├── games/             # 游戏系统：niuniu, blackjack, russian_roulette, number_bomb, economy, scores, registry
+│   ├── generation/        # 多模态生成：image, audio, music, asr, svg
+│   ├── tieba/             # 贴吧爬虫（Playwright）
+│   ├── search/            # 联网搜索（SearXNG）
+│   ├── sts/               # 杀戮尖塔公式化回复（lexicon、formulas）
 │   ├── adapters/nonebot/  # NoneBot2 适配层：matcher 注册、命令处理、scheduler、lifecycle
-│   └── app/           # 应用组装：管线实例化、Web Admin（FastAPI + Vue 3 SPA）
-└── plugins/           # NoneBot2 插件入口 shim，re-export 指向 quickquip.*
+│   └── app/               # 应用组装：管线实例化、Web Admin（FastAPI + Vue 3 SPA）
+└── plugins/               # NoneBot2 插件入口 shim，re-export 指向 quickquip.*
 ```
 
 三层结构：
-- `quickquip/chat|common|llm|games|generation|tieba|search` — 框架无关的业务逻辑（包路径不变，`from quickquip.xxx import ...`）
+- `quickquip/{chat,common,configuration,config_workspace,config_sync,environment,llm,games,generation,tieba,search,sts}` — 框架无关的业务逻辑（`from quickquip.xxx import ...`）
 - `quickquip/adapters/nonebot/` — NoneBot2 handler 注册（直接 import `nonebot`，与业务层隔离）
 - `plugins/` — NoneBot2 插件入口 shim，每个文件只是 re-export 指向 `quickquip.*`
-
-开发环境需先运行 `uv pip install -e .`（可编辑安装），让 Python 能解析 `src/` 下的包。
 
 消息流：`NoneBot2 event → group_messages → resolve_reply()`（规则链：repeat → good_girl_chain → custom_chain_games → games registry → text_rules → context_rules → timezone → STS card_le（链尾，规则开关与限频预检通过后才匹配，不得抢占时区等具体规则）），每条经 `rule_switch.is_enabled()` 和 `rate_limit.allow()` 检查。LLM 触发时走 `llm_service.generate_reply()`。
 
