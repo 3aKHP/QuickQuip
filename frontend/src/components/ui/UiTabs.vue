@@ -1,5 +1,5 @@
 <template>
-  <div ref="rootRef" class="ui-tabs" role="tablist" :aria-label="ariaLabel">
+  <div ref="rootRef" class="ui-tabs" :class="{ 'has-indicator': indicator.ready }" role="tablist" :aria-label="ariaLabel">
     <div
       v-if="indicator.ready"
       class="ui-tabs__indicator"
@@ -62,6 +62,7 @@ const rootRef = ref<HTMLElement | null>(null)
 const itemMap = new Map<string, HTMLElement>()
 const btnMap = new Map<string, HTMLButtonElement>()
 const indicator = reactive({ ready: false, animated: false, x: 0, y: 0, w: 0, h: 0 })
+let unmounted = false
 
 function setItemRef(key: string, el: Element | ComponentPublicInstance | null) {
   if (el instanceof HTMLElement) itemMap.set(key, el)
@@ -79,21 +80,20 @@ const indicatorStyle = computed(() => ({
   height: `${indicator.h}px`,
 }))
 
-function measure() {
+function measure(animate = true) {
+  if (unmounted) return
   const item = itemMap.get(props.modelValue)
-  if (!item) {
+  if (!item || item.offsetWidth === 0) {
     indicator.ready = false
     return
   }
   const wasReady = indicator.ready
+  indicator.animated = animate && wasReady
   indicator.x = item.offsetLeft
   indicator.y = item.offsetTop
   indicator.w = item.offsetWidth
   indicator.h = item.offsetHeight
   indicator.ready = true
-  if (wasReady && !indicator.animated) {
-    indicator.animated = true
-  }
 }
 
 function select(key: string) {
@@ -119,18 +119,21 @@ function onKeydown(e: KeyboardEvent, idx: number) {
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
-  nextTick(measure)
-  document.fonts?.ready?.then(() => nextTick(measure)).catch(() => {})
+  nextTick(() => measure(false))
+  document.fonts?.ready?.then(() => {
+    if (!unmounted) nextTick(() => measure(false))
+  }).catch(() => {})
   if (rootRef.value && typeof ResizeObserver !== 'undefined') {
-    resizeObserver = new ResizeObserver(() => measure())
+    resizeObserver = new ResizeObserver(() => measure(false))
     resizeObserver.observe(rootRef.value)
   }
 })
 
-watch(() => props.modelValue, () => nextTick(measure))
-watch(() => props.tabs, () => nextTick(measure), { deep: true })
+watch(() => props.modelValue, () => nextTick(() => measure(true)))
+watch(() => props.tabs, () => nextTick(() => measure(false)), { deep: true })
 
 onUnmounted(() => {
+  unmounted = true
   resizeObserver?.disconnect()
 })
 </script>
@@ -160,9 +163,9 @@ onUnmounted(() => {
 
 .ui-tabs__indicator--animated {
   transition:
-    transform var(--qq-transition-slow),
-    width var(--qq-transition-slow),
-    height var(--qq-transition-slow);
+    transform var(--qq-transition-spring),
+    width var(--qq-transition-spring),
+    height var(--qq-transition-spring);
 }
 
 .ui-tabs__item {
@@ -210,6 +213,12 @@ onUnmounted(() => {
   color: var(--qq-text);
 }
 
+.ui-tabs:not(.has-indicator) .ui-tabs__item--active {
+  border-radius: calc(var(--qq-radius-card) - 3px);
+  background: var(--qq-surface);
+  box-shadow: var(--qq-shadow-card);
+}
+
 .ui-tabs__sub {
   font-size: var(--qq-text-xs);
   color: var(--qq-text-quiet);
@@ -220,8 +229,10 @@ onUnmounted(() => {
     transition: none;
   }
 }
+</style>
 
-:global(html[data-motion="reduced"]) .ui-tabs__indicator--animated {
+<style>
+html[data-motion="reduced"] .ui-tabs__indicator--animated {
   transition: none;
 }
 </style>

@@ -140,13 +140,16 @@
   --qq-text-2xl: 28px;
   --qq-text-3xl: 36px;
 
-  /* ── Typography ── */
-  --qq-font-base: "Inter", "Segoe UI", "Noto Sans SC", "Source Han Sans SC",
-                  "Microsoft YaHei UI", "PingFang SC", "Hiragino Sans GB",
+  /* ── Typography（英文/数字 Google Sans Flex + 中文 Noto Sans SC 自托管；等宽字体独立）── */
+  --qq-font-base: "Google Sans Flex Variable", "Google Sans",
+                  "Noto Sans SC Variable", "Noto Sans SC",
+                  "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Source Han Sans SC",
+                  "Microsoft YaHei UI", "Hiragino Sans GB",
                   system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
-  --qq-font-display: "Inter", "Segoe UI Semibold", "Segoe UI", "Noto Sans SC",
-                     "Source Han Sans SC", "Microsoft YaHei UI", "PingFang SC",
-                     system-ui, sans-serif;
+  --qq-font-display: "Google Sans Flex Variable", "Google Sans",
+                     "Noto Sans SC Variable", "Noto Sans SC",
+                     "PingFang SC", "HarmonyOS Sans SC", "MiSans", "Source Han Sans SC",
+                     "Microsoft YaHei UI", system-ui, sans-serif;
   --qq-font-mono: "JetBrains Mono", "SF Mono", "Cascadia Code", Consolas,
                   "Fira Code", "Noto Sans Mono CJK SC", "Microsoft YaHei UI",
                   monospace;
@@ -156,8 +159,10 @@
   --qq-line-base: 1.6;
   --qq-line-mono: 1.55;
 
-  /* ── Transitions（一次性过渡 ease-out；循环动画 linear / ease-in-out）── */
+  /* ── Transitions（M3 Expressive 双轨：效果用单调 ease-out，空间位移用弹簧 spring；循环用 linear）── */
   --qq-ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --qq-ease-spring: cubic-bezier(0.34, 1.28, 0.64, 1);
+  --qq-ease-spring-soft: cubic-bezier(0.22, 1.14, 0.36, 1);
   --qq-ease-loop: linear;
   --qq-ease-pulse: ease-in-out;
   --qq-ease-step: steps(4, end);
@@ -165,6 +170,15 @@
   --qq-transition-fast: 120ms var(--qq-ease-out);
   --qq-transition-base: 150ms var(--qq-ease-out);
   --qq-transition-slow: 240ms var(--qq-ease-out);
+  --qq-transition-spring-fast: 200ms var(--qq-ease-spring);
+  --qq-transition-spring: 260ms var(--qq-ease-spring);
+  --qq-transition-spring-soft: 320ms var(--qq-ease-spring-soft);
+
+  /* ── Tactile Ripple & Specular Glow（克制触觉涟漪与指针追光描边）── */
+  --qq-ripple-color: rgba(18, 183, 245, 0.22);
+  --qq-ripple-on-solid: rgba(255, 255, 255, 0.28);
+  --qq-specular-border: rgba(18, 183, 245, 0.42);
+  --qq-specular-sheen: rgba(18, 183, 245, 0.06);
 
   /* ── Layout ── */
   --qq-domain-rail-width: 72px;
@@ -352,4 +366,9 @@
 
   --qq-trace-request: rgba(245, 158, 11, 0.34);
   --qq-trace-response: rgba(34, 211, 238, 0.34);
+
+  --qq-ripple-color: rgba(56, 208, 248, 0.24);
+  --qq-ripple-on-solid: rgba(255, 255, 255, 0.26);
+  --qq-specular-border: rgba(56, 208, 248, 0.48);
+  --qq-specular-sheen: rgba(56, 208, 248, 0.08);
 }

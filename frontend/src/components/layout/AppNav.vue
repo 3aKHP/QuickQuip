@@ -22,10 +22,18 @@
         </a>
       </router-link>
 
-      <nav class="domain-rail__items" aria-label="工作域">
+      <nav ref="domainNavRef" class="domain-rail__items" :class="{ 'has-indicator': domainInd.ready }" aria-label="工作域">
+        <div
+          v-if="domainInd.ready"
+          class="domain-rail__indicator"
+          :class="{ 'domain-rail__indicator--animated': domainInd.animated }"
+          :style="domainIndicatorStyle"
+          aria-hidden="true"
+        />
         <button
           v-for="section in sections"
           :key="section.key"
+          :ref="(el) => setDomainBtnRef(section.key, el)"
           type="button"
           class="domain-btn"
           :class="{ active: activeSectionKey === section.key }"
@@ -40,7 +48,7 @@
       </nav>
 
       <div class="domain-rail__tools">
-        <button type="button" class="rail-tool" :title="themeLabel" :aria-label="themeLabel" @click="$emit('toggleTheme')">
+        <button type="button" class="rail-tool" :title="themeLabel" :aria-label="themeLabel" @click="$emit('toggleTheme', $event)">
           <Transition name="icon-swap" mode="out-in">
             <UiIcon :key="themeIcon" :name="themeIcon" :size="18" />
           </Transition>
@@ -73,7 +81,14 @@
         <p>{{ activeSection?.description || '选择一个工作域继续操作' }}</p>
       </div>
 
-      <nav class="section-panel__nav" aria-label="当前工作域页面">
+      <nav ref="pageNavRef" class="section-panel__nav" :class="{ 'has-indicator': pageInd.ready }" aria-label="当前工作域页面">
+        <div
+          v-if="pageInd.ready"
+          class="section-panel__indicator"
+          :class="{ 'section-panel__indicator--animated': pageInd.animated }"
+          :style="pageIndicatorStyle"
+          aria-hidden="true"
+        />
         <router-link
           v-for="item in activeItems"
           :key="item.key"
@@ -82,6 +97,7 @@
           v-slot="{ href, navigate, isActive }"
         >
           <a
+            :ref="(el) => setPageLinkRef(item.path, el)"
             :href="href"
             class="page-link"
             :class="{ active: isActive }"
@@ -105,7 +121,7 @@
       <span class="mobile-bar__title">{{ mobileTitle }}</span>
     </span>
     <div class="mobile-bar__actions">
-      <button type="button" class="mobile-bar__theme-btn" :aria-label="themeLabel" @click="$emit('toggleTheme')">
+      <button type="button" class="mobile-bar__theme-btn" :aria-label="themeLabel" @click="$emit('toggleTheme', $event)">
         <Transition name="icon-swap" mode="out-in">
           <UiIcon :key="themeIcon" :name="themeIcon" :size="18" />
         </Transition>
@@ -193,7 +209,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onBeforeUnmount, ref, watch } from 'vue'
+import { computed, nextTick, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import UiIcon from '../ui/UiIcon.vue'
 import { useMotionPrefs } from '../../composables/useMotionPrefs'
@@ -209,7 +226,7 @@ const props = defineProps<{
 
 defineEmits<{
   logout: []
-  toggleTheme: []
+  toggleTheme: [event?: MouseEvent]
 }>()
 
 const route = useRoute()
@@ -217,6 +234,68 @@ const router = useRouter()
 const { lowMotion, toggleLowMotion } = useMotionPrefs()
 const drawerOpen = ref(false)
 const mobileOpenSections = ref(new Set<string>())
+
+// 物理弹簧滑动指示器：左侧域轨 + 二级页面导航
+const domainNavRef = ref<HTMLElement | null>(null)
+const pageNavRef = ref<HTMLElement | null>(null)
+const domainBtnMap = new Map<string, HTMLElement>()
+const pageLinkMap = new Map<string, HTMLElement>()
+
+const domainInd = reactive({ ready: false, animated: false, x: 0, y: 0, w: 0, h: 0 })
+const pageInd = reactive({ ready: false, animated: false, x: 0, y: 0, w: 0, h: 0 })
+
+function setDomainBtnRef(key: string, el: Element | ComponentPublicInstance | null) {
+  if (el instanceof HTMLElement) domainBtnMap.set(key, el)
+  else domainBtnMap.delete(key)
+}
+
+function setPageLinkRef(path: string, el: Element | ComponentPublicInstance | null) {
+  if (el instanceof HTMLElement) pageLinkMap.set(path, el)
+  else pageLinkMap.delete(path)
+}
+
+const domainIndicatorStyle = computed(() => ({
+  transform: `translate(${domainInd.x}px, ${domainInd.y}px)`,
+  width: `${domainInd.w}px`,
+  height: `${domainInd.h}px`,
+}))
+
+const pageIndicatorStyle = computed(() => ({
+  transform: `translate(${pageInd.x}px, ${pageInd.y}px)`,
+  width: `${pageInd.w}px`,
+  height: `${pageInd.h}px`,
+}))
+
+function measureDomain(animate = true) {
+  const el = domainBtnMap.get(activeSectionKey.value)
+  if (!el || el.offsetHeight === 0) {
+    domainInd.ready = false
+    return
+  }
+  const wasReady = domainInd.ready
+  domainInd.animated = animate && wasReady
+  domainInd.x = el.offsetLeft
+  domainInd.y = el.offsetTop
+  domainInd.w = el.offsetWidth
+  domainInd.h = el.offsetHeight
+  domainInd.ready = true
+}
+
+function measurePage(animate = true) {
+  const path = activeItem.value?.path
+  const el = path ? pageLinkMap.get(path) : undefined
+  if (!el || el.offsetHeight === 0) {
+    pageInd.ready = false
+    return
+  }
+  const wasReady = pageInd.ready
+  pageInd.animated = animate && wasReady
+  pageInd.x = el.offsetLeft
+  pageInd.y = el.offsetTop
+  pageInd.w = el.offsetWidth
+  pageInd.h = el.offsetHeight
+  pageInd.ready = true
+}
 
 const activeItem = computed(() => {
   return props.items.find(item => item.path === route.path) || props.items[0]
@@ -287,12 +366,56 @@ watch(drawerOpen, (open) => {
   }
 })
 
-watch(activeSectionKey, (sectionKey) => {
-  mobileOpenSections.value = new Set([sectionKey])
-}, { immediate: true })
+let navUnmounted = false
+
+watch(
+  [activeSectionKey, () => activeItem.value?.path],
+  ([sectionKey], [prevSectionKey]) => {
+    const sectionChanged = prevSectionKey !== undefined && sectionKey !== prevSectionKey
+    if (prevSectionKey === undefined || sectionChanged) {
+      mobileOpenSections.value = new Set([sectionKey])
+    }
+    nextTick(() => {
+      if (navUnmounted) return
+      measureDomain(sectionChanged)
+      // 同域切页启用弹簧滑行；跨域或首屏渲染直接落位
+      measurePage(prevSectionKey !== undefined && !sectionChanged)
+    })
+  },
+  { immediate: true },
+)
+
+let navResizeObserver: ResizeObserver | null = null
+
+onMounted(() => {
+  nextTick(() => {
+    if (navUnmounted) return
+    measureDomain(false)
+    measurePage(false)
+  })
+  document.fonts?.ready?.then(() => {
+    if (navUnmounted) return
+    nextTick(() => {
+      if (navUnmounted) return
+      measureDomain(false)
+      measurePage(false)
+    })
+  }).catch(() => {})
+  if (typeof ResizeObserver !== 'undefined') {
+    navResizeObserver = new ResizeObserver(() => {
+      if (navUnmounted) return
+      measureDomain(false)
+      measurePage(false)
+    })
+    if (domainNavRef.value) navResizeObserver.observe(domainNavRef.value)
+    if (pageNavRef.value) navResizeObserver.observe(pageNavRef.value)
+  }
+})
 
 onBeforeUnmount(() => {
+  navUnmounted = true
   window.removeEventListener('keydown', onDrawerKeydown)
+  navResizeObserver?.disconnect()
 })
 </script>
 
@@ -366,6 +489,7 @@ onBeforeUnmount(() => {
 }
 
 .domain-rail__items {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: var(--qq-gap-xs);
@@ -373,7 +497,29 @@ onBeforeUnmount(() => {
   padding: var(--qq-gap-xs);
 }
 
+.domain-rail__indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-shell-control-active);
+  box-shadow: inset 2.5px 0 0 var(--active-domain-color, var(--qq-primary));
+  backdrop-filter: blur(10px) saturate(1.14);
+  -webkit-backdrop-filter: blur(10px) saturate(1.14);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.domain-rail__indicator--animated {
+  transition:
+    transform var(--qq-transition-spring),
+    height var(--qq-transition-spring),
+    box-shadow var(--qq-transition-base);
+}
+
 .domain-btn {
+  position: relative;
+  z-index: 1;
   height: 58px;
   width: 100%;
   display: flex;
@@ -400,6 +546,9 @@ onBeforeUnmount(() => {
 
 .domain-btn.active {
   color: var(--domain-color, var(--qq-primary));
+}
+
+.domain-rail__items:not(.has-indicator) .domain-btn.active {
   background: var(--qq-shell-control-active);
   box-shadow: inset 2px 0 0 var(--domain-color, var(--qq-primary));
   backdrop-filter: blur(10px) saturate(1.14);
@@ -515,6 +664,7 @@ onBeforeUnmount(() => {
 }
 
 .section-panel__nav {
+  position: relative;
   display: flex;
   flex-direction: column;
   gap: 3px;
@@ -522,8 +672,42 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
+.section-panel__indicator {
+  position: absolute;
+  top: 0;
+  left: 0;
+  border-radius: var(--qq-radius-sm);
+  background: var(--qq-shell-control-active);
+  border: 1px solid var(--qq-shell-glass-border);
+  box-shadow: inset 0 1px 0 var(--qq-shell-glass-highlight);
+  backdrop-filter: blur(10px) saturate(1.14);
+  -webkit-backdrop-filter: blur(10px) saturate(1.14);
+  pointer-events: none;
+  z-index: 0;
+}
+
+.section-panel__indicator::before {
+  content: "";
+  position: absolute;
+  left: 3px;
+  top: 50%;
+  width: 3px;
+  height: 16px;
+  border-radius: var(--qq-radius-full);
+  background: var(--active-domain-color, var(--qq-primary));
+  transform: translateY(-50%);
+}
+
+.section-panel__indicator--animated {
+  transition:
+    transform var(--qq-transition-spring),
+    width var(--qq-transition-spring),
+    height var(--qq-transition-spring);
+}
+
 .page-link {
   position: relative;
+  z-index: 1;
   box-sizing: border-box;
   width: 100%;
   height: 38px;
@@ -544,7 +728,7 @@ onBeforeUnmount(() => {
   transition: color var(--qq-transition-fast), background var(--qq-transition-fast);
 }
 
-/* 统一单条左侧指示条：悬停淡现、选中加粗染域色 */
+/* 悬停淡现指示条；选中态在滑动指示器就绪后由单一物理滑块接管 */
 .page-link::before {
   content: "";
   position: absolute;
@@ -564,7 +748,7 @@ onBeforeUnmount(() => {
   background: var(--qq-shell-control-hover);
 }
 
-.page-link:hover::before {
+.page-link:hover:not(.active)::before {
   transform: translateY(-50%) scaleY(0.75);
   opacity: 0.45;
 }
@@ -576,6 +760,9 @@ onBeforeUnmount(() => {
 
 .page-link.active {
   color: var(--qq-text);
+}
+
+.section-panel__nav:not(.has-indicator) .page-link.active {
   background: var(--qq-shell-control-active);
   border: 1px solid var(--qq-shell-glass-border);
   box-shadow: inset 0 1px 0 var(--qq-shell-glass-highlight);
@@ -583,7 +770,7 @@ onBeforeUnmount(() => {
   -webkit-backdrop-filter: blur(10px) saturate(1.14);
 }
 
-.page-link.active::before {
+.section-panel__nav:not(.has-indicator) .page-link.active::before {
   transform: translateY(-50%) scaleY(1);
   opacity: 1;
 }
@@ -802,5 +989,19 @@ onBeforeUnmount(() => {
 .drawer-action:disabled {
   opacity: 0.45;
   cursor: not-allowed;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .domain-rail__indicator--animated,
+  .section-panel__indicator--animated {
+    transition: none;
+  }
+}
+</style>
+
+<style>
+html[data-motion="reduced"] .domain-rail__indicator--animated,
+html[data-motion="reduced"] .section-panel__indicator--animated {
+  transition: none;
 }
 </style>

@@ -78,16 +78,36 @@
   }
 }
 
+/* ── View Transitions API（明暗主题点击原点圆形扩散揭幕）── */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+::view-transition-old(root) {
+  z-index: 1;
+}
+
+::view-transition-new(root) {
+  z-index: 2;
+}
+
 /* ── Toast ── */
-.toast-enter-active,
+.toast-enter-active {
+  transition:
+    opacity var(--qq-transition-base),
+    transform var(--qq-transition-spring);
+}
+
 .toast-leave-active {
-  transition: opacity var(--qq-transition-base), transform var(--qq-transition-base);
+  transition: opacity var(--qq-transition-fast), transform var(--qq-transition-fast);
 }
 
 .toast-enter-from,
 .toast-leave-to {
   opacity: 0;
-  transform: translate(-50%, 8px);
+  transform: translate(-50%, 10px) scale(0.96);
 }
 
 /* ── Slide-up（抽屉 / 模态）── */
@@ -122,7 +142,7 @@
   transform: translateX(-100%);
 }
 
-/* ── Modal（弹窗淡入 + 轻微缩放）── */
+/* ── Modal（弹窗淡入 + 轻微弹簧缩放）── */
 .modal-fade-enter-active,
 .modal-fade-leave-active {
   transition: opacity 160ms var(--qq-ease-out);
@@ -131,6 +151,42 @@
 .modal-fade-enter-from,
 .modal-fade-leave-to {
   opacity: 0;
+}
+
+/* ── Command Palette（遮罩单调淡入 + 面板弹簧入场）── */
+.palette-fade-enter-active {
+  transition: opacity 150ms var(--qq-ease-out);
+}
+
+.palette-fade-leave-active {
+  transition: opacity 120ms var(--qq-ease-out);
+}
+
+.palette-fade-enter-active .cmd-palette__panel {
+  transition:
+    opacity 150ms var(--qq-ease-out),
+    transform var(--qq-transition-spring);
+}
+
+.palette-fade-leave-active .cmd-palette__panel {
+  transition:
+    opacity 110ms var(--qq-ease-out),
+    transform 110ms var(--qq-ease-out);
+}
+
+.palette-fade-enter-from,
+.palette-fade-leave-to {
+  opacity: 0;
+}
+
+.palette-fade-enter-from .cmd-palette__panel {
+  opacity: 0;
+  transform: translateY(-10px) scale(0.97);
+}
+
+.palette-fade-leave-to .cmd-palette__panel {
+  opacity: 0;
+  transform: translateY(-6px) scale(0.985);
 }
 
 /* ── List transitions ── */
@@ -159,22 +215,27 @@
   transition: transform var(--qq-transition-slow);
 }
 
-button:hover .qq-ico--spin,
+button:hover:not(:disabled) .qq-ico--spin,
 a:hover .qq-ico--spin {
   transform: rotate(180deg);
 }
 
-button:hover .qq-ico--nudge,
+button:hover:not(:disabled) .qq-ico--nudge,
 a:hover .qq-ico--nudge {
   transform: translateX(2px);
 }
 
-/* ── Icon Swap（主题切换等图标替换：旋转 + 淡入）── */
-.icon-swap-enter-active,
+/* ── Icon Swap（主题切换等图标替换：弹簧旋转 + 淡入）── */
+.icon-swap-enter-active {
+  transition:
+    opacity 150ms var(--qq-ease-out),
+    transform 240ms var(--qq-ease-spring);
+}
+
 .icon-swap-leave-active {
   transition:
-    opacity 160ms var(--qq-ease-out),
-    transform 200ms var(--qq-ease-out);
+    opacity 120ms var(--qq-ease-out),
+    transform 140ms var(--qq-ease-out);
 }
 
 .icon-swap-enter-from {
@@ -221,6 +282,10 @@ a:hover .qq-ico--nudge {
   .drawer-fade-leave-active .drawer,
   .modal-fade-enter-active,
   .modal-fade-leave-active,
+  .palette-fade-enter-active,
+  .palette-fade-leave-active,
+  .palette-fade-enter-active .cmd-palette__panel,
+  .palette-fade-leave-active .cmd-palette__panel,
   .list-enter-active,
   .list-leave-active,
   .tab-pane-enter-active,
@@ -232,6 +297,13 @@ a:hover .qq-ico--nudge {
 
   .qq-ico {
     transition: none;
+  }
+
+  button:hover:not(:disabled) .qq-ico--spin,
+  a:hover .qq-ico--spin,
+  button:hover:not(:disabled) .qq-ico--nudge,
+  a:hover .qq-ico--nudge {
+    transform: none;
   }
 
   .route-trace {
@@ -251,6 +323,10 @@ html[data-motion="reduced"] .drawer-fade-enter-active .drawer,
 html[data-motion="reduced"] .drawer-fade-leave-active .drawer,
 html[data-motion="reduced"] .modal-fade-enter-active,
 html[data-motion="reduced"] .modal-fade-leave-active,
+html[data-motion="reduced"] .palette-fade-enter-active,
+html[data-motion="reduced"] .palette-fade-leave-active,
+html[data-motion="reduced"] .palette-fade-enter-active .cmd-palette__panel,
+html[data-motion="reduced"] .palette-fade-leave-active .cmd-palette__panel,
 html[data-motion="reduced"] .list-enter-active,
 html[data-motion="reduced"] .list-leave-active,
 html[data-motion="reduced"] .tab-pane-enter-active,
@@ -259,6 +335,13 @@ html[data-motion="reduced"] .icon-swap-enter-active,
 html[data-motion="reduced"] .icon-swap-leave-active,
 html[data-motion="reduced"] .qq-ico {
   transition: none;
+}
+
+html[data-motion="reduced"] button:hover:not(:disabled) .qq-ico--spin,
+html[data-motion="reduced"] a:hover .qq-ico--spin,
+html[data-motion="reduced"] button:hover:not(:disabled) .qq-ico--nudge,
+html[data-motion="reduced"] a:hover .qq-ico--nudge {
+  transform: none;
 }
 
 html[data-motion="reduced"] .route-trace {

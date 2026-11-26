@@ -1,10 +1,21 @@
 <template>
   <button
+    ref="btnRef"
     :class="classes"
     :type="type"
     :disabled="disabled || loading"
+    @pointerdown="spawnRipple"
     @click="$emit('click', $event)"
   >
+    <span v-if="ripples.length" class="ui-btn__ripples" aria-hidden="true">
+      <span
+        v-for="r in ripples"
+        :key="r.id"
+        class="ui-btn__ripple"
+        :style="{ left: `${r.x}px`, top: `${r.y}px`, width: `${r.size}px`, height: `${r.size}px` }"
+        @animationend="removeRipple(r.id)"
+      />
+    </span>
     <UiIcon v-if="loading" name="Loader2" :size="iconSize" class="ui-btn__loading spin" />
     <UiIcon v-else-if="icon" :name="icon" :size="iconSize" :motion="iconMotion" />
     <span v-if="$slots.default" class="ui-btn__text">
@@ -14,8 +25,16 @@
 </template>
 
 <script setup lang="ts">
-import { computed, useSlots } from 'vue'
+import { computed, onUnmounted, ref, useSlots } from 'vue'
 import UiIcon from './UiIcon.vue'
+import { useMotionPrefs } from '../../composables/useMotionPrefs'
+
+interface Ripple {
+  id: number
+  x: number
+  y: number
+  size: number
+}
 
 const props = withDefaults(defineProps<{
   variant?: 'default' | 'primary' | 'secondary' | 'danger' | 'ghost'
@@ -35,6 +54,12 @@ defineEmits<{
 }>()
 
 const slots = useSlots()
+const { lowMotion } = useMotionPrefs()
+const btnRef = ref<HTMLButtonElement | null>(null)
+const ripples = ref<Ripple[]>([])
+let nextRippleId = 0
+const cleanupTimers = new Map<number, ReturnType<typeof setTimeout>>()
+
 const iconSize = computed(() => props.size === 'sm' ? 14 : 16)
 const isIconOnly = computed(() => !slots.default && Boolean(props.icon || props.loading))
 
@@ -54,10 +79,59 @@ const classes = computed(() => [
   `ui-btn--${props.size}`,
   { 'ui-btn--icon-only': isIconOnly.value },
 ])
+
+function reducedMotion(): boolean {
+  if (lowMotion.value) return true
+  try {
+    return typeof window !== 'undefined' && window.matchMedia('(prefers-reduced-motion: reduce)').matches
+  } catch {
+    return false
+  }
+}
+
+function removeRipple(id: number) {
+  const timer = cleanupTimers.get(id)
+  if (timer) {
+    clearTimeout(timer)
+    cleanupTimers.delete(id)
+  }
+  const idx = ripples.value.findIndex(r => r.id === id)
+  if (idx >= 0) ripples.value.splice(idx, 1)
+}
+
+function spawnRipple(e: PointerEvent) {
+  if (props.disabled || props.loading || e.button !== 0 || reducedMotion()) return
+  const el = btnRef.value
+  if (!el) return
+  const rect = el.getBoundingClientRect()
+  if (rect.width <= 0 || rect.height <= 0) return
+
+  const x = e.clientX - rect.left
+  const y = e.clientY - rect.top
+  const maxDistX = Math.max(x, rect.width - x)
+  const maxDistY = Math.max(y, rect.height - y)
+  const size = Math.ceil(Math.hypot(maxDistX, maxDistY) * 2.05)
+
+  const id = ++nextRippleId
+  if (ripples.value.length >= 2) {
+    const oldest = ripples.value[0]
+    if (oldest) removeRipple(oldest.id)
+  }
+  ripples.value.push({ id, x, y, size })
+  // animationend 兜底清理（例如按钮在动画中卸载或隐藏）
+  cleanupTimers.set(id, setTimeout(() => removeRipple(id), 520))
+}
+
+onUnmounted(() => {
+  for (const timer of cleanupTimers.values()) clearTimeout(timer)
+  cleanupTimers.clear()
+})
 </script>
 
 <style scoped>
 .ui-btn {
+  position: relative;
+  overflow: hidden;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -78,8 +152,48 @@ const classes = computed(() => [
   user-select: none;
 }
 
+.ui-btn__ripples {
+  position: absolute;
+  inset: 0;
+  overflow: hidden;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.ui-btn__text,
+.ui-btn > svg {
+  position: relative;
+  z-index: 1;
+}
+
+.ui-btn__ripple {
+  position: absolute;
+  border-radius: 50%;
+  background: var(--qq-ripple-color);
+  transform: translate(-50%, -50%) scale(0);
+  opacity: 0.72;
+  animation: ui-btn-ripple 440ms var(--qq-ease-out) forwards;
+}
+
+.ui-btn--primary .ui-btn__ripple,
+.ui-btn--danger .ui-btn__ripple {
+  background: var(--qq-ripple-on-solid);
+}
+
+@keyframes ui-btn-ripple {
+  from {
+    transform: translate(-50%, -50%) scale(0);
+    opacity: 0.72;
+  }
+  to {
+    transform: translate(-50%, -50%) scale(1);
+    opacity: 0;
+  }
+}
+
 .ui-btn:active:not(:disabled) {
-  transform: translateY(1px) scale(0.97);
+  transform: translateY(1px) scale(0.975);
 }
 
 .ui-btn:disabled {
@@ -173,5 +287,17 @@ const classes = computed(() => [
 
 @keyframes spin {
   to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-btn__ripple {
+    display: none;
+  }
+}
+</style>
+
+<style>
+html[data-motion="reduced"] .ui-btn__ripple {
+  display: none;
 }
 </style>
