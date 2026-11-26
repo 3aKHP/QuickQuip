@@ -70,17 +70,17 @@ export interface GenerationLog {
 }
 
 export async function fetchSummaryGenerationLog(groupId: string, date: string): Promise<GenerationLog> {
-  return request(`/api/summaries/${groupId}/${date}/generation-log`)
+  return request(`/api/summaries/${encodeURIComponent(groupId)}/${encodeURIComponent(date)}/generation-log`)
 }
 
 export async function fetchSummaries(groupId: string): Promise<SummaryRow[]> {
-  return request(`/api/summaries/${groupId}`)
+  return request(`/api/summaries/${encodeURIComponent(groupId)}`)
 }
 
 export async function fetchSummaryDetail(groupId: string, date: string): Promise<SummaryDetail> {
-  return request(`/api/summaries/${groupId}/${date}`)
+  return request(`/api/summaries/${encodeURIComponent(groupId)}/${encodeURIComponent(date)}`)
 }
 
 export async function deleteSummary(groupId: string, date: string): Promise<{ ok: boolean }> {
-  return request(`/api/summaries/${groupId}/${date}`, { method: 'DELETE' })
+  return request(`/api/summaries/${encodeURIComponent(groupId)}/${encodeURIComponent(date)}`, { method: 'DELETE' })
 }

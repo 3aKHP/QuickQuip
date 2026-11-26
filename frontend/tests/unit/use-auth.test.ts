@@ -118,4 +118,27 @@ describe('useAuth', () => {
     expect(auth.authenticated.value).toBe(false)
     expect(auth.authError.value).toBe('')
   })
+
+  it('concurrent 401 responses keep the session expiry notice intact', async () => {
+    auth.authenticated.value = true
+    auth.authReady.value = true
+    auth.attachUnauthorizedHandler()
+    vi.stubGlobal('fetch', vi.fn(async () => ({
+      status: 401, ok: false, statusText: 'Unauthorized', text: async () => '',
+    } as unknown as Response)))
+
+    await Promise.all([
+      request('/api/one').catch(() => {}),
+      request('/api/two').catch(() => {}),
+    ])
+    expect(auth.authenticated.value).toBe(false)
+    expect(auth.authError.value).toBe('登录状态已失效，请重新登录。')
+  })
+
+  it('handleLogout 401 does not emit a contradictory logout failure toast', async () => {
+    auth.authenticated.value = true
+    mockLogout.mockRejectedValue({ status: 401 })
+    await auth.handleLogout()
+    expect(toastMsg.value).toBeNull()
+  })
 })

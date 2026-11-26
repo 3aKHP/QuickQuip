@@ -229,6 +229,7 @@ def get_group_settings(group_id: str):
 def put_group_settings(group_id: str, body: GroupSettingsBody, request: Request):
     _validate_group_id(group_id)
     payload = body.model_dump(exclude_unset=True)
+    updated_fields = sorted(payload.keys())
     history_enabled = payload.pop("history_enabled", None)
     if "history_enabled" in body.model_fields_set and group_id.startswith("private:"):
         raise HTTPException(status_code=422, detail="history_enabled is group-only")
@@ -238,13 +239,13 @@ def put_group_settings(group_id: str, body: GroupSettingsBody, request: Request)
         LLMStore(_DB).set_group_history_flag(group_id, history_enabled)
     if payload:
         get_config_service().update_group_override(group_id, **payload)
-    logger.info("group_settings updated: group=%s fields=%s", group_id, list(payload.keys()))
+    logger.info("group_settings updated: group=%s fields=%s", group_id, updated_fields)
     audit_logger.log(
         request,
         action="update",
         target_type="group_setting",
         target_id=group_id,
-        summary_after={"fields": list(payload.keys())},
+        summary_after={"fields": updated_fields},
     )
     return {"ok": True}
 

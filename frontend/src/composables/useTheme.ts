@@ -33,6 +33,8 @@ try {
   })
 } catch { /* ignore */ }
 
+let themeAnimTimer: number | null = null
+
 function toggleTheme() {
   theme.value = theme.value === 'light' ? 'dark' : 'light'
   try { localStorage.setItem(THEME_KEY, theme.value) } catch { /* ignore */ }
@@ -40,10 +42,14 @@ function toggleTheme() {
   const root = document.documentElement
   root.classList.add('theme-anim')
   applyTheme(theme.value)
-  window.setTimeout(() => root.classList.remove('theme-anim'), 320)
+  if (themeAnimTimer !== null) window.clearTimeout(themeAnimTimer)
+  themeAnimTimer = window.setTimeout(() => {
+    root.classList.remove('theme-anim')
+    themeAnimTimer = null
+  }, 320)
 }
 
-watch(theme, applyTheme)
+watch(theme, applyTheme, { flush: 'sync' })
 
 export function useTheme() {
   return { theme, loadTheme, toggleTheme }

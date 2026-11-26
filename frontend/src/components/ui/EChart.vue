@@ -37,6 +37,8 @@ const emit = defineEmits<{
 const el = ref<HTMLDivElement | null>(null)
 let chart: echartsApi.ECharts | null = null
 let resizeObserver: ResizeObserver | null = null
+let resizeRaf = 0
+let disposed = false
 
 /** 仅更新 cursor markLine 的数据位；未指定 id 的 option（无 cursor 系列）不受影响 */
 function applyCursor() {
@@ -57,23 +59,34 @@ function render() {
 }
 
 onMounted(async () => {
-  const { echarts } = await import('../../charts/echarts')
-  if (!el.value) return
+  let echarts: typeof echartsApi
+  try {
+    ({ echarts } = await import('../../charts/echarts'))
+  } catch {
+    return
+  }
+  if (disposed || !el.value) return
   chart = echarts.init(el.value)
   chart.on('click', params => emit('click', params))
   render()
-  if (props.plotClick) {
-    chart.getZr().on('click', (params: { offsetX?: number; offsetY?: number }) => {
-      if (!chart || params.offsetX == null || params.offsetY == null) return
-      try {
-        const point = chart.convertFromPixel({ seriesIndex: 0 }, [params.offsetX, params.offsetY])
-        if (point && Number.isFinite(point[0])) emit('plot-click', point[0])
-      } catch {
-        // 系列未渲染/坐标系不可转换时静默忽略（如空数据首帧）
+  chart.getZr().on('click', (params: { offsetX?: number; offsetY?: number }) => {
+    if (!props.plotClick || !chart || params.offsetX == null || params.offsetY == null) return
+    try {
+      const point = chart.convertFromPixel({ seriesIndex: 0 }, [params.offsetX, params.offsetY])
+      if (point && Number.isFinite(point[0])) emit('plot-click', point[0])
+    } catch {
+      // 系列未渲染/坐标系不可转换时静默忽略（如空数据首帧）
+    }
+  })
+  resizeObserver = new ResizeObserver(() => {
+    if (resizeRaf) return
+    resizeRaf = requestAnimationFrame(() => {
+      resizeRaf = 0
+      if (!disposed && chart && el.value && el.value.clientWidth > 0) {
+        chart.resize()
       }
     })
-  }
-  resizeObserver = new ResizeObserver(() => chart?.resize())
+  })
   resizeObserver.observe(el.value)
 })
 
@@ -81,6 +94,8 @@ watch(() => props.option, render)
 watch(() => props.cursorAt, applyCursor)
 
 onBeforeUnmount(() => {
+  disposed = true
+  if (resizeRaf) cancelAnimationFrame(resizeRaf)
   resizeObserver?.disconnect()
   chart?.dispose()
   chart = null

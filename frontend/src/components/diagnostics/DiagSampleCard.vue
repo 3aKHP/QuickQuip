@@ -8,6 +8,11 @@
       </div>
     </div>
 
+    <div v-if="providersError" class="error-block error-block--inline">
+      <span>加载 Provider 列表失败：{{ providersError }}</span>
+      <UiButton size="sm" variant="ghost" icon="RefreshCw" :loading="providersLoading" @click="loadProviders">重试</UiButton>
+    </div>
+
     <div class="sample-form">
       <div class="form-row">
         <div class="field">
@@ -46,6 +51,8 @@
       <div class="form-actions">
         <UiButton icon="Send" :loading="sampleLoading" :disabled="samplePending || !sample.provider_id || publishedRevision == null" @click="sendSample">发送一次请求</UiButton>
         <UiButton v-if="samplePending && !sampleLoading" icon="RefreshCw" @click="sampleTask.resume()">{{ sampleOperation ? '继续查询' : '恢复提交结果' }}</UiButton>
+        <UiButton v-if="samplePending && sampleOperation" variant="danger" size="sm" icon="X" :loading="sampleCancelling" @click="cancelSample">取消任务</UiButton>
+        <UiButton v-if="samplePending && !sampleLoading" variant="ghost" size="sm" icon="RotateCcw" @click="sampleTask.reset()">放弃等待</UiButton>
         <span v-if="sampleStatus" class="duration">{{ sampleStatus }}</span>
         <span v-if="sampleResult" class="duration">耗时 {{ sampleResult.duration_ms }}ms</span>
       </div>
@@ -78,13 +85,20 @@
               {{ call.state.toUpperCase() }}
             </UiTag>
             <span class="trace-meta">{{ call.method }} {{ call.url }}</span>
+            <UiButton size="sm" variant="ghost" icon="Copy" @click="copyText(`${call.method} ${call.url}`)">复制地址</UiButton>
           </div>
-          <details open>
+          <details>
             <summary>Request JSON · {{ call.request_bytes }} bytes</summary>
+            <div class="json-toolbar">
+              <UiButton size="sm" variant="ghost" icon="Copy" @click="copyText(call.request_text)">复制 Request</UiButton>
+            </div>
             <pre class="json-block">{{ call.request_text }}</pre>
           </details>
           <details>
             <summary>Response JSON · {{ call.response_bytes }} bytes</summary>
+            <div class="json-toolbar">
+              <UiButton size="sm" variant="ghost" icon="Copy" @click="copyText(call.response_text)">复制 Response</UiButton>
+            </div>
             <pre class="json-block">{{ call.response_text }}</pre>
           </details>
         </div>
@@ -101,16 +115,21 @@ import UiIcon from '../ui/UiIcon.vue'
 import UiInfoTip from '../ui/UiInfoTip.vue'
 import UiTag from '../ui/UiTag.vue'
 import { fetchProviders, runSampleRequest } from '../../api/diagnostics'
-import type { DiagnosticsProvider, SampleRequestResult } from '../../api/diagnostics'
+import type { DiagnosticOperation, DiagnosticsProvider, SampleRequestResult } from '../../api/diagnostics'
+import { cancelLlmConfigOperation } from '../../api/llmConfiguration'
 import { useDiagnosticTask } from '../../composables/useDiagnosticTask'
 import { formatVersionLabel } from '../../lib/llmConfig'
+import { toast } from '../../toast'
 
 const providers = ref<DiagnosticsProvider[]>([])
+const providersLoading = ref(false)
+const providersError = ref('')
 const publishedRevision = ref<number | null>(null)
 const publishedVersionText = ref('…')
 
-const sampleTask = useDiagnosticTask<SampleRequestResult>()
-const { loading: sampleLoading, error: sampleError, result: sampleResult,
+// 后端 probe/sample 默认超时 120s，前端观察窗略宽于后端以避免误报未确认
+const sampleTask = useDiagnosticTask<SampleRequestResult>(undefined, { intervalMs: 1000, timeoutMs: 130_000 })
+const { loading: sampleLoading, cancelling: sampleCancelling, error: sampleError, result: sampleResult,
   pending: samplePending, operation: sampleOperation, statusText: sampleStatus } = sampleTask
 
 interface SampleRequest {
@@ -118,7 +137,7 @@ interface SampleRequest {
   model: string
   system_prompt: string
   user_prompt: string
-  max_output_tokens: number
+  max_output_tokens: number | string
 }
 
 const sample = ref<SampleRequest>({
@@ -144,7 +163,26 @@ function prettyJson(obj: unknown): string {
   }
 }
 
+function coerceMaxOutputTokens(value: number | string): number {
+  const text = String(value ?? '').trim()
+  if (!text) return 512
+  const num = Number(text)
+  if (!Number.isFinite(num)) return 512
+  return Math.min(16384, Math.max(1, Math.round(num)))
+}
+
+async function copyText(text: string) {
+  try {
+    await navigator.clipboard.writeText(text)
+    toast('已复制')
+  } catch {
+    toast('复制失败，请手动选中复制', 'error')
+  }
+}
+
 async function loadProviders() {
+  providersLoading.value = true
+  providersError.value = ''
   try {
     const data = await fetchProviders()
     if (data?.providers) {
@@ -155,13 +193,18 @@ async function loadProviders() {
         sample.value.provider_id = providers.value[0].id
       }
     }
-  } catch {
+  } catch (e: unknown) {
     providers.value = []
+    providersError.value = e instanceof Error ? e.message : String(e)
+  } finally {
+    providersLoading.value = false
   }
 }
 
 async function sendSample() {
   if (samplePending.value || publishedRevision.value == null || !currentProvider.value) return
+  const maxOutputTokens = coerceMaxOutputTokens(sample.value.max_output_tokens)
+  sample.value.max_output_tokens = maxOutputTokens
   const body = {
     source: publishedRevision.value,
     request_id: crypto.randomUUID(),
@@ -170,9 +213,15 @@ async function sendSample() {
     system_prompt: sample.value.system_prompt,
     user_prompt: sample.value.user_prompt,
     stream: false,
-    max_output_tokens: sample.value.max_output_tokens,
+    max_output_tokens: maxOutputTokens,
   }
   await sampleTask.start(() => runSampleRequest(body))
+}
+
+async function cancelSample() {
+  await sampleTask.cancel(
+    id => cancelLlmConfigOperation(id) as Promise<DiagnosticOperation<SampleRequestResult>>,
+  )
 }
 
 onMounted(() => {
@@ -278,6 +327,12 @@ textarea {
   font-size: var(--qq-text-xs);
 }
 
+.trace-meta {
+  flex: 1;
+  min-width: 0;
+  word-break: break-all;
+}
+
 .error-block {
   padding: var(--qq-gap-sm);
   background: var(--qq-danger-soft);
@@ -285,6 +340,14 @@ textarea {
   border-radius: var(--qq-radius-sm);
   color: var(--qq-danger);
   font-size: var(--qq-text-sm);
+}
+
+.error-block--inline {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--qq-gap-sm);
+  flex-wrap: wrap;
 }
 
 .result-text,
@@ -302,10 +365,17 @@ textarea {
   white-space: pre-wrap;
 }
 
+.json-toolbar {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: var(--qq-gap-xs);
+}
+
 .json-block {
   margin: var(--qq-gap-xs) 0 0;
   padding: var(--qq-gap-sm);
-  overflow-x: auto;
+  max-height: 360px;
+  overflow: auto;
   color: var(--qq-text-muted);
   font-family: var(--qq-font-mono);
   font-size: var(--qq-text-xs);

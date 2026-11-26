@@ -34,6 +34,11 @@ export function useTiebaSync(onSynced: () => void) {
   }
 
   function clearLog() {
+    if (syncing.value) {
+      stream?.close()
+      stream = null
+      syncing.value = false
+    }
     syncLog.value = []
   }
 

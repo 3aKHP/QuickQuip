@@ -15,7 +15,7 @@
     <UiCard padding="md" shadow="sm" class="trace-shell">
       <div class="status-row">
         <label class="trace-switch">
-          <UiToggle :model-value="traceActive" :disabled="!traceFlagFile" @update:model-value="toggleTrace" />
+          <UiToggle :model-value="traceActive" :disabled="!traceFlagFile || togglingTrace" aria-label="切换 LLM Trace 采集开关" @update:model-value="toggleTrace" />
           <span>{{ traceActive ? '正在采集' : '采集已关闭' }}<UiInfoTip text="开关通过创建/删除开关文件（路径由环境变量 LLM_TRACE_FLAG_FILE 指定）控制全局采集：开启后每次 LLM HTTP 调用的完整请求与响应都会写入 data/llm_trace.db；未配置该环境变量时开关不可用。" /></span>
         </label>
         <UiTag size="sm" :variant="connected ? 'success' : 'warn'">
@@ -138,6 +138,9 @@ const filter = ref('')
 const stateFilter = ref('')
 const error = ref('')
 let source: EventSource | null = null
+let disposed = false
+let detailSeq = 0
+const togglingTrace = ref(false)
 
 const filteredCalls = computed(() => {
   const query = filter.value.trim().toLowerCase()
@@ -206,13 +209,15 @@ async function reload() {
   error.value = ''
   try {
     await loadStatus()
+    if (disposed) return
     await loadCalls()
+    if (disposed) return
     connect()
     if (selectedCallId.value) await selectCall(selectedCallId.value)
   } catch (e: unknown) {
-    error.value = (e as Error).message
+    if (!disposed) error.value = (e as Error).message
   } finally {
-    loading.value = false
+    if (!disposed) loading.value = false
   }
 }
 
@@ -221,6 +226,7 @@ async function loadMore() {
   loadingMore.value = true
   try {
     const data = await fetchTraceCalls(PAGE_SIZE, nextBeforeId.value)
+    if (disposed) return
     const known = new Set(calls.value.map(item => item.call_id))
     calls.value.push(...(data.calls || []).filter((item: TraceCallSummary) => !known.has(item.call_id)))
     nextBeforeId.value = data.next_before_id ?? null
@@ -232,29 +238,41 @@ async function loadMore() {
 }
 
 async function selectCall(callId: string) {
+  const seq = ++detailSeq
+  const sameCall = detail.value?.call_id === callId
   selectedCallId.value = callId
-  detailLoading.value = true
+  if (!sameCall) detailLoading.value = true
   try {
-    detail.value = await fetchTraceCall(callId)
+    const loaded = await fetchTraceCall(callId)
+    if (disposed || seq !== detailSeq || selectedCallId.value !== callId) return
+    detail.value = loaded
   } catch (e: unknown) {
+    if (disposed || seq !== detailSeq) return
+    if (!sameCall) detail.value = null
     toast((e as Error).message, 'error')
   } finally {
-    detailLoading.value = false
+    if (seq === detailSeq) detailLoading.value = false
   }
 }
 
 function closeDetail() {
+  detailSeq += 1
   selectedCallId.value = ''
   detail.value = null
+  detailLoading.value = false
 }
 
 async function toggleTrace(enabled: boolean) {
+  if (togglingTrace.value) return
+  togglingTrace.value = true
   try {
     const data = await setTraceStatus(enabled)
     traceActive.value = !!data.active
     toast(enabled ? 'LLM Trace 已开启' : 'LLM Trace 已关闭')
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
+  } finally {
+    togglingTrace.value = false
   }
 }
 
@@ -265,7 +283,9 @@ async function clear() {
     calls.value = []
     nextBeforeId.value = null
     totalCount.value = 0
+    storageBytes.value = 0
     closeDetail()
+    await loadStatus().catch(() => {})
     toast('LLM Trace 已清空')
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
@@ -273,6 +293,7 @@ async function clear() {
 }
 
 function connect() {
+  if (disposed) return
   source?.close()
   source = new EventSource(buildTraceStreamUrl(latestEventId.value))
   source.onopen = () => { connected.value = true }
@@ -290,7 +311,10 @@ function connect() {
 }
 
 function formatTime(value: string): string {
-  return new Date(value).toLocaleString('zh-CN', { hour12: false })
+  if (!value) return '—'
+  const d = new Date(value)
+  if (Number.isNaN(d.getTime())) return value
+  return d.toLocaleString('zh-CN', { hour12: false })
 }
 
 function formatStatus(call: TraceCallSummary): string {
@@ -325,7 +349,11 @@ function loopVariant(loopCalls: TraceCallSummary[]): 'info' | 'success' | 'warn'
 }
 
 onMounted(reload)
-onBeforeUnmount(() => source?.close())
+onBeforeUnmount(() => {
+  disposed = true
+  source?.close()
+  source = null
+})
 </script>
 
 <style scoped>

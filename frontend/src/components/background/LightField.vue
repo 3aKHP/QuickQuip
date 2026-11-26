@@ -11,7 +11,6 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTheme } from '../../composables/useTheme'
 import { useMotionPrefs } from '../../composables/useMotionPrefs'
-import { prefersReducedMotion } from './light-field/config'
 import { createLightFieldStage } from './light-field/stage'
 
 const props = defineProps<{
@@ -31,14 +30,17 @@ const stage = createLightFieldStage({
 
 const canvasRef = ref<HTMLCanvasElement | null>(null)
 let raf = 0
-
-// 静态模式（低动效/reduced-motion）不消费指针视差，跳过坐标更新
-const onMouseMove = (e: MouseEvent) => { if (!shouldStatic()) stage.onMouseMove(e) }
+let resizeRaf = 0
+let reducedMotionMql: MediaQueryList | null = null
+const systemReducedMotion = ref(false)
 
 /** 静态渲染判定：系统 reduced-motion 或用户开启低动态 */
 function shouldStatic(): boolean {
-  return lowMotion.value || prefersReducedMotion()
+  return lowMotion.value || systemReducedMotion.value
 }
+
+// 静态模式（低动效/reduced-motion）不消费指针视差，跳过坐标更新
+const onMouseMove = (e: MouseEvent) => { if (!shouldStatic()) stage.onMouseMove(e) }
 
 function draw(now: number) {
   const canvas = canvasRef.value
@@ -57,18 +59,42 @@ function resize() {
   if (shouldStatic()) draw(performance.now())
 }
 
-function onVisibilityChange() {
-  if (document.hidden) {
+function onWindowResize() {
+  if (resizeRaf) return
+  resizeRaf = requestAnimationFrame(() => {
+    resizeRaf = 0
+    resize()
+  })
+}
+
+function syncLoop() {
+  if (shouldStatic() || document.hidden) {
     if (raf) { cancelAnimationFrame(raf); raf = 0 }
-  } else if (!raf && !shouldStatic()) {
+    if (shouldStatic()) draw(performance.now())
+  } else if (!raf) {
+    stage.resetClock()
     raf = requestAnimationFrame(draw)
   }
 }
 
+function onReducedMotionChange(e: MediaQueryListEvent) {
+  systemReducedMotion.value = e.matches
+  syncLoop()
+}
+
+function onVisibilityChange() {
+  syncLoop()
+}
+
 onMounted(() => {
+  try {
+    reducedMotionMql = window.matchMedia('(prefers-reduced-motion: reduce)')
+    systemReducedMotion.value = reducedMotionMql.matches
+    reducedMotionMql.addEventListener('change', onReducedMotionChange)
+  } catch { /* ignore */ }
   resize()
   stage.centerPointer()
-  window.addEventListener('resize', resize)
+  window.addEventListener('resize', onWindowResize)
   window.addEventListener('mousemove', onMouseMove, { passive: true })
   document.addEventListener('visibilitychange', onVisibilityChange)
   // 尊重 reduced-motion / 低动态开关：只画一帧静态，不启动 RAF 循环
@@ -79,22 +105,17 @@ onMounted(() => {
   raf = requestAnimationFrame(draw)
 })
 
-watch(theme, () => resize())
-watch(isShowcase, () => resize())
-
-// 低动态开关切换：即时停帧或恢复动画
-watch(lowMotion, (staticOnly) => {
-  if (staticOnly) {
-    if (raf) { cancelAnimationFrame(raf); raf = 0 }
-    draw(performance.now())
-  } else if (!raf && !document.hidden) {
-    raf = requestAnimationFrame(draw)
-  }
+watch(theme, () => {
+  if (shouldStatic()) draw(performance.now())
 })
+watch(isShowcase, () => resize())
+watch(lowMotion, () => syncLoop())
 
 onUnmounted(() => {
   if (raf) cancelAnimationFrame(raf)
-  window.removeEventListener('resize', resize)
+  if (resizeRaf) cancelAnimationFrame(resizeRaf)
+  reducedMotionMql?.removeEventListener('change', onReducedMotionChange)
+  window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('mousemove', onMouseMove)
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })

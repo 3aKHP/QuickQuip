@@ -34,6 +34,18 @@ const expanded = ref<string | null>(null)
 const changes = computed(() => Object.values(edits))
 const hasDirectory = computed(() => Array.isArray(listing.value?.directory))
 const taxonomy = computed(() => listing.value?.taxonomy ?? [])
+const groupLabelMap = computed(() => {
+  const map = new Map<string, string>()
+  for (const domain of taxonomy.value) {
+    for (const group of domain.groups) map.set(group.id, group.label)
+  }
+  return map
+})
+const observationLabels: Record<string, string> = {
+  not_observed: '未观测',
+  observed: '已观测',
+  verified: '已确认',
+}
 
 const baseRows = computed<Row[]>(() => {
   if (hasDirectory.value) return listing.value?.directory ?? []
@@ -160,14 +172,22 @@ function detailId(name: string) { return `environment-details-${name}` }
 function toggleDetail(name: string) {
   expanded.value = expanded.value === name ? null : name
 }
-async function refresh() {
-  refreshing.value = true
+function hasPendingOperation(op: Operation | null): boolean {
+  if (!op || op.phase === 'superseded') return false
+  const allStates = Object.values(op.states ?? {}).flatMap(s => Object.values(s ?? {}))
+  if (!allStates.length) return false
+  return allStates.some(state => state === 'loading' || state === 'waiting')
+}
+async function refresh(silent = false) {
+  if (!silent) refreshing.value = true
   try {
     listing.value = await loadEnvironment(true)
-    error.value = ''
-    if (changes.value.length) reviewed.value = false
-  } catch (e) { error.value = String(e) }
-  finally { refreshing.value = false }
+    if (!silent) {
+      error.value = ''
+      if (changes.value.length) reviewed.value = false
+    }
+  } catch (e) { if (!silent) error.value = String(e) }
+  finally { if (!silent) refreshing.value = false }
 }
 function edit(row: Row, value: string) {
   const existing = edits[row.name]?.action
@@ -177,9 +197,10 @@ function edit(row: Row, value: string) {
   // matching the legacy flow where the user typed the name on purpose.
   if (!value && (action !== 'create' || !row.local)) { delete edits[row.name] } else { edits[row.name] = { name: row.name, action, value } }
   reviewed.value = false
+  requestId.value = crypto.randomUUID()
 }
 function mark(name: string, action: EditAction) {
-  edits[name] = { name, action }; reviewed.value = false
+  edits[name] = { name, action }; reviewed.value = false; requestId.value = crypto.randomUUID()
 }
 async function focusRow(name: string) {
   await nextTick()
@@ -197,11 +218,11 @@ function add() {
     newName.value = ''
     void focusRow(name); return
   }
-  edits[name] = { name, action: 'create', value: '' }; newName.value = ''; reviewed.value = false
+  edits[name] = { name, action: 'create', value: '' }; newName.value = ''; reviewed.value = false; requestId.value = crypto.randomUUID()
   search.value = name; domainFilter.value = 'all'; groupFilter.value = 'all'
   void focusRow(name)
 }
-function undo(name: string) { delete edits[name]; reviewed.value = false }
+function undo(name: string) { delete edits[name]; reviewed.value = false; requestId.value = crypto.randomUUID() }
 async function submit() {
   if (!listing.value) return
   busy.value = true; error.value = ''
@@ -225,6 +246,8 @@ watch(() => route.query.variable, value => {
   const name = String(value ?? '').trim()
   if (name) {
     search.value = name
+    domainFilter.value = 'all'
+    groupFilter.value = 'all'
     const target = baseRows.value.find(row => row.name === name)
     if (target) {
       expanded.value = name
@@ -233,8 +256,11 @@ watch(() => route.query.variable, value => {
   }
 })
 let timer: ReturnType<typeof setInterval> | undefined
+let pollInFlight = false
+let disposed = false
 onMounted(() => {
   void refresh().then(() => {
+    if (disposed) return
     const name = String(route.query.variable ?? '')
     if (name) {
       const target = baseRows.value.find(row => row.name === name)
@@ -246,15 +272,19 @@ onMounted(() => {
     }
   }); window.addEventListener('beforeunload', guard)
   timer = setInterval(async () => {
-    if (operation.value) {
-      try {
-        operation.value = await getEnvironmentOperation(operation.value.id)
-        if (!changes.value.length) await refresh()
-      } catch (e) { error.value = String(e) }
-    }
+    if (disposed || document.hidden || pollInFlight || !hasPendingOperation(operation.value)) return
+    const opId = operation.value!.id
+    pollInFlight = true
+    try {
+      const nextOp = await getEnvironmentOperation(opId)
+      if (disposed || operation.value?.id !== opId) return
+      operation.value = nextOp
+      if (!changes.value.length) await refresh(true)
+    } catch (e) { if (!disposed) error.value = String(e) }
+    finally { pollInFlight = false }
   }, 5000)
 })
-onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunload', guard) })
+onUnmounted(() => { disposed = true; clearInterval(timer); window.removeEventListener('beforeunload', guard) })
 </script>
 
 <template>
@@ -262,7 +292,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
     <UiPageHeader title="环境变量" subtitle="管理根 .env 中的密钥与运行参数">
       <template #actions>
         <UiTag v-if="listing?.enabled && listing.backend_available">{{ listing.variables.length }} 项变量</UiTag>
-        <UiButton icon="RefreshCw" :loading="refreshing" :disabled="busy" @click="refresh">刷新状态</UiButton>
+        <UiButton icon="RefreshCw" :loading="refreshing" :disabled="busy" @click="() => refresh()">刷新状态</UiButton>
       </template>
     </UiPageHeader>
 
@@ -324,7 +354,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
                       <UiTag size="sm" :variant="definitionVariant(row)">{{ definitionLabel(row) }}</UiTag>
                     </div>
                     <p v-if="row.description" class="row-reference">{{ row.description }}</p>
-                    <p v-if="row.groups.length && hasDirectory" class="row-reference row-groups">{{ row.groups.map(group => taxonomy.flatMap(domain => domain.groups).find(item => item.id === group)?.label ?? group).join(' · ') }}</p>
+                    <p v-if="row.groups.length && hasDirectory" class="row-reference row-groups">{{ row.groups.map(group => groupLabelMap.get(group) ?? group).join(' · ') }}</p>
                     <p v-if="row.references?.length" class="row-reference">渠道：{{ row.references.join('、') }}</p>
                     <p v-if="row.warning" class="row-warning"><UiIcon name="AlertTriangle" :size="13" />{{ row.warning }}</p>
                   </td>
@@ -354,11 +384,11 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
                         <p v-if="!row.relations.length" class="row-reference">未发现已确认的消费者；这不代表没有任何使用。</p>
                         <dl v-for="(relation, index) in row.relations" :key="index" class="detail-dl">
                           <dt>消费者</dt><dd>{{ relation.component }}{{ relation.object_id ? `（${relation.object_id}）` : '' }}</dd>
-                          <dt>配置阶段</dt><dd>{{ scopeLabels[relation.config_scope] ?? relation.config_scope }}{{ relation.enabled === false ? ' · 已停用' : relation.enabled === true ? '' : '' }}</dd>
+                          <dt>配置阶段</dt><dd>{{ scopeLabels[relation.config_scope] ?? relation.config_scope }}{{ relation.enabled === false ? ' · 已停用' : '' }}</dd>
                           <dt>字段</dt><dd class="mono">{{ relation.field_path }}</dd>
                           <dt>引用</dt><dd class="mono">{{ relation.raw_expression }}<span v-if="relation.name_kind === 'computed_name'">（名称经配置计算，未确认）</span></dd>
                           <dt>目标</dt><dd>{{ relation.target_service }} · {{ relation.target_kind }}<span v-if="relation.target_name && relation.target_name !== row.name" class="mono"> → {{ relation.target_name }}</span></dd>
-                          <dt>生效</dt><dd>{{ requiredActionLabels[relation.required_action] ?? relation.required_action }} · 确认状态：未观测</dd>
+                          <dt>生效</dt><dd>{{ requiredActionLabels[relation.required_action] ?? relation.required_action }} · 确认状态：{{ observationLabels[relation.observation] ?? relation.observation }}</dd>
                         </dl>
                       </section>
                       <section class="detail-section">
@@ -394,16 +424,19 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
         </div>
         <template v-if="reviewed">
           <ul class="change-preview"><li v-for="change in preview?.changes" :key="change.name"><span class="variable-name">{{ change.name }}</span><UiTag size="sm">{{ actionLabel(edits[change.name]!.action) }}</UiTag><span>{{ modeLabel(change.mode) }}</span><span v-if="change.references?.length">渠道：{{ change.references.join('、') }}</span><p v-if="change.mode === 'unknown'" class="row-reference">{{ usageHint }}</p><p v-if="change.warning" class="row-warning">{{ change.warning }}</p></li></ul>
-          <div class="confirmation"><label>管理员当前口令<input v-model="password" type="password" autocomplete="current-password" placeholder="输入当前管理口令"></label><UiButton variant="primary" icon="Check" :loading="busy" :disabled="!password" @click="submit">确认并保存</UiButton></div>
+          <div class="confirmation"><label>管理员当前口令<input v-model="password" type="password" autocomplete="current-password" placeholder="输入当前管理口令" @keyup.enter="password && !busy && submit()"></label><UiButton variant="primary" icon="Check" :loading="busy" :disabled="!password" @click="submit">确认并保存</UiButton></div>
         </template>
       </UiCard>
     </fieldset>
 
     <UiCard v-if="operation" class="operation-card" accent="success" role="status">
-      <h2 class="section-title">{{ operation.phase === 'superseded' ? '已被后续修改替代' : '根 .env 修改已保存' }}</h2>
+      <div class="operation-head">
+        <h2 class="section-title">{{ operation.phase === 'superseded' ? '已被后续修改替代' : '根 .env 修改已保存' }}</h2>
+        <UiButton size="sm" variant="ghost" icon="X" aria-label="关闭操作状态卡片" @click="operation = null" />
+      </div>
       <p class="row-reference">以下为当前加载状态。操作 <span class="operation-id">{{ operation.id }}</span></p>
       <div v-for="(states, name) in operation.states" :key="name" class="operation-row"><span class="variable-name">{{ name }}</span><span v-for="(state, role) in states" :key="role">{{ role === 'bot' ? 'Bot' : 'Web' }}：{{ stateLabel(state) }}</span></div>
-      <div class="consumer-states"><span v-for="(consumer, role) in operation.consumers" :key="role">{{ role === 'bot' ? 'Bot' : 'Web' }}：{{ consumer && Date.now() / 1000 - consumer.updated_at < 20 ? '运行中' : '等待进程确认' }}</span></div>
+      <div class="consumer-states"><span v-for="(consumer, role) in operation.consumers" :key="role">{{ role === 'bot' ? 'Bot' : 'Web' }}：{{ consumer && Math.abs(Date.now() / 1000 - consumer.updated_at) < 30 ? '运行中' : '等待进程确认' }}</span></div>
     </UiCard>
   </section>
 </template>
@@ -463,6 +496,7 @@ onUnmounted(() => { clearInterval(timer); window.removeEventListener('beforeunlo
 .confirmation { padding-top: var(--qq-gap-md); border-top: 1px solid var(--qq-border); }
 .confirmation label { display: flex; align-items: center; flex-wrap: wrap; gap: var(--qq-gap-sm); font-size: var(--qq-text-sm); color: var(--qq-text-muted); }
 .confirmation input { min-width: 0; font-size: var(--qq-text-base); }
+.operation-head { display: flex; align-items: center; justify-content: space-between; gap: var(--qq-gap-sm); }
 .operation-id { font-family: var(--qq-font-mono); overflow-wrap: anywhere; }
 .operation-row { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: var(--qq-gap-sm); font-size: var(--qq-text-sm); }
 .error-note { display: flex; align-items: center; flex-wrap: wrap; gap: var(--qq-gap-sm); }

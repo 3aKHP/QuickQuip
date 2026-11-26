@@ -23,6 +23,8 @@ export interface RuntimeActionPollOptions<T> {
   validate: (result: RuntimeActionResult) => T
   /** 返回 true 时停止轮询（视图卸载守卫） */
   isCancelled?: () => boolean
+  /** 可选外部中止信号：中止时立即取消在飞请求与等待定时器 */
+  signal?: AbortSignal
 }
 
 export class RuntimeActionTimeoutError extends Error {
@@ -30,6 +32,29 @@ export class RuntimeActionTimeoutError extends Error {
     super(message)
     this.name = 'RuntimeActionTimeoutError'
   }
+}
+
+function isAbortError(error: unknown): boolean {
+  return (
+    (typeof DOMException !== 'undefined' && error instanceof DOMException && error.name === 'AbortError')
+    || (error instanceof Error && error.name === 'AbortError')
+  )
+}
+
+function waitInterval(ms: number, isStopped: () => boolean, signal?: AbortSignal): Promise<void> {
+  if (ms <= 0 || isStopped()) return Promise.resolve()
+  return new Promise<void>(resolve => {
+    let settled = false
+    const finish = () => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      signal?.removeEventListener('abort', finish)
+      resolve()
+    }
+    const timer = setTimeout(finish, ms)
+    signal?.addEventListener('abort', finish, { once: true })
+  })
 }
 
 export async function pollRuntimeAction<T>(
@@ -40,9 +65,13 @@ export async function pollRuntimeAction<T>(
   const limitMs = options.limitMs ?? 30000
   const deadline = Date.now() + limitMs
   const cancelled = options.isCancelled ?? (() => false)
+  const signal = options.signal
+  const isStopped = () => cancelled() || Boolean(signal?.aborted)
 
-  while (!cancelled() && Date.now() < deadline) {
+  while (!isStopped() && Date.now() < deadline) {
     const controller = new AbortController()
+    const onExternalAbort = () => controller.abort()
+    signal?.addEventListener('abort', onExternalAbort, { once: true })
     const timer = setTimeout(
       () => controller.abort(),
       Math.max(500, Math.min(REQUEST_TIMEOUT_MS, deadline - Date.now())),
@@ -52,15 +81,16 @@ export async function pollRuntimeAction<T>(
       payload = await fetchLlmRuntimeAction(actionId, controller.signal)
     } catch (error) {
       // 超时/卸载中止统一映射为轮询超时；网络错误原样上抛
-      if (error instanceof DOMException && error.name === 'AbortError') {
+      if (isAbortError(error)) {
         throw new RuntimeActionTimeoutError()
       }
       throw error
     } finally {
       clearTimeout(timer)
+      signal?.removeEventListener('abort', onExternalAbort)
     }
     const { action } = payload
-    if (cancelled()) throw new RuntimeActionTimeoutError()
+    if (isStopped()) throw new RuntimeActionTimeoutError()
     if (action.id !== actionId) throw new Error('任务响应不匹配')
     if (action.status === 'succeeded') {
       if (action.result == null) throw new Error('任务缺少结果')
@@ -72,7 +102,7 @@ export async function pollRuntimeAction<T>(
     if (action.status !== 'queued' && action.status !== 'running') {
       throw new Error(`未知任务状态：${action.status}`)
     }
-    await new Promise(resolve => setTimeout(resolve, intervalMs))
+    await waitInterval(Math.min(intervalMs, Math.max(0, deadline - Date.now())), isStopped, signal)
   }
   throw new RuntimeActionTimeoutError()
 }

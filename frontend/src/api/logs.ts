@@ -1,4 +1,4 @@
-import { request } from './index'
+import { BASE, request } from './index'
 
 export interface TraceCallSummary {
   id: number
@@ -42,11 +42,11 @@ export async function fetchLogTail(name: string, lines: number = 200) {
 }
 
 export function buildLogDownloadUrl(name: string) {
-  return `/ops/api/logs/files/${encodeURIComponent(name)}/download`
+  return `${BASE}/api/logs/files/${encodeURIComponent(name)}/download`
 }
 
 export function buildLogStreamUrl(tail: number = 200) {
-  return `/ops/api/logs/stream?tail=${tail}`
+  return `${BASE}/api/logs/stream?tail=${tail}`
 }
 
 export async function fetchTraceCalls(limit: number = 50, beforeId?: number) {
@@ -55,10 +55,11 @@ export async function fetchTraceCalls(limit: number = 50, beforeId?: number) {
   return request(`/api/logs/trace/calls?${params}`)
 }
 
-export async function fetchTraceCall(callId: string) {
-  return request(`/api/logs/trace/calls/${encodeURIComponent(callId)}`)
+export async function fetchTraceCall(callId: string, restore: boolean = false) {
+  const q = restore ? '?restore=true' : ''
+  return request(`/api/logs/trace/calls/${encodeURIComponent(callId)}${q}`)
 }
 
 export function buildTraceStreamUrl(afterEventId: number = 0) {
-  return `/ops/api/logs/trace/stream?after_event_id=${afterEventId}`
+  return `${BASE}/api/logs/trace/stream?after_event_id=${afterEventId}`
 }

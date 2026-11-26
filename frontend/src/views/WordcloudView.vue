@@ -10,12 +10,13 @@
     <p class="hint"><UiIcon name="Info" :size="14" />分词与渲染都在后端进行，单群全年数据可能需要数秒到十几秒</p>
     <p v-if="renderError" class="error">{{ renderError }}</p>
     <div v-if="result">
-      <div class="sum-row"><UiTag size="sm">{{ winLabel }}</UiTag><span class="muted">{{ result.message_count }} 条 · {{ result.word_count }} 词 · {{ result.unique_words }} unique<UiInfoTip text="条 = 时间窗内归档消息数（已剔除 bot 自己的发言）；词 = jieba 分词并过滤停用词和单字后的总词次；unique = 不重复的词种数。有效词次过少时无法生成。" /></span><a :href="imgUrl" download="wordcloud.png" class="link">下载</a></div>
-      <div class="res-grid"><div class="img-wrap"><img :src="imgUrl" class="wc-img" /></div>
+      <div class="sum-row"><UiTag size="sm">{{ winLabel }}</UiTag><UiTag v-if="result.group" size="sm" variant="cyan">{{ result.group }}</UiTag><span class="muted">{{ result.message_count }} 条 · {{ result.word_count }} 词 · {{ result.unique_words }} unique<UiInfoTip text="条 = 时间窗内归档消息数（已剔除 bot 自己的发言）；词 = jieba 分词并过滤停用词和单字后的总词次；unique = 不重复的词种数。有效词次过少时无法生成。" /></span><a :href="imgUrl" :download="downloadName" class="link">下载</a></div>
+      <div class="res-grid"><div class="img-wrap"><img :src="imgUrl" class="wc-img" alt="群聊词云图" /></div>
         <UiCard padding="md" shadow="sm" class="top-wrap"><h3 class="top-t section-title">Top {{ result.top_words.length }} 词频</h3><ol class="top-list"><li v-for="(w, i) in result.top_words" :key="w.word"><span class="rk">{{ Number(i) + 1 }}</span><span class="wd">{{ w.word }}</span><span class="ct">{{ w.count }}</span></li></ol></UiCard>
       </div>
     </div>
     <UiEmpty v-else-if="!groups.length && !loading" icon="BarChart3" title="暂无词云消息记录" />
+    <UiEmpty v-else-if="!loading && !rendering" icon="Cloud" title="选择群组与时间窗后点击「生成」" description="后端会按所选时间窗对归档聊天消息做分词并渲染高分辨率词云图。" />
   </div>
 </template>
 
@@ -29,7 +30,15 @@ const WL: Record<string, string> = { today: '今日', week: '近7天', month: '�
 
 const groups = ref<any[]>([]); const loading = ref(false); const loadError = ref<string | null>(null); const groupId = ref(''); const windowKey = ref('today'); const rendering = ref(false); const renderError = ref<string | null>(null); const result = ref<any>(null)
 const imgUrl = computed(() => result.value ? `data:image/png;base64,${result.value.image_base64}` : '')
-const winLabel = computed(() => WL[windowKey.value] || windowKey.value)
+const winLabel = computed(() => {
+  const key = result.value?.window || windowKey.value
+  return WL[key] || key
+})
+const downloadName = computed(() => {
+  const grp = result.value?.group || groupId.value || 'group'
+  const win = result.value?.window || windowKey.value
+  return `wordcloud-${grp}-${win}.png`
+})
 
 function fmtBytes(n: number): string { if (n < 1024) return n + ' B'; if (n < 1024 * 1024) return (n / 1024).toFixed(1) + ' KB'; return (n / 1024 / 1024).toFixed(1) + ' MB' }
 async function loadGroups() { loading.value = true; loadError.value = null; try { groups.value = (await listWordcloudGroups()).groups || [] } catch (e: unknown) { loadError.value = (e as Error).message } finally { loading.value = false } }

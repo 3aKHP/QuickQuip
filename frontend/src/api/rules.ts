@@ -5,7 +5,7 @@ export async function fetchRules() {
 }
 
 export async function updateRule(groupId: string, ruleName: string, enabled: boolean) {
-  return request(`/api/rules/${groupId}/${ruleName}`, {
+  return request(`/api/rules/${encodeURIComponent(groupId)}/${encodeURIComponent(ruleName)}`, {
     method: 'POST',
     body: JSON.stringify({ enabled }),
   })

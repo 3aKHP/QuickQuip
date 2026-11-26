@@ -1,6 +1,14 @@
 <template>
   <div class="llm-about-view">
-    <UiPageHeader title="资料" subtitle="管理全局与分群的群友身份档案（identities.yaml）和群内黑话词表（vocab.yaml）"><template #actions><span class="hint"><UiIcon name="Info" :size="14" />保存后执行 /llm reload 或在「诊断」页重载 LLM 生效</span><span v-if="basePath" class="hint mono">{{ basePath }}</span><router-link to="/diagnostics" custom v-slot="{ navigate }"><UiButton variant="ghost" icon="Stethoscope" @click="navigate">去重载</UiButton></router-link><UiButton icon="RefreshCw" :disabled="listing" @click="loadList">刷新</UiButton><UiButton variant="primary" icon="Plus" @click="startCreateGroup">新建群资料</UiButton></template></UiPageHeader>
+    <UiPageHeader title="资料" subtitle="管理全局与分群的群友身份档案（identities.yaml）和群内黑话词表（vocab.yaml）">
+      <template #actions>
+        <span class="hint"><UiIcon name="Info" :size="14" />保存后点击「重载 LLM」或执行 /llm reload 生效</span>
+        <span v-if="basePath" class="hint mono">{{ basePath }}</span>
+        <UiButton variant="ghost" icon="RotateCw" :loading="reloading" :disabled="reloading" @click="onReloadLlm">重载 LLM</UiButton>
+        <UiButton icon="RefreshCw" :disabled="listing" @click="onRefresh">刷新</UiButton>
+        <UiButton variant="primary" icon="Plus" @click="startCreateGroup">新建群资料</UiButton>
+      </template>
+    </UiPageHeader>
     <p v-if="listError" class="error">{{ listError }}</p>
 
     <div class="split">
@@ -9,7 +17,13 @@
         <UiEmpty v-else-if="!scopes.length" icon="BookUser" title="暂无资料文件" />
         <div v-else class="list-scroll">
           <button v-for="scope in scopes" :key="scope.scope" class="list-item qq-selectable" :class="{ active: scope.scope === selectedScope }" @click="selectScope(scope.scope)">
-            <div class="list-item-head"><span>{{ scope.label }}</span><UiTag v-if="scope.global" size="sm" variant="info">全局</UiTag><UiInfoTip v-if="scope.global" text="全局资料对所有群生效；群级文件与全局合并，同名词条以群级为准。" /><UiTag v-if="scope.existing_files < scope.total_files" size="sm" variant="warn">缺失</UiTag><UiInfoTip v-if="scope.existing_files < scope.total_files" text="每个 scope 应有 vocab.yaml 和 identities.yaml 两个文件；缺失的在保存后自动创建。" /></div>
+            <div class="list-item-head">
+              <span>{{ scope.label }}</span>
+              <UiTag v-if="scope.global" size="sm" variant="info">全局</UiTag>
+              <UiInfoTip v-if="scope.global" text="全局资料对所有群生效；群级文件与全局合并，同名词条以群级为准。" />
+              <UiTag v-if="scope.existing_files < scope.total_files" size="sm" variant="warn">缺失</UiTag>
+              <UiInfoTip v-if="scope.existing_files < scope.total_files" text="每个 scope 应有 vocab.yaml 和 identities.yaml 两个文件；缺失的在保存后自动创建。" />
+            </div>
             <div class="list-item-meta"><span class="mono">{{ scope.path }}</span><span>{{ scope.existing_files }}/{{ scope.total_files }}</span></div>
           </button>
         </div>
@@ -26,10 +40,18 @@
         <div v-if="!selectedScope" class="hint-panel"><UiEmpty icon="BookUser" title="从左侧选择全局或群级资料" /></div>
         <template v-else>
           <div class="editor-bar">
-            <div class="editor-bar-title"><span class="mono">{{ currentPath }}</span><UiTag v-if="currentFile?.exists === false" size="sm" variant="warn">保存后创建</UiTag></div>
-            <div class="editor-bar-actions"><UiButton icon="RefreshCw" :disabled="saving || loadingContent" @click="loadFile">重置</UiButton><UiButton variant="primary" icon="Save" :loading="saving" @click="save">保存</UiButton></div>
+            <div class="editor-bar-title">
+              <span class="mono">{{ currentPath }}</span>
+              <UiTag v-if="dirty" size="sm" variant="warn">未保存</UiTag>
+              <UiTag v-if="currentFile?.exists === false" size="sm" variant="warn">保存后创建</UiTag>
+            </div>
+            <div class="editor-bar-actions">
+              <UiButton icon="RefreshCw" :disabled="saving || loadingContent" @click="onReset">重置</UiButton>
+              <UiButton variant="primary" icon="Save" :loading="saving" :disabled="loadingContent || (!dirty && currentFile?.exists !== false)" @click="save">保存</UiButton>
+            </div>
           </div>
-          <p v-if="loadError" class="error">{{ loadError }}</p><p v-if="saveError" class="error">{{ saveError }}</p>
+          <p v-if="loadError" class="error">{{ loadError }}</p>
+          <p v-if="saveError" class="error">{{ saveError }}</p>
           <UiLoading v-if="loadingContent" />
           <div v-else class="editor-wrap">
             <textarea v-model="content" class="yaml-editor" spellcheck="false" autocomplete="off" />
@@ -41,7 +63,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiTag from '../components/ui/UiTag.vue'
@@ -51,27 +74,189 @@ import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiTabs from '../components/ui/UiTabs.vue'
 import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { listLlmAbout, fetchLlmAboutFile, saveLlmAboutFile, createLlmAboutGroup } from '../api/llmAbout'
+import { reloadLlmRuntime } from '../api/llmRuntime'
 import { toast } from '../toast'
 
 interface AboutKind { kind: string; filename: string; label: string; description: string }
 interface AboutFile { scope: string; kind: string; filename: string; label: string; path: string; exists: boolean }
 interface AboutScope { scope: string; label: string; global: boolean; path: string; files: AboutFile[]; existing_files: number; total_files: number }
 
-const basePath = ref(''); const scopes = ref<AboutScope[]>([]); const kinds = ref<AboutKind[]>([]); const listing = ref(false); const listError = ref<string | null>(null)
-const selectedScope = ref(''); const selectedKind = ref('vocab'); const loadingContent = ref(false); const loadError = ref<string | null>(null); const saveError = ref<string | null>(null); const saving = ref(false); const content = ref(''); const originalContent = ref('')
+const basePath = ref('')
+const scopes = ref<AboutScope[]>([])
+const kinds = ref<AboutKind[]>([])
+const listing = ref(false)
+const listError = ref<string | null>(null)
+const selectedScope = ref('')
+const selectedKind = ref('vocab')
+const loadingContent = ref(false)
+const loadError = ref<string | null>(null)
+const saveError = ref<string | null>(null)
+const saving = ref(false)
+const reloading = ref(false)
+const content = ref('')
+const originalContent = ref('')
+let requestSeq = 0
+
 const currentScope = computed(() => scopes.value.find(s => s.scope === selectedScope.value) || null)
 const kindTabs = computed(() => kinds.value.map((k) => ({ key: k.kind, label: k.label, sub: k.filename, tip: k.description })))
 const currentFile = computed(() => currentScope.value?.files.find(f => f.kind === selectedKind.value) || null)
 const currentPath = computed(() => currentFile.value?.path || '')
 const dirty = computed(() => content.value !== originalContent.value)
 
-async function loadList() { listing.value = true; listError.value = null; try { const data = await listLlmAbout(); basePath.value = data.base_path || ''; scopes.value = data.scopes || []; kinds.value = data.kinds || []; if (!selectedScope.value && scopes.value.length) selectedScope.value = scopes.value[0].scope; if (!selectedKind.value && kinds.value.length) selectedKind.value = kinds.value[0].kind; if (selectedScope.value) await loadFile() } catch (e: unknown) { listError.value = (e as Error).message } finally { listing.value = false } }
-async function selectScope(scope: string) { if (scope === selectedScope.value) return; if (dirty.value && !confirm('未保存的修改将丢失。是否继续？')) return; selectedScope.value = scope; await loadFile() }
-async function selectKind(kind: string) { if (kind === selectedKind.value) return; if (dirty.value && !confirm('未保存的修改将丢失。是否继续？')) return; selectedKind.value = kind; await loadFile() }
-async function loadFile() { if (!selectedScope.value || !selectedKind.value) return; loadingContent.value = true; loadError.value = null; saveError.value = null; try { const data = await fetchLlmAboutFile(selectedScope.value, selectedKind.value); content.value = data.content || ''; originalContent.value = data.content || ''; if (currentFile.value) currentFile.value.exists = !data.missing } catch (e: unknown) { loadError.value = (e as Error).message } finally { loadingContent.value = false } }
-async function save() { if (!selectedScope.value || !selectedKind.value) return; saving.value = true; saveError.value = null; try { await saveLlmAboutFile(selectedScope.value, selectedKind.value, content.value); originalContent.value = content.value; toast('已保存'); await loadList() } catch (e: unknown) { saveError.value = (e as Error).message; toast('保存失败', 'error') } finally { saving.value = false } }
-async function startCreateGroup() { const raw = prompt('群号（5-12 位数字）'); if (!raw) return; const gid = raw.trim(); if (!/^\d{5,12}$/.test(gid)) { toast('格式不合法', 'error'); return } if (scopes.value.some(s => s.scope === gid)) { toast('该群资料已存在', 'error'); selectedScope.value = gid; await loadFile(); return } try { await createLlmAboutGroup(gid, true); toast('已创建'); selectedScope.value = gid; await loadList() } catch (e: unknown) { toast((e as Error).message, 'error') } }
-loadList()
+function confirmDiscard(): boolean {
+  if (!dirty.value) return true
+  return confirm('未保存的修改将丢失。是否继续？')
+}
+
+async function loadList(reloadCurrent = true) {
+  listing.value = true
+  listError.value = null
+  try {
+    const data = await listLlmAbout()
+    basePath.value = data.base_path || ''
+    scopes.value = data.scopes || []
+    kinds.value = data.kinds || []
+    if (!selectedScope.value && scopes.value.length) selectedScope.value = scopes.value[0].scope
+    if (!selectedKind.value && kinds.value.length) selectedKind.value = kinds.value[0].kind
+    if (reloadCurrent && selectedScope.value) await loadFile()
+  } catch (e: unknown) {
+    listError.value = (e as Error).message
+  } finally {
+    listing.value = false
+  }
+}
+
+async function onRefresh() {
+  if (!confirmDiscard()) return
+  await loadList(true)
+}
+
+async function selectScope(scope: string) {
+  if (scope === selectedScope.value) return
+  if (!confirmDiscard()) return
+  selectedScope.value = scope
+  await loadFile()
+}
+
+async function selectKind(kind: string) {
+  if (kind === selectedKind.value) return
+  if (!confirmDiscard()) return
+  selectedKind.value = kind
+  await loadFile()
+}
+
+async function onReset() {
+  if (!confirmDiscard()) return
+  await loadFile()
+}
+
+async function loadFile() {
+  if (!selectedScope.value || !selectedKind.value) return
+  const seq = ++requestSeq
+  const scope = selectedScope.value
+  const kind = selectedKind.value
+  loadingContent.value = true
+  loadError.value = null
+  saveError.value = null
+  try {
+    const data = await fetchLlmAboutFile(scope, kind)
+    if (seq !== requestSeq || selectedScope.value !== scope || selectedKind.value !== kind) return
+    content.value = data.content || ''
+    originalContent.value = data.content || ''
+    if (currentFile.value) currentFile.value.exists = !data.missing
+  } catch (e: unknown) {
+    if (seq !== requestSeq || selectedScope.value !== scope || selectedKind.value !== kind) return
+    loadError.value = (e as Error).message
+  } finally {
+    if (seq === requestSeq) loadingContent.value = false
+  }
+}
+
+async function save() {
+  if (!selectedScope.value || !selectedKind.value || saving.value || loadingContent.value) return
+  const scope = selectedScope.value
+  const kind = selectedKind.value
+  const savedContent = content.value
+  saving.value = true
+  saveError.value = null
+  try {
+    await saveLlmAboutFile(scope, kind, savedContent)
+    if (selectedScope.value === scope && selectedKind.value === kind) {
+      originalContent.value = savedContent
+    }
+    toast('已保存')
+    await loadList(false)
+  } catch (e: unknown) {
+    saveError.value = (e as Error).message
+    toast('保存失败', 'error')
+  } finally {
+    saving.value = false
+  }
+}
+
+async function startCreateGroup() {
+  if (!confirmDiscard()) return
+  const raw = prompt('群号（5-12 位数字）')
+  if (!raw) return
+  const gid = raw.trim()
+  if (!/^\d{5,12}$/.test(gid)) {
+    toast('格式不合法', 'error')
+    return
+  }
+  if (scopes.value.some(s => s.scope === gid)) {
+    toast('该群资料已存在', 'error')
+    selectedScope.value = gid
+    await loadFile()
+    return
+  }
+  try {
+    await createLlmAboutGroup(gid, true)
+    toast('已创建')
+    selectedScope.value = gid
+    await loadList(true)
+  } catch (e: unknown) {
+    toast((e as Error).message, 'error')
+  }
+}
+
+async function onReloadLlm() {
+  reloading.value = true
+  try {
+    await reloadLlmRuntime()
+    toast('已提交重载 LLM 任务')
+  } catch (e: unknown) {
+    toast((e as Error).message || '重载 LLM 失败', 'error')
+  } finally {
+    reloading.value = false
+  }
+}
+
+function beforeUnload(event: BeforeUnloadEvent) {
+  if (dirty.value) {
+    event.preventDefault()
+    event.returnValue = ''
+  }
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    if (selectedScope.value && selectedKind.value && !saving.value && !loadingContent.value && (dirty.value || currentFile.value?.exists === false)) {
+      void save()
+    }
+  }
+}
+
+onBeforeRouteLeave(() => !dirty.value || confirm('当前资料有未保存修改，是否离开？'))
+onMounted(() => {
+  void loadList(true)
+  window.addEventListener('beforeunload', beforeUnload)
+  window.addEventListener('keydown', onKeydown)
+})
+onUnmounted(() => {
+  window.removeEventListener('beforeunload', beforeUnload)
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <style scoped>
@@ -94,7 +279,7 @@ loadList()
 .kind-tabs { align-self: flex-start; max-width: 100%; }
 
 .editor-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--qq-gap-md); flex-wrap: wrap; }
-.editor-bar-title { display: flex; align-items: center; gap: var(--qq-gap-sm); color: var(--qq-text); font-size: var(--qq-text-base); }
+.editor-bar-title { display: flex; align-items: center; gap: var(--qq-gap-sm); flex-wrap: wrap; color: var(--qq-text); font-size: var(--qq-text-base); }
 .editor-bar-actions { display: flex; gap: var(--qq-gap-sm); }
 .editor-wrap { border-radius: var(--qq-radius-card); overflow: hidden; box-shadow: var(--qq-shadow-card); }
 .yaml-editor { display: block; width: 100%; min-height: 55vh; background: var(--qq-surface); color: var(--qq-text); font-family: var(--qq-font-mono); font-size: var(--qq-text-sm); line-height: 1.7; padding: var(--qq-gap-md); resize: none; outline: none; border: none; }

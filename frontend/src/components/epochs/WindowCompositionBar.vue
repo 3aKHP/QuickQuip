@@ -13,7 +13,15 @@
           />
         </TransitionGroup>
       </div>
-      <div class="anchor-mark"><i>锚点 #{{ anchorId }}</i></div>
+      <div
+        class="anchor-mark"
+        :class="{
+          'anchor-mark--empty-live': !liveBlocks.length,
+          'anchor-mark--empty-out': !outBlocks.length,
+        }"
+      >
+        <i>锚点 #{{ anchorId }}</i>
+      </div>
       <div class="zone zone-live">
         <TransitionGroup name="seg">
           <div
@@ -25,6 +33,7 @@
             :title="block.title"
           />
         </TransitionGroup>
+        <span v-if="!liveBlocks.length" class="zone-empty">当前窗口为空</span>
       </div>
     </div>
     <div class="bar-foot">
@@ -66,8 +75,22 @@ interface Block {
   title: string
 }
 
+const BUSINESS_TIMEZONE = 'Asia/Shanghai'
+
 function fmtTokens(value: number): string {
   return `${(value / 1000).toFixed(1)}k`
+}
+
+function formatMessageTime(iso: string): string {
+  if (!iso) return ''
+  const parsed = new Date(iso)
+  if (Number.isNaN(parsed.getTime())) return iso.slice(11, 16)
+  return parsed.toLocaleTimeString('zh-CN', {
+    timeZone: BUSINESS_TIMEZONE,
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  })
 }
 
 function toBlock(message: EpochWindowMessage): Block {
@@ -76,7 +99,7 @@ function toBlock(message: EpochWindowMessage): Block {
     key: `m${message.id}`,
     tokens: message.tokens,
     role: message.role,
-    title: `#${message.id} · ${who} · ${message.tokens} tok · ${message.ts.slice(11, 16)}`,
+    title: `#${message.id} · ${who} · ${message.tokens} tok · ${formatMessageTime(message.ts)}`,
   }
 }
 
@@ -139,8 +162,16 @@ const windowTokens = computed(() => props.window.reduce((sum, item) => sum + ite
 }
 .seg {
   border-radius: 4px;
-  min-width: 4px;
+  min-width: 2px;
   transition: flex-grow 0.6s ease, opacity 0.6s ease, filter 0.6s ease;
+}
+.zone-empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  font-size: 12px;
+  color: var(--qq-text-muted);
 }
 .seg-user { background: var(--qq-epoch-user); }
 .seg-bot { background: var(--qq-epoch-bot); }
@@ -178,6 +209,9 @@ const windowTokens = computed(() => props.window.reduce((sum, item) => sum + ite
   position: absolute;
   top: -26px;
   left: -4px;
+  max-width: min(200px, 55vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-style: normal;
   font-size: 11.5px;
   font-weight: 700;
@@ -188,6 +222,13 @@ const windowTokens = computed(() => props.window.reduce((sum, item) => sum + ite
   border-radius: 6px;
   border: 1px solid color-mix(in srgb, var(--qq-primary) 35%, transparent);
 }
+.anchor-mark--empty-live:not(.anchor-mark--empty-out) i {
+  left: auto;
+  right: -4px;
+}
+.anchor-mark--empty-out i {
+  left: 0;
+}
 .bar-foot {
   display: flex;
   justify-content: space-between;
@@ -197,6 +238,12 @@ const windowTokens = computed(() => props.window.reduce((sum, item) => sum + ite
   flex-wrap: wrap;
   gap: 8px;
   font-variant-numeric: tabular-nums;
+}
+@media (max-width: 640px) {
+  .zone {
+    gap: 1px;
+    padding: 3px;
+  }
 }
 @media (prefers-reduced-motion: reduce) {
   .seg, .seg-enter-active, .seg-leave-active { transition: none; }

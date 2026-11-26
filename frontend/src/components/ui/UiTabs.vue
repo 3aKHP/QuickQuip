@@ -1,30 +1,41 @@
 <template>
-  <div ref="rootRef" class="ui-tabs" role="tablist">
+  <div ref="rootRef" class="ui-tabs" role="tablist" :aria-label="ariaLabel">
     <div
       v-if="indicator.ready"
       class="ui-tabs__indicator"
+      :class="{ 'ui-tabs__indicator--animated': indicator.animated }"
       :style="indicatorStyle"
       aria-hidden="true"
     />
-    <button
-      v-for="t in tabs"
+    <div
+      v-for="(t, idx) in tabs"
       :key="t.key"
-      ref="btnRefs"
-      type="button"
-      role="tab"
-      class="ui-tabs__btn"
-      :class="{ 'ui-tabs__btn--active': modelValue === t.key }"
-      :aria-selected="modelValue === t.key"
-      @click="select(t.key)"
+      :ref="(el) => setItemRef(t.key, el)"
+      class="ui-tabs__item"
+      :class="{ 'ui-tabs__item--active': modelValue === t.key }"
     >
-      <span class="ui-tabs__label">{{ t.label }}<UiInfoTip v-if="t.tip" :text="t.tip" /></span>
-      <span v-if="t.sub" class="ui-tabs__sub">{{ t.sub }}</span>
-    </button>
+      <button
+        :ref="(el) => setBtnRef(t.key, el)"
+        type="button"
+        role="tab"
+        class="ui-tabs__btn"
+        :class="{ 'ui-tabs__btn--active': modelValue === t.key, 'ui-tabs__btn--with-tip': Boolean(t.tip) }"
+        :aria-selected="modelValue === t.key"
+        :tabindex="modelValue === t.key ? 0 : -1"
+        @click="select(t.key)"
+        @keydown="onKeydown($event, idx)"
+      >
+        <span class="ui-tabs__label">{{ t.label }}</span>
+        <span v-if="t.sub" class="ui-tabs__sub">{{ t.sub }}</span>
+      </button>
+      <UiInfoTip v-if="t.tip" :text="t.tip" class="ui-tabs__tip" />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import type { ComponentPublicInstance } from 'vue'
 import UiInfoTip from './UiInfoTip.vue'
 
 export interface UiTabItem {
@@ -39,6 +50,7 @@ export interface UiTabItem {
 const props = defineProps<{
   tabs: UiTabItem[]
   modelValue: string
+  ariaLabel?: string
 }>()
 
 const emit = defineEmits<{
@@ -47,8 +59,19 @@ const emit = defineEmits<{
 }>()
 
 const rootRef = ref<HTMLElement | null>(null)
-const btnRefs = ref<HTMLElement[]>([])
-const indicator = reactive({ ready: false, x: 0, y: 0, w: 0, h: 0 })
+const itemMap = new Map<string, HTMLElement>()
+const btnMap = new Map<string, HTMLButtonElement>()
+const indicator = reactive({ ready: false, animated: false, x: 0, y: 0, w: 0, h: 0 })
+
+function setItemRef(key: string, el: Element | ComponentPublicInstance | null) {
+  if (el instanceof HTMLElement) itemMap.set(key, el)
+  else itemMap.delete(key)
+}
+
+function setBtnRef(key: string, el: Element | ComponentPublicInstance | null) {
+  if (el instanceof HTMLButtonElement) btnMap.set(key, el)
+  else btnMap.delete(key)
+}
 
 const indicatorStyle = computed(() => ({
   transform: `translate(${indicator.x}px, ${indicator.y}px)`,
@@ -57,14 +80,20 @@ const indicatorStyle = computed(() => ({
 }))
 
 function measure() {
-  const idx = props.tabs.findIndex((t) => t.key === props.modelValue)
-  const btn = btnRefs.value?.[idx]
-  if (!btn) return
-  indicator.x = btn.offsetLeft
-  indicator.y = btn.offsetTop
-  indicator.w = btn.offsetWidth
-  indicator.h = btn.offsetHeight
+  const item = itemMap.get(props.modelValue)
+  if (!item) {
+    indicator.ready = false
+    return
+  }
+  const wasReady = indicator.ready
+  indicator.x = item.offsetLeft
+  indicator.y = item.offsetTop
+  indicator.w = item.offsetWidth
+  indicator.h = item.offsetHeight
   indicator.ready = true
+  if (wasReady && !indicator.animated) {
+    indicator.animated = true
+  }
 }
 
 function select(key: string) {
@@ -73,10 +102,25 @@ function select(key: string) {
   emit('change', key)
 }
 
+function onKeydown(e: KeyboardEvent, idx: number) {
+  if (!props.tabs.length) return
+  let nextIdx = -1
+  if (e.key === 'ArrowRight') nextIdx = (idx + 1) % props.tabs.length
+  else if (e.key === 'ArrowLeft') nextIdx = (idx - 1 + props.tabs.length) % props.tabs.length
+  else if (e.key === 'Home') nextIdx = 0
+  else if (e.key === 'End') nextIdx = props.tabs.length - 1
+  if (nextIdx < 0) return
+  e.preventDefault()
+  const target = props.tabs[nextIdx]
+  select(target.key)
+  btnMap.get(target.key)?.focus()
+}
+
 let resizeObserver: ResizeObserver | null = null
 
 onMounted(() => {
   nextTick(measure)
+  document.fonts?.ready?.then(() => nextTick(measure)).catch(() => {})
   if (rootRef.value && typeof ResizeObserver !== 'undefined') {
     resizeObserver = new ResizeObserver(() => measure())
     resizeObserver.observe(rootRef.value)
@@ -103,7 +147,7 @@ onUnmounted(() => {
   background: var(--qq-surface-strong);
 }
 
-/* 滑动指示条：药丸背景跟随选中项 */
+/* 滑动指示条：首次量测不播放飞入动画，切换时平滑跟随 */
 .ui-tabs__indicator {
   position: absolute;
   top: 0;
@@ -111,16 +155,24 @@ onUnmounted(() => {
   border-radius: calc(var(--qq-radius-card) - 3px);
   background: var(--qq-surface);
   box-shadow: var(--qq-shadow-card);
+  pointer-events: none;
+}
+
+.ui-tabs__indicator--animated {
   transition:
     transform var(--qq-transition-slow),
     width var(--qq-transition-slow),
     height var(--qq-transition-slow);
-  pointer-events: none;
+}
+
+.ui-tabs__item {
+  position: relative;
+  z-index: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .ui-tabs__btn {
-  position: relative;
-  z-index: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -137,8 +189,21 @@ onUnmounted(() => {
   transition: color var(--qq-transition-fast);
 }
 
+.ui-tabs__btn--with-tip {
+  padding-right: 4px;
+}
+
+.ui-tabs__tip {
+  padding-right: 10px;
+}
+
 .ui-tabs__btn:hover {
   color: var(--qq-text);
+}
+
+.ui-tabs__btn:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px var(--qq-primary-glow);
 }
 
 .ui-tabs__btn--active {
@@ -151,8 +216,12 @@ onUnmounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .ui-tabs__indicator {
+  .ui-tabs__indicator--animated {
     transition: none;
   }
+}
+
+:global(html[data-motion="reduced"]) .ui-tabs__indicator--animated {
+  transition: none;
 }
 </style>

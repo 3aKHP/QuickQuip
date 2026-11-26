@@ -16,19 +16,23 @@
             <td class="file-kind">{{ r.kind }}</td>
             <td class="file-size">{{ formatSize(r.size_bytes) }}</td>
             <td class="col-actions">
-              <UiButton
-                v-if="r.path !== 'SKILL.md'"
-                size="sm"
-                variant="danger"
-                icon="Trash2"
-                title="删除该文件"
-                @click="onDeleteFile(r.path)"
-              >删除</UiButton>
+                <UiButton
+                  v-if="r.path !== 'SKILL.md'"
+                  size="sm"
+                  variant="danger"
+                  icon="Trash2"
+                  title="删除该文件"
+                  :loading="deletingPath === r.path"
+                  :disabled="Boolean(deletingPath)"
+                  @click="onDeleteFile(r.path)"
+                >删除</UiButton>
             </td>
           </tr>
         </tbody>
       </table>
     </div>
+
+    <p v-if="loadError" class="error">{{ loadError }}</p>
 
     <UiEmpty v-if="!filePath && resources.length" compact icon="FileText" title="从上方资源表选择一个文件开始编辑" />
 
@@ -39,10 +43,19 @@
       </div>
       <div class="editor-bar">
         <span class="mono editor-path">{{ filePath }}</span>
+        <span class="byte-counter mono" :class="{ 'byte-counter--over': exceedsByteLimit }">
+          {{ formatSize(contentBytes) }} / 256 KiB
+        </span>
         <span v-if="dirty" class="dirty-pill">未保存</span>
-        <UiButton variant="primary" icon="Save" :loading="saving" :disabled="loading || !dirty" @click="onSave">保存</UiButton>
+        <UiButton
+          variant="primary"
+          icon="Save"
+          :loading="saving"
+          :disabled="loading || !dirty || exceedsByteLimit"
+          :title="exceedsByteLimit ? '文件大小超过 256 KiB 上限' : '保存（Ctrl+S）'"
+          @click="onSave"
+        >保存</UiButton>
       </div>
-      <p v-if="loadError" class="error">{{ loadError }}</p>
       <UiLoading v-if="loading" />
       <textarea v-else v-model="content" class="file-editor" spellcheck="false" autocomplete="off" />
     </template>
@@ -50,7 +63,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import UiButton from '../ui/UiButton.vue'
 import UiTag from '../ui/UiTag.vue'
 import UiIcon from '../ui/UiIcon.vue'
@@ -72,13 +85,20 @@ const emit = defineEmits<{
   fileDeleted: []
 }>()
 
+const MAX_FILE_BYTES = 256 * 1024
+
 const filePath = ref('')
 const content = ref('')
 const original = ref('')
 const loading = ref(false)
 const saving = ref(false)
+const deletingPath = ref('')
 const loadError = ref<string | null>(null)
 const dirty = computed(() => content.value !== original.value)
+const contentBytes = computed(() => (
+  typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(content.value).length : content.value.length
+))
+const exceedsByteLimit = computed(() => contentBytes.value > MAX_FILE_BYTES)
 let editorRequest = 0
 
 watch(() => props.skillName, () => reset())
@@ -133,7 +153,7 @@ async function openPath(path: string, seedContent?: string) {
 }
 
 async function onSave() {
-  if (loading.value || saving.value || !filePath.value) return
+  if (loading.value || saving.value || !filePath.value || exceedsByteLimit.value) return
   const request = editorRequest
   const skillName = props.skillName
   const path = filePath.value
@@ -157,7 +177,9 @@ async function onSave() {
 }
 
 async function onDeleteFile(path: string) {
+  if (deletingPath.value) return
   if (!confirm(`确定删除文件 ${path}？该操作不可撤销。`)) return
+  deletingPath.value = path
   try {
     await deleteSkillFile(props.skillName, path)
     toast('已删除')
@@ -166,10 +188,31 @@ async function onDeleteFile(path: string) {
     emit('fileDeleted')
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
+  } finally {
+    if (deletingPath.value === path) deletingPath.value = ''
   }
 }
 
-defineExpose({ confirmLeave, openPath, reset })
+function onKeydown(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    if (!filePath.value) return
+    event.preventDefault()
+    if (dirty.value && !loading.value && !saving.value && !exceedsByteLimit.value) {
+      void onSave()
+    }
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+})
+if (typeof onUnmounted === 'function') {
+  onUnmounted(() => {
+    window.removeEventListener('keydown', onKeydown)
+  })
+}
+
+defineExpose({ confirmLeave, openPath, reset, dirty })
 </script>
 
 <style scoped>
@@ -256,6 +299,7 @@ defineExpose({ confirmLeave, openPath, reset })
   display: flex;
   align-items: center;
   gap: var(--qq-gap-sm);
+  flex-wrap: wrap;
 }
 
 .editor-path {
@@ -266,6 +310,17 @@ defineExpose({ confirmLeave, openPath, reset })
   white-space: nowrap;
   color: var(--qq-text);
   font-size: var(--qq-text-sm);
+}
+
+.byte-counter {
+  flex-shrink: 0;
+  color: var(--qq-text-quiet);
+  font-size: var(--qq-text-xs);
+}
+
+.byte-counter--over {
+  color: var(--qq-danger);
+  font-weight: 600;
 }
 
 .dirty-pill {

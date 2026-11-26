@@ -17,7 +17,7 @@
       </div>
     </UiCard>
 
-    <UiCard v-if="health && !selected" padding="md" shadow="sm" class="health-card">
+    <UiCard v-if="(health || healthError) && !selected" padding="md" shadow="sm" class="health-card">
       <div class="health-head">
         <strong>生成健康度<UiInfoTip text="汇总日报、简报、周月报三条生成链路近期的 LLM 调用结果：正文是否被采纳、异常分布、耗时与按模型定价估算的美元成本；未记录结果的历史调用计入「历史未知」。" /></strong>
         <label class="health-days">
@@ -30,26 +30,32 @@
         </label>
         <UiButton size="sm" icon="RefreshCw" :loading="healthLoading" @click="loadHealth">刷新</UiButton>
       </div>
-      <table v-if="healthRows.length" class="health-table">
-        <thead><tr><th>链路<UiInfoTip :text="linkTip" /></th><th>调用</th><th>接受<UiInfoTip :text="acceptTip" /></th><th>异常<UiInfoTip :text="outcomeTip" /></th><th>均耗时</th><th>成本</th></tr></thead>
-        <tbody>
-          <tr v-for="row in healthRows" :key="row.feature">
-            <td>{{ featureLabel(row.feature) }}</td>
-            <td>{{ row.calls }}</td>
-            <td><span class="health-accept">{{ row.accepted }} · {{ acceptPct(row) }}%</span></td>
-            <td class="health-issues">
-              <template v-if="row.issues.length">
-                <UiTag v-for="issue in row.issues" :key="issue.outcome" size="sm" :variant="issueVariant(issue.outcome)">{{ outcomeLabel(issue.outcome) }} ×{{ issue.calls }}</UiTag>
-              </template>
-              <span v-else class="health-none">—</span>
-            </td>
-            <td>{{ Math.round(row.avgDurationMs / 1000) }}s</td>
-            <td>${{ row.cost.toFixed(2) }}</td>
-          </tr>
-        </tbody>
-      </table>
-      <p v-if="healthRows.length" class="health-empty">按级联尝试统计，一次报文生成可能包含多跳；成本含被丢弃正文的调用。每跳明细见报文详情的「生成日志」。</p>
-      <p v-else class="health-empty">近 {{ health.days }} 天无总结族调用记录。</p>
+      <div v-if="healthError" class="error-block">
+        <UiIcon name="CircleX" :size="15" />
+        <span>加载健康度失败：{{ healthError }}</span>
+      </div>
+      <div v-else-if="healthRows.length" class="table-scroll">
+        <table class="health-table">
+          <thead><tr><th>链路<UiInfoTip :text="linkTip" /></th><th>调用</th><th>接受<UiInfoTip :text="acceptTip" /></th><th>异常<UiInfoTip :text="outcomeTip" /></th><th>均耗时</th><th>成本</th></tr></thead>
+          <tbody>
+            <tr v-for="row in healthRows" :key="row.feature">
+              <td>{{ featureLabel(row.feature) }}</td>
+              <td>{{ row.calls }}</td>
+              <td><span class="health-accept">{{ row.accepted }} · {{ acceptPct(row) }}%</span></td>
+              <td class="health-issues">
+                <template v-if="row.issues.length">
+                  <UiTag v-for="issue in row.issues" :key="issue.outcome" size="sm" :variant="issueVariant(issue.outcome)">{{ outcomeLabel(issue.outcome) }} ×{{ issue.calls }}</UiTag>
+                </template>
+                <span v-else class="health-none">—</span>
+              </td>
+              <td>{{ Math.round(row.avgDurationMs / 1000) }}s</td>
+              <td>${{ row.cost.toFixed(2) }}</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-if="health && healthRows.length && !healthError" class="health-empty">按级联尝试统计，一次报文生成可能包含多跳；成本含被丢弃正文的调用。每跳明细见报文详情的「生成日志」。</p>
+      <p v-else-if="health && !healthError" class="health-empty">近 {{ health.days }} 天无总结族调用记录。</p>
     </UiCard>
 
     <p v-if="groupId && !selected && !listLoading" class="pub-legend">「已发布」= 已推送到群聊；「未发布」= 已生成、等待下次调度推送。</p>
@@ -69,7 +75,7 @@
     />
 
     <Transition name="tab-pane" mode="out-in" @after-enter="onPaneEnter">
-      <div v-if="!selected && groupId" :key="activeTab" class="summary-list">
+      <div v-if="!selected && groupId && !listLoading" :key="activeTab" class="summary-list">
         <article
           v-for="item in normalizedList"
           :key="item.key"
@@ -371,20 +377,21 @@ function onGenLogToggle(event: Event) {
 
 async function loadGenLog() {
   if (!selected.value) return
-  // 捕获发起时的报文坐标；响应落地时已切走（慢网络）则丢弃，防止错串（CR S3）
+  // 捕获发起时的报文坐标（含 tab）；响应落地时已切走则丢弃，防止错串
+  const tab = activeTab.value
   const gid = groupId.value
   const key = selected.value
   genLogLoading.value = true
   genLogError.value = null
   try {
     const data = await current.value.fetchGenerationLog(gid, key)
-    if (selected.value !== key || groupId.value !== gid) return
+    if (activeTab.value !== tab || selected.value !== key || groupId.value !== gid) return
     genLog.value = data
   } catch (e: unknown) {
-    if (selected.value !== key || groupId.value !== gid) return
+    if (activeTab.value !== tab || selected.value !== key || groupId.value !== gid) return
     genLogError.value = (e as Error).message
   } finally {
-    if (selected.value === key && groupId.value === gid) genLogLoading.value = false
+    if (activeTab.value === tab && selected.value === key && groupId.value === gid) genLogLoading.value = false
   }
 }
 
@@ -404,6 +411,7 @@ function hopLabel(hop: GenerationHop): string {
 
 function hopVariant(hop: GenerationHop): TagVariant {
   if (hop.state === 'ok' && hop.response_outcome === 'accepted') return 'success'
+  if (hop.state === 'error') return 'danger'
   return issueVariant(hop.response_outcome || (hop.state === 'cancelled' ? 'cancelled' : 'unknown'))
 }
 
@@ -423,14 +431,25 @@ const totalHopCost = computed(() =>
   (genLog.value?.hops ?? []).reduce((sum, h) => sum + Number(h.cost_usd ?? 0), 0).toFixed(4),
 )
 
+const healthError = ref<string | null>(null)
+let healthSeq = 0
+let groupsSeq = 0
+let listSeq = 0
+let detailSeq = 0
+
 async function loadHealth() {
+  const seq = ++healthSeq
   healthLoading.value = true
+  healthError.value = null
   try {
-    health.value = await fetchSummariesHealth(healthDays.value)
-  } catch {
-    health.value = null
+    const data = await fetchSummariesHealth(healthDays.value)
+    if (seq !== healthSeq) return
+    health.value = data
+  } catch (e: unknown) {
+    if (seq !== healthSeq) return
+    healthError.value = (e as Error).message
   } finally {
-    healthLoading.value = false
+    if (seq === healthSeq) healthLoading.value = false
   }
 }
 
@@ -439,6 +458,10 @@ function switchTab(value: string) {
   const t = value as Tab
   if (activeTab.value === t) return
   activeTab.value = t
+  listSeq += 1
+  detailSeq += 1
+  listLoading.value = false
+  detailLoading.value = false
   selected.value = null
   detail.value = null
   detailError.value = null
@@ -448,10 +471,15 @@ function switchTab(value: string) {
 }
 
 async function loadGroups() {
+  const seq = ++groupsSeq
+  const tab = activeTab.value
   listError.value = null
   try {
-    groups.value = await current.value.fetchGroups()
+    const fetched = await current.value.fetchGroups()
+    if (seq !== groupsSeq || activeTab.value !== tab) return
+    groups.value = fetched
   } catch (e: unknown) {
+    if (seq !== groupsSeq || activeTab.value !== tab) return
     groups.value = []
     listError.value = `加载群组列表失败: ${(e as Error).message}`
     return
@@ -464,22 +492,30 @@ async function loadGroups() {
 
 async function loadList() {
   if (!groupId.value) return
+  const seq = ++listSeq
+  const tab = activeTab.value
+  const gid = groupId.value
   listLoading.value = true
   listError.value = null
   selected.value = null
   detail.value = null
   detailError.value = null
   try {
-    const rows = await current.value.fetchList(groupId.value)
+    const rows = await current.value.fetchList(gid)
+    if (seq !== listSeq || activeTab.value !== tab || groupId.value !== gid) return
     list.value = Array.isArray(rows) ? rows : []
   } catch (e: unknown) {
+    if (seq !== listSeq || activeTab.value !== tab || groupId.value !== gid) return
     listError.value = (e as Error).message
   } finally {
-    listLoading.value = false
+    if (seq === listSeq) listLoading.value = false
   }
 }
 
 async function open(key: string) {
+  const seq = ++detailSeq
+  const tab = activeTab.value
+  const gid = groupId.value
   listScrollTop = pageScroller()?.scrollTop ?? 0
   selected.value = key
   detail.value = null
@@ -488,12 +524,15 @@ async function open(key: string) {
   resetGenLog()
   void nextTick(() => pageScroller()?.scrollTo({ top: 0 }))
   try {
-    detail.value = await current.value.fetchDetail(groupId.value, key)
+    const loaded = await current.value.fetchDetail(gid, key)
+    if (seq !== detailSeq || activeTab.value !== tab || selected.value !== key) return
+    detail.value = loaded
   } catch (e: unknown) {
+    if (seq !== detailSeq || activeTab.value !== tab || selected.value !== key) return
     detailError.value = (e as Error).message
     toast((e as Error).message, 'error')
   } finally {
-    detailLoading.value = false
+    if (seq === detailSeq) detailLoading.value = false
   }
 }
 

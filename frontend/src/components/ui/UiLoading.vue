@@ -1,5 +1,5 @@
 <template>
-  <div class="ui-loading">
+  <div class="ui-loading" role="status" aria-busy="true">
     <div class="ui-loading__bar ui-loading__bar--1" />
     <div class="ui-loading__bar ui-loading__bar--2" />
     <div class="ui-loading__bar ui-loading__bar--3" />
@@ -46,5 +46,17 @@ withDefaults(defineProps<{
 @keyframes pulse {
   0%, 100% { opacity: 0.3; }
   50% { opacity: 0.7; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-loading__bar {
+    animation: none;
+    opacity: 0.5;
+  }
+}
+
+:global(html[data-motion="reduced"]) .ui-loading__bar {
+  animation: none;
+  opacity: 0.5;
 }
 </style>

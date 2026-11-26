@@ -108,6 +108,23 @@ export function useConversationDeletion(refresh: (scope: string) => Promise<void
     if (operation?.state === 'unknown' && operation.actionId) await poll(operation)
   }
 
+  /** 清除单条已停滞或失败的状态记录，解除行级删除锁死 */
+  function dismiss(scope: string, rowId: number) {
+    const operation = get(scope, rowId)
+    if (operation && (operation.state === 'unknown' || operation.state === 'failed')) {
+      operations.delete(key(scope, rowId))
+    }
+  }
+
+  /** 刷新会话后清理所有已停滞（unknown）或失败（failed）的状态记录 */
+  function clear() {
+    for (const [opKey, operation] of operations.entries()) {
+      if (operation.state === 'unknown' || operation.state === 'failed') {
+        operations.delete(opKey)
+      }
+    }
+  }
+
   onUnmounted(() => {
     disposed = true
     controllers.forEach(controller => controller.abort())
@@ -115,5 +132,5 @@ export function useConversationDeletion(refresh: (scope: string) => Promise<void
     timers.clear()
   })
 
-  return { get, remove, resume }
+  return { get, remove, resume, dismiss, clear }
 }

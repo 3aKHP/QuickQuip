@@ -33,14 +33,23 @@
         </div>
 
         <div class="archive-preview">
+          <p v-if="loadError" class="error-note">{{ loadError }}</p>
           <UiLoading v-if="previewLoading" text="正在读取日志尾部" />
-          <UiEmpty v-else-if="!selectedFile && files.length" icon="FolderOpen" title="选择一个日志文件查看预览" />
+          <UiEmpty v-else-if="!selectedFile" icon="FolderOpen" :title="files.length ? '选择一个日志文件查看预览' : '暂无日志归档'" />
           <template v-else>
             <div class="preview-head">
               <span class="preview-title">{{ selectedFile }}</span>
-              <UiTag size="sm">{{ previewLines.length }} 行</UiTag><UiInfoTip :text="`预览只显示该文件末尾的 ${PREVIEW_TAIL_LINES} 行；查看完整内容请使用「下载」。`" />
+              <div class="preview-tools">
+                <input v-model="previewFilter" type="search" class="preview-filter" placeholder="过滤预览行…" aria-label="过滤预览行" />
+                <UiTag size="sm">{{ filteredPreview.length }} / {{ previewLines.length }} 行</UiTag>
+                <UiInfoTip :text="`预览只显示该文件末尾的 ${PREVIEW_TAIL_LINES} 行；查看完整内容请使用「下载」。`" />
+              </div>
             </div>
-            <pre class="preview-block">{{ previewLines.join('\n') }}</pre>
+            <p v-if="previewError" class="error-note">{{ previewError }}</p>
+            <div v-else class="preview-block">
+              <div v-for="(line, i) in filteredPreview" :key="i" class="preview-line" :class="line.cls">{{ line.text }}</div>
+              <UiEmpty v-if="!filteredPreview.length" icon="Search" title="无匹配日志行" />
+            </div>
           </template>
         </div>
       </div>
@@ -49,7 +58,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiCard from '../components/ui/UiCard.vue'
@@ -68,9 +77,29 @@ interface LogFileItem {
 
 const loading = ref(false)
 const previewLoading = ref(false)
+const loadError = ref('')
+const previewError = ref('')
 const files = ref<LogFileItem[]>([])
 const selectedFile = ref('')
 const previewLines = ref<string[]>([])
+const previewFilter = ref('')
+let previewSeq = 0
+
+function classifyLine(line: string): string {
+  if (/\[(?:ERROR|CRITICAL)\]|\|\s*(?:ERROR|CRITICAL)\b|\b(?:ERROR|CRITICAL):|Traceback|Exception:/.test(line)) return 'lvl-error'
+  if (/\[WARNING\]|\|\s*WARNING\b|\bWARNING:/.test(line)) return 'lvl-warning'
+  if (/\[SUCCESS\]|\|\s*SUCCESS\b/.test(line)) return 'lvl-success'
+  if (/\[INFO\]|\|\s*INFO\b|\bINFO:/.test(line)) return 'lvl-info'
+  if (/\[DEBUG\]|\|\s*DEBUG\b|\bDEBUG:/.test(line)) return 'lvl-debug'
+  return ''
+}
+
+const classifiedLines = computed(() => previewLines.value.map(text => ({ text, cls: classifyLine(text) })))
+const filteredPreview = computed(() => {
+  const q = previewFilter.value.trim().toLowerCase()
+  if (!q) return classifiedLines.value
+  return classifiedLines.value.filter(item => item.text.toLowerCase().includes(q))
+})
 
 function formatTime(ts: number): string {
   if (!ts) return ''
@@ -101,19 +130,25 @@ const PREVIEW_TAIL_LINES = 240
 
 async function loadPreview(name: string) {
   if (!name) return
+  const seq = ++previewSeq
   previewLoading.value = true
+  previewError.value = ''
   try {
     const data = await fetchLogTail(name, PREVIEW_TAIL_LINES)
+    if (seq !== previewSeq) return
     previewLines.value = data.lines || []
-  } catch {
+  } catch (e: unknown) {
+    if (seq !== previewSeq) return
     previewLines.value = []
+    previewError.value = `读取日志失败：${(e as Error).message}`
   } finally {
-    previewLoading.value = false
+    if (seq === previewSeq) previewLoading.value = false
   }
 }
 
 async function loadFiles() {
   loading.value = true
+  loadError.value = ''
   try {
     const data = await fetchLogIndex()
     files.value = data.files || []
@@ -125,10 +160,8 @@ async function loadFiles() {
     } else {
       previewLines.value = []
     }
-  } catch {
-    files.value = []
-    selectedFile.value = ''
-    previewLines.value = []
+  } catch (e: unknown) {
+    loadError.value = `加载日志归档列表失败：${(e as Error).message}`
   } finally {
     loading.value = false
   }
@@ -242,6 +275,27 @@ onMounted(() => {
   flex-wrap: wrap;
 }
 
+.preview-tools {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--qq-gap-xs);
+  flex-wrap: wrap;
+}
+
+.preview-filter {
+  min-height: 28px;
+  height: 28px;
+  padding: 2px 8px;
+  font-size: var(--qq-text-xs);
+  width: 170px;
+}
+
+.error-note {
+  margin: 0;
+  color: var(--qq-danger-ink);
+  font-size: var(--qq-text-xs);
+}
+
 .preview-block {
   min-height: 62vh;
   max-height: 75vh;
@@ -251,13 +305,26 @@ onMounted(() => {
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-sm);
   background: var(--qq-surface-strong);
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
+
+.preview-line {
   color: var(--qq-text-muted);
   font-family: var(--qq-font-mono);
   font-size: var(--qq-text-xs);
   line-height: 1.5;
   white-space: pre-wrap;
-  word-break: break-word;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }
+
+.lvl-error { color: var(--qq-log-error); }
+.lvl-warning { color: var(--qq-log-warn); }
+.lvl-success { color: var(--qq-log-success); }
+.lvl-info { color: var(--qq-log-info); }
+.lvl-debug { color: var(--qq-log-debug); }
 
 @media (max-width: 1100px) {
   .archive-grid {

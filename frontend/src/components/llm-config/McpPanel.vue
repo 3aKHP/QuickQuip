@@ -8,12 +8,13 @@
         </div>
         <div class="mcp-panel__top-actions">
           <span v-if="liveSummary" class="mcp-live-summary">{{ liveSummary }}</span>
-          <UiButton size="sm" variant="ghost" icon="RefreshCw" :loading="loadingLive" @click="loadLiveStatus">刷新连接状态</UiButton>
+          <UiButton size="sm" variant="ghost" icon="RefreshCw" :loading="loadingLive" @click="loadLiveStatus(true)">刷新连接状态</UiButton>
         </div>
       </div>
+      <p v-if="liveError" class="mcp-live-error">{{ liveError }}</p>
     </UiCard>
 
-    <UiCard v-for="(server, index) in servers" :key="index" padding="lg" :accent="server.enabled === false ? undefined : 'cyan'">
+    <UiCard v-for="(server, index) in servers" :key="serverKeys[index] ?? index" padding="lg" :accent="server.enabled === false ? undefined : 'cyan'">
       <header class="server-head">
         <input
           class="server-head__id"
@@ -53,8 +54,8 @@
       </details>
 
       <div class="server-grid">
-        <SettingField label="传输方式" :model-value="String(server.transport ?? 'stdio')" :options="transportOptions" @update:model-value="patch(index, { transport: String($event) })" />
-        <SettingField label="超时" unit="秒" :meta="{ type: 'number', minimum: 0 }" :model-value="numberOr(server.timeout_seconds, 30)" @update:model-value="patch(index, { timeout_seconds: $event })" />
+        <SettingField label="传输方式" :model-value="String(server.transport ?? 'stdio')" :options="transportOptions" @update:model-value="onTransportChange(index, String($event))" />
+        <SettingField label="超时" unit="秒" :meta="{ type: 'number', minimum: 0.01 }" :model-value="numberOr(server.timeout_seconds, 30)" @update:model-value="patch(index, { timeout_seconds: $event })" />
         <SettingField label="工具名前缀" :model-value="String(server.tool_prefix ?? '')" hint="给该服务的工具名加前缀，避免撞名。留空不加。" @update:model-value="patch(index, { tool_prefix: $event === '' ? null : $event })" />
 
         <template v-if="transportOf(server) === 'stdio'">
@@ -66,7 +67,7 @@
           <SettingField label="工作目录" :model-value="String(server.cwd ?? '')" hint="留空使用 Bot 进程目录。" @update:model-value="patch(index, { cwd: $event === '' ? null : $event })" />
           <div class="server-grid__wide">
             <p class="sub-label">环境变量 <UiInfoTip text="密钥值必须写成 ${变量名} 引用，不能直接填写。" /></p>
-            <KeyValueEditor :model-value="objectValue(server.env)" @update:model-value="patch(index, { env: $event })" />
+            <KeyValueEditor :model-value="objectValue(server.env)" value-placeholder="值（密钥用 ${变量名} 引用）" @update:model-value="patch(index, { env: $event })" />
           </div>
         </template>
 
@@ -79,18 +80,26 @@
             <StringListEditor :model-value="stringList(server.docker_args)" @update:model-value="patch(index, { docker_args: $event })" />
           </div>
           <div class="server-grid__wide">
+            <p class="sub-label">容器启动参数</p>
+            <StringListEditor :model-value="stringList(server.args)" @update:model-value="patch(index, { args: $event })" />
+          </div>
+          <div class="server-grid__wide">
             <p class="sub-label">挂载</p>
             <StringListEditor :model-value="stringList(server.mounts)" placeholder="宿主路径:容器路径" @update:model-value="patch(index, { mounts: $event })" />
           </div>
           <SettingField label="网络" :model-value="String(server.network ?? '')" @update:model-value="patch(index, { network: $event === '' ? null : $event })" />
           <SettingField label="容器工作目录" :model-value="String(server.container_workdir ?? '')" @update:model-value="patch(index, { container_workdir: $event === '' ? null : $event })" />
+          <div class="server-grid__wide">
+            <p class="sub-label">环境变量 <UiInfoTip text="密钥值必须写成 ${变量名} 引用，不能直接填写。" /></p>
+            <KeyValueEditor :model-value="objectValue(server.env)" value-placeholder="值（密钥用 ${变量名} 引用）" @update:model-value="patch(index, { env: $event })" />
+          </div>
         </template>
 
         <template v-else>
           <SettingField class="server-grid__wide" label="服务地址" :model-value="String(server.url ?? '')" :placeholder="MCP_SERVER_URL_PLACEHOLDER" @update:model-value="patch(index, { url: String($event) })" />
           <div class="server-grid__wide">
             <p class="sub-label">请求头 <UiInfoTip text="密钥值必须写成 ${变量名} 引用，不能直接填写。" /></p>
-            <KeyValueEditor :model-value="objectValue(server.headers)" @update:model-value="patch(index, { headers: $event })" />
+            <KeyValueEditor :model-value="objectValue(server.headers)" value-placeholder="值（密钥用 ${变量名} 引用）" @update:model-value="patch(index, { headers: $event })" />
           </div>
         </template>
 
@@ -122,7 +131,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 import UiButton from '../ui/UiButton.vue'
 import UiCard from '../ui/UiCard.vue'
 import UiEmpty from '../ui/UiEmpty.vue'
@@ -136,20 +145,28 @@ import KeyValueEditor from './KeyValueEditor.vue'
 import SettingsForm from './SettingsForm.vue'
 import { fetchMcpDashboard, type McpServer } from '../../api/mcpDashboard'
 import { injectLlmConfigStore } from '../../composables/useLlmConfigStore'
+import { toast } from '../../toast'
 import { MCP_NEGOTIATION_OPTIONS, MCP_PULL_POLICY_OPTIONS, MCP_TRANSPORT_OPTIONS, fieldTemplate, isObject, type JsonObject, type JsonValue } from '../../lib/llmConfig'
 
 const store = injectLlmConfigStore()
 
 const liveServers = ref<McpServer[]>([])
 const loadingLive = ref(false)
+const liveError = ref('')
 
-async function loadLiveStatus() {
+async function loadLiveStatus(manual = false) {
   loadingLive.value = true
+  if (manual) liveError.value = ''
   try {
     const data = await fetchMcpDashboard()
     liveServers.value = data.servers || []
-  } catch {
-    /* ignore live status fetch error so config editing stays usable */
+    liveError.value = ''
+  } catch (e: unknown) {
+    const message = (e as Error).message || '读取 MCP 运行状态失败'
+    if (manual) {
+      liveError.value = `刷新连接状态失败：${message}`
+      toast(liveError.value, 'error')
+    }
   } finally {
     loadingLive.value = false
   }
@@ -195,21 +212,47 @@ const negotiationOptions = MCP_NEGOTIATION_OPTIONS.map(value => ({ value, label:
 // 误改写为块注释导致虚拟文件解析失败（language-tools#6264），直接写在模板里会让全文件报 TS2304
 const MCP_SERVER_URL_PLACEHOLDER = 'https://example.com/mcp'
 
+const EMPTY_OBJ: JsonObject = Object.freeze({})
+let nextServerKey = 1
+const serverKeys = ref<number[]>(servers.value.map(() => nextServerKey++))
+let selfMcpCommit = false
+watch(servers, list => {
+  if (selfMcpCommit) {
+    selfMcpCommit = false
+    while (serverKeys.value.length < list.length) serverKeys.value.push(nextServerKey++)
+    if (serverKeys.value.length > list.length) serverKeys.value.length = list.length
+    return
+  }
+  serverKeys.value = list.map(() => nextServerKey++)
+})
+
 function mcpSection(): JsonObject {
   const settings = store.document.value?.settings
   return isObject(settings) && isObject(settings.mcp) ? settings.mcp : {}
 }
-function commit(next: JsonObject[]) { store.updateSettingsSection('mcp', { ...mcpSection(), servers: next }) }
+function commit(next: JsonObject[]) { selfMcpCommit = true; store.updateSettingsSection('mcp', { ...mcpSection(), servers: next }) }
 function patch(index: number, fields: JsonObject) { commit(servers.value.map((server, i) => i === index ? { ...server, ...fields } : server)) }
-function remove(index: number) { if (confirm(`确定删除 MCP 服务「${servers.value[index]?.id || '未命名'}」？`)) commit(servers.value.filter((_, i) => i !== index)) }
-function add() { commit([...servers.value, structuredClone(fieldTemplate('servers'))]) }
+function onTransportChange(index: number, transport: string) {
+  const fields: JsonObject = { transport }
+  if (transport !== 'http') fields.negotiation = 'legacy'
+  patch(index, fields)
+}
+function remove(index: number) {
+  if (!confirm(`确定删除 MCP 服务「${servers.value[index]?.id || '未命名'}」？`)) return
+  serverKeys.value.splice(index, 1)
+  commit(servers.value.filter((_, i) => i !== index))
+}
+function add() {
+  serverKeys.value.push(nextServerKey++)
+  commit([...servers.value, structuredClone(fieldTemplate('servers'))])
+}
 
 function transportOf(server: JsonObject) { const value = String(server.transport ?? 'stdio'); return value === 'sse' ? 'http' : value }
 function stringList(value: JsonValue | undefined): string[] { return Array.isArray(value) ? value.map(String) : [] }
-function objectValue(value: JsonValue | undefined): JsonObject { return isObject(value) ? value : {} }
+function objectValue(value: JsonValue | undefined): JsonObject { return isObject(value) ? value : EMPTY_OBJ }
 function numberOr(value: JsonValue | undefined, fallback: number) { return typeof value === 'number' ? value : fallback }
 
-onMounted(() => { void loadLiveStatus() })
+onMounted(() => { void loadLiveStatus(false) })
 </script>
 
 <style scoped>
@@ -241,6 +284,12 @@ onMounted(() => { void loadLiveStatus() })
 .mcp-live-summary {
   font-size: var(--qq-text-xs);
   color: var(--qq-text-muted);
+}
+
+.mcp-live-error {
+  margin: var(--qq-gap-xs) 0 0;
+  color: var(--qq-danger);
+  font-size: var(--qq-text-xs);
 }
 
 .mcp-panel__note {

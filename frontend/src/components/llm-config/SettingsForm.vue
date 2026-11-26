@@ -66,10 +66,23 @@ function isLongText(field: string) {
 }
 
 const providers = computed<JsonObject[]>(() => Array.isArray(store.document.value?.providers) ? store.document.value.providers.filter(isObject) : [])
-const defaultProviderOptions = computed(() => [
-  { value: '', label: '自动（第一个启用的渠道）' },
-  ...providers.value.filter(provider => provider.enabled !== false).map(provider => ({ value: String(provider.id ?? ''), label: String(provider.id ?? '') })),
-])
+const defaultProviderOptions = computed(() => {
+  const enabled = providers.value.filter(provider => provider.enabled !== false)
+  const options = [
+    { value: '', label: '自动（第一个启用的渠道）' },
+    ...enabled.map(provider => ({ value: String(provider.id ?? ''), label: String(provider.id ?? '') })),
+  ]
+  const raw = valueOf('default_provider')
+  const saved = raw === null || raw === undefined ? '' : String(raw)
+  if (saved && !enabled.some(provider => String(provider.id ?? '') === saved)) {
+    const disabled = providers.value.some(provider => String(provider.id ?? '') === saved)
+    options.splice(1, 0, {
+      value: saved,
+      label: disabled ? `${saved}（已停用）` : `${saved}（不存在）`,
+    })
+  }
+  return options
+})
 </script>
 
 <style scoped>

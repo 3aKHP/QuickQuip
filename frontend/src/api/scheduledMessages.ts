@@ -11,6 +11,7 @@ export interface ScheduledMessageJob {
   origin: string
   created_at: string
   updated_at: string
+  run_at?: string
 }
 
 export interface ScheduledMessageCreateBody {
@@ -20,6 +21,7 @@ export interface ScheduledMessageCreateBody {
   enabled?: boolean
   kind?: 'text' | 'llm'
   recurring?: boolean
+  run_at?: string
 }
 
 export type ScheduledMessagePatch = Partial<ScheduledMessageCreateBody>
@@ -37,14 +39,14 @@ export async function createScheduledMessage(body: ScheduledMessageCreateBody) {
 }
 
 export async function updateScheduledMessage(id: string, patch: ScheduledMessagePatch) {
-  return request<ScheduledMessageJob>(`/api/scheduled-messages/${id}`, {
+  return request<ScheduledMessageJob>(`/api/scheduled-messages/${encodeURIComponent(id)}`, {
     method: 'PUT',
     body: JSON.stringify(patch),
   })
 }
 
 export async function deleteScheduledMessage(id: string) {
-  return request<{ ok: boolean }>(`/api/scheduled-messages/${id}`, {
+  return request<{ ok: boolean }>(`/api/scheduled-messages/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   })
 }

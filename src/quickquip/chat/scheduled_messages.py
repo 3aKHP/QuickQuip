@@ -59,21 +59,55 @@ def validate_cron(cron_expr: str) -> None:
 _INT_FIELD_RE = re.compile(r"^\d+$")
 
 
-def validate_one_off_schedule(cron_expr: str) -> None:
+def parse_run_at(raw: str) -> datetime:
+    """解析一次性任务的定点触发时间（ISO 8601，缺省按北京时间 Asia/Shanghai）。"""
+    text = str(raw or "").strip()
+    if not text:
+        raise ValueError("run_at 不能为空")
+    from zoneinfo import ZoneInfo
+
+    tz = ZoneInfo(BEIJING_TIMEZONE)
+    try:
+        dt = datetime.fromisoformat(text)
+    except ValueError as exc:
+        raise ValueError(f"非法触发时间格式 {raw!r}") from exc
+    if dt.tzinfo is None:
+        dt = dt.replace(tzinfo=tz)
+    else:
+        dt = dt.astimezone(tz)
+    return dt.replace(second=0, microsecond=0)
+
+
+def normalize_run_at(raw: str | None) -> str:
+    """归一化 run_at 为北京时间 ISO 字符串；空值返回 ''。"""
+    text = str(raw or "").strip()
+    if not text:
+        return ""
+    return parse_run_at(text).isoformat(timespec="seconds")
+
+
+def validate_one_off_schedule(cron_expr: str, run_at: str = "") -> None:
     """校验一次性任务（recurring=False）的首次触发时间在可预期的未来，非法时抛 ValueError。
 
-    钉死月/日的表达式若今年对应时刻已过，APScheduler 会静默等到来年才触发，
-    与"一次性提醒"的直觉相悖，此处直接拒绝。apscheduler 不可用时退化为跳过。
+    - 若显式提供 ``run_at``（支持跨年定点触发），校验该时刻严格晚于当前北京时间（分钟粒度）；
+    - 未提供 ``run_at`` 时沿用无年份 5 段 cron 校验：钉死月/日的表达式若今年对应时刻已过，
+      APScheduler 会静默等到来年才触发，此处直接拒绝。apscheduler 不可用时退化为跳过。
     """
     validate_cron(cron_expr)
-    try:
-        from zoneinfo import ZoneInfo
+    from zoneinfo import ZoneInfo
 
+    tz = ZoneInfo(BEIJING_TIMEZONE)
+    now = datetime.now(tz)
+    if (run_at or "").strip():
+        target = parse_run_at(run_at)
+        now_minute = now.replace(second=0, microsecond=0)
+        if target <= now_minute:
+            raise ValueError("一次性任务的触发时间必须在未来")
+        return
+    try:
         from apscheduler.triggers.cron import CronTrigger
     except ImportError:
         return
-    tz = ZoneInfo(BEIJING_TIMEZONE)
-    now = datetime.now(tz)
     trigger = CronTrigger.from_crontab(cron_expr.strip(), timezone=tz)
     if trigger.get_next_fire_time(None, now) is None:
         raise ValueError(f"一次性任务 {cron_expr!r} 没有未来触发时间")
@@ -130,9 +164,14 @@ class ScheduledMessage:
     origin: str = "web"  # command | llm | web
     created_at: str = ""
     updated_at: str = ""
+    # 可选的带年份定点触发时间（ISO 8601 北京时间）；仅 recurring=False 时有效（跨年一次性任务）。
+    run_at: str = ""
 
     def to_dict(self) -> dict[str, Any]:
-        return asdict(self)
+        data = asdict(self)
+        if not data.get("run_at"):
+            data.pop("run_at", None)
+        return data
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "ScheduledMessage":
@@ -152,6 +191,9 @@ class ScheduledMessage:
         origin = str(data.get("origin") or "web")
         if origin not in VALID_ORIGINS:
             origin = "web"
+        recurring = bool(data.get("recurring", True))
+        raw_run_at = data.get("run_at")
+        run_at = "" if recurring else normalize_run_at(raw_run_at)
         return cls(
             id=job_id,
             cron=cron,
@@ -159,10 +201,11 @@ class ScheduledMessage:
             message=message,
             enabled=bool(data.get("enabled", True)),
             kind=kind,
-            recurring=bool(data.get("recurring", True)),
+            recurring=recurring,
             origin=origin,
             created_at=str(data.get("created_at") or ""),
             updated_at=str(data.get("updated_at") or ""),
+            run_at=run_at,
         )
 
 
@@ -267,12 +310,14 @@ class ScheduledMessageStore:
         kind: str = "text",
         recurring: bool = True,
         origin: str = "web",
+        run_at: str = "",
     ) -> ScheduledMessage:
         validate_cron(cron)
+        normalized_run_at = "" if recurring else normalize_run_at(run_at)
         if not recurring:
             # 一次性任务的未来触发时间校验落在存储层：Web 路由、/schedule 命令、
-            # LLM 工具三条写路径共用，避免钉死已过期日期的任务静默等到来年。
-            validate_one_off_schedule(cron)
+            # LLM 工具三条写路径共用；提供 run_at 时支持跨年定点触发。
+            validate_one_off_schedule(cron, normalized_run_at)
         now = datetime.now().isoformat(timespec="seconds")
         with self._lock():
             jobs = self._load_unlocked()
@@ -291,12 +336,21 @@ class ScheduledMessageStore:
                 origin=origin if origin in VALID_ORIGINS else "web",
                 created_at=now,
                 updated_at=now,
+                run_at=normalized_run_at,
             )
             jobs.append(job)
             self._save_unlocked(jobs)
         return job
 
-    _UPDATE_ALLOWED_FIELDS = {"cron", "group_ids", "message", "enabled", "kind", "recurring"}
+    _UPDATE_ALLOWED_FIELDS = {
+        "cron",
+        "group_ids",
+        "message",
+        "enabled",
+        "kind",
+        "recurring",
+        "run_at",
+    }
 
     def _update_locked(
         self, jobs: list[ScheduledMessage], index: int, effective: dict[str, Any]

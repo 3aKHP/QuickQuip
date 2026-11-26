@@ -6,7 +6,12 @@
         <UiTag v-if="group.overridden" size="sm" variant="cyan">{{ group.overridden }} 项覆盖</UiTag>
       </header>
       <div class="params-group__rows">
-        <div v-for="name in group.names" :key="name" class="param-row" :class="{ 'param-row--inherited': !isOverridden(name) }">
+        <div
+          v-for="name in group.primary"
+          :key="name"
+          class="param-row"
+          :class="{ 'param-row--inherited': !isOverridden(name), 'param-row--overridden': isOverridden(name) }"
+        >
           <div class="param-row__label">
             <span class="param-row__name">{{ labelFor(name).label || name }}</span>
             <UiInfoTip v-if="labelFor(name).hint" :text="labelFor(name).hint" />
@@ -49,6 +54,7 @@
               :max="metaFor(name)?.maximum ?? undefined"
               :value="valueFor(name) === null ? '' : Number(valueFor(name))"
               @input="onNumber(name, $event)"
+              @change="onNumberCommit(name, $event)"
             />
             <input
               v-else
@@ -67,6 +73,27 @@
           </div>
         </div>
       </div>
+
+      <details v-if="group.secondary.length" class="params-group__other">
+        <summary>其他协议参数（{{ group.secondary.length }}）</summary>
+        <div class="params-group__rows">
+          <div
+            v-for="name in group.secondary"
+            :key="name"
+            class="param-row param-row--inherited"
+          >
+            <div class="param-row__label">
+              <span class="param-row__name">{{ labelFor(name).label || name }}</span>
+              <UiInfoTip v-if="labelFor(name).hint" :text="labelFor(name).hint" />
+              <span v-if="labelFor(name).unit" class="param-row__unit">{{ labelFor(name).unit }}</span>
+            </div>
+            <div class="param-row__inherited">
+              <span class="param-row__inherit-chip">其他协议</span>
+              <UiButton size="sm" variant="ghost" @click="overrideParam(name)">覆盖</UiButton>
+            </div>
+          </div>
+        </div>
+      </details>
     </section>
   </div>
 </template>
@@ -86,13 +113,29 @@ const props = withDefaults(defineProps<{
   metadata?: Record<string, FieldMetadata>
   styleProfiles?: string[]
   level?: 'provider' | 'model'
-}>(), { metadata: () => ({}), styleProfiles: () => [], level: 'provider' })
+  protocol?: string
+}>(), { metadata: () => ({}), styleProfiles: () => [], level: 'provider', protocol: '' })
 
 const emit = defineEmits<{ 'update:modelValue': [value: JsonObject] }>()
+
+/** 协议专用参数：非对应协议且未被覆盖时收纳到折叠区 */
+const PROTOCOL_SPECIFIC_PARAMS: Record<string, string[]> = {
+  prompt_caching: ['claude'],
+  cache_ttl: ['claude'],
+  builtin_search: ['gemini', 'claude'],
+  gemini_empty_response_recovery: ['gemini'],
+  gemini_empty_response_recovery_max_output_tokens: ['gemini'],
+  responses_profile: ['openai_responses'],
+}
 
 /** 覆盖态判定：键存在且非 null 即为覆盖；null/缺失都表示跟随上层 */
 function isOverridden(name: string) {
   return props.modelValue[name] !== null && props.modelValue[name] !== undefined
+}
+function isRelevantToProtocol(name: string) {
+  if (!props.protocol || isOverridden(name)) return true
+  const allowed = PROTOCOL_SPECIFIC_PARAMS[name]
+  return !allowed || allowed.includes(props.protocol)
 }
 function valueFor(name: string): JsonValue {
   return props.modelValue[name] ?? null
@@ -123,7 +166,9 @@ const groups = computed(() => {
   return Object.entries(PARAM_GROUPS)
     .map(([key, names]) => {
       const present = names.filter(name => available.includes(name))
-      return { key, names: present, overridden: present.filter(isOverridden).length }
+      const primary = present.filter(isRelevantToProtocol)
+      const secondary = present.filter(name => !isRelevantToProtocol(name))
+      return { key, names: present, primary, secondary, overridden: present.filter(isOverridden).length }
     })
     .filter(group => group.names.length > 0)
 })
@@ -142,6 +187,17 @@ function onNumber(name: string, event: Event) {
   if (text === '') return
   const value = Number(text)
   if (Number.isFinite(value)) setParam(name, value)
+}
+function onNumberCommit(name: string, event: Event) {
+  const input = event.target as HTMLInputElement
+  const text = input.value.trim()
+  if (text === '') {
+    clearParam(name)
+    return
+  }
+  const value = Number(text)
+  if (Number.isFinite(value)) setParam(name, value)
+  else input.value = valueFor(name) === null ? '' : String(valueFor(name))
 }
 function jsonText(name: string) {
   const value = props.modelValue[name]
@@ -195,16 +251,39 @@ function onJsonChange(name: string, event: Event) {
   grid-template-columns: minmax(160px, 240px) minmax(0, 1fr);
   gap: var(--qq-gap-sm);
   align-items: center;
-  padding: 7px 0;
+  padding: 7px 6px;
   border-bottom: 1px solid var(--qq-border-soft);
+  border-left: 3px solid transparent;
+  transition: border-color var(--qq-transition-fast), background-color var(--qq-transition-fast);
 }
 
 .param-row:last-child {
   border-bottom: 0;
 }
 
+.param-row--overridden {
+  border-left-color: var(--qq-primary);
+  padding-left: 10px;
+  background: color-mix(in srgb, var(--qq-primary-soft) 45%, transparent);
+}
+
 .param-row--inherited {
   opacity: 0.75;
+}
+
+.params-group__other {
+  margin-top: 4px;
+  padding: 4px 8px;
+  border: 1px dashed var(--qq-border-soft);
+  border-radius: var(--qq-radius-md);
+  background: var(--qq-surface-elevated);
+}
+
+.params-group__other summary {
+  cursor: pointer;
+  color: var(--qq-text-muted);
+  font-size: var(--qq-text-xs);
+  padding: 2px 0;
 }
 
 .param-row__label {

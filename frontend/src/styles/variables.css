@@ -25,26 +25,29 @@
   /* ── Text ── */
   --qq-text: #1c2330;
   --qq-text-muted: #5b6678;
-  --qq-text-quiet: #9099a6;
+  --qq-text-quiet: #6b7687;
 
   /* ── Primary: QQ 蓝 ── */
   --qq-primary: #12b7f5;
   --qq-primary-dark: #0d9be0;
   --qq-primary-deep: #0a82c2;
+  --qq-primary-hover: #0a82c2;
   --qq-primary-soft: rgba(18, 183, 245, 0.12);
   --qq-primary-glow: rgba(18, 183, 245, 0.40);
-  --qq-primary-ink: rgba(13, 155, 224, 0.94);
+  --qq-primary-ink: #0774b0;
   --qq-primary-border: rgba(18, 183, 245, 0.36);
   --qq-primary-shadow: rgba(18, 183, 245, 0.25);
 
   /* ── Accent: 青 (Cyan) ── */
   --qq-cyan: #06b6d4;
   --qq-cyan-deep: #0891b2;
+  --qq-cyan-ink: #0e7490;
   --qq-cyan-soft: rgba(6, 182, 212, 0.12);
   --qq-cyan-glow: rgba(6, 182, 212, 0.38);
 
   /* ── Highlight: 琥珀 (Amber) ── */
   --qq-accent: #f59e0b;
+  --qq-accent-ink: #b45309;
   --qq-accent-soft: rgba(245, 158, 11, 0.14);
 
   /* ── Brand Gradient（QQ 蓝 → 青）── */
@@ -52,11 +55,13 @@
 
   /* ── Semantics ── */
   --qq-success: #07c160;
+  --qq-success-ink: #047857;
   --qq-success-soft: rgba(7, 193, 96, 0.12);
   /* 浅色下取深琥珀（徽标文字对比度 4.5:1+，达 WCAG AA）；暗色覆盖回亮橙 */
   --qq-warn: #b45309;
   --qq-warn-soft: rgba(250, 157, 59, 0.12);
   --qq-danger: #fa5151;
+  --qq-danger-ink: #c81e1e;
   --qq-danger-deep: #e03e3e;
   --qq-danger-soft: rgba(250, 81, 81, 0.12);
   --qq-danger-border: rgba(250, 81, 81, 0.25);
@@ -178,11 +183,21 @@
   /* ── Table ── */
   --qq-table-stripe: rgba(0, 0, 0, 0.018);
 
+  /* ── Z-Index Scale（统一层级，避免气泡/日期弹层/Toast 互相遮挡）── */
+  --qq-z-shell: 100;
+  --qq-z-status: 150;
+  --qq-z-drawer: 300;
+  --qq-z-modal: 400;
+  --qq-z-popover: 500;
+  --qq-z-tooltip: 600;
+  --qq-z-toast: 700;
+
   /* ── Shell Glass（氛围层玻璃：侧栏/状态条/抽屉/Toast）── */
   --qq-shell-glass-bg: rgba(255, 255, 255, 0.46);
   --qq-shell-rail-bg: rgba(238, 242, 246, 0.40);
   --qq-shell-status-bg: rgba(238, 242, 246, 0.52);
-  --qq-shell-drawer-bg: rgba(255, 255, 255, 0.66);
+  --qq-shell-drawer-bg: rgba(255, 255, 255, 0.90);
+  --qq-shell-drawer-surface: #ffffff;
   --qq-shell-glass-border: rgba(18, 183, 245, 0.22);
   --qq-shell-glass-highlight: rgba(255, 255, 255, 0.72);
   --qq-shell-glass-sheen: rgba(18, 183, 245, 0.10);
@@ -234,24 +249,27 @@
   --qq-border-soft: rgba(255, 255, 255, 0.05);
 
   --qq-text: #e6ebf2;
-  --qq-text-muted: #8290a3;
-  --qq-text-quiet: #555f6e;
+  --qq-text-muted: #8b99ad;
+  --qq-text-quiet: #78869a;
 
   --qq-primary: #12b7f5;
   --qq-primary-dark: #0d9be0;
   --qq-primary-deep: #34d0f7;
+  --qq-primary-hover: #0d9be0;
   --qq-primary-soft: rgba(18, 183, 245, 0.16);
   --qq-primary-glow: rgba(18, 183, 245, 0.36);
-  --qq-primary-ink: rgba(52, 208, 247, 0.96);
+  --qq-primary-ink: #38d0f8;
   --qq-primary-border: rgba(18, 183, 245, 0.34);
   --qq-primary-shadow: rgba(18, 183, 245, 0.22);
 
   --qq-cyan: #22d3ee;
   --qq-cyan-deep: #06b6d4;
+  --qq-cyan-ink: #22d3ee;
   --qq-cyan-soft: rgba(6, 182, 212, 0.16);
   --qq-cyan-glow: rgba(34, 211, 238, 0.34);
 
   --qq-accent: #f59e0b;
+  --qq-accent-ink: #fbbf24;
   --qq-accent-soft: rgba(245, 158, 11, 0.16);
 
   /* 域色暗色微调：提高明度保持识别度 */
@@ -287,10 +305,12 @@
   --qq-epoch-stripe-agg-a: #3a4150;
   --qq-epoch-stripe-agg-b: #464e60;
 
+  --qq-success-ink: #34d399;
   --qq-success-soft: rgba(7, 193, 96, 0.16);
   /* 暗色保持亮橙：浅底加深后的 #b45309 在暗底上对比不足 */
   --qq-warn: #fa9d3b;
   --qq-warn-soft: rgba(250, 157, 59, 0.16);
+  --qq-danger-ink: #f87171;
   --qq-danger-soft: rgba(250, 81, 81, 0.16);
   --qq-danger-deep: #e85a5a;
   --qq-danger-border: rgba(250, 81, 81, 0.30);
@@ -308,7 +328,8 @@
   --qq-shell-glass-bg: rgba(13, 17, 23, 0.62);
   --qq-shell-rail-bg: rgba(17, 24, 32, 0.58);
   --qq-shell-status-bg: rgba(29, 37, 48, 0.62);
-  --qq-shell-drawer-bg: rgba(13, 17, 23, 0.78);
+  --qq-shell-drawer-bg: rgba(16, 22, 31, 0.92);
+  --qq-shell-drawer-surface: #131922;
   --qq-shell-glass-border: rgba(18, 183, 245, 0.18);
   --qq-shell-glass-highlight: rgba(255, 255, 255, 0.07);
   --qq-shell-glass-sheen: rgba(52, 208, 247, 0.10);

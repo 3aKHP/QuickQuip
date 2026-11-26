@@ -1,5 +1,5 @@
 <template>
-  <div :class="classes">
+  <div :class="classes" :tabindex="clickable ? 0 : undefined">
     <div v-if="accent" class="ui-card__accent" :class="`ui-card__accent--${accent}`" />
     <slot />
   </div>
@@ -52,10 +52,24 @@ const classes = computed(() => [
 }
 
 /* hover 微浮起 + 投影加深 + 描边变色 */
-.ui-card--clickable:hover {
+.ui-card--clickable:hover,
+.ui-card--clickable:focus-visible {
+  outline: none;
   border-color: var(--qq-primary-border);
   box-shadow: var(--qq-shadow-card-hover);
   transform: translateY(-1px);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-card--clickable:hover,
+  .ui-card--clickable:focus-visible {
+    transform: none;
+  }
+}
+
+:global(html[data-motion="reduced"]) .ui-card--clickable:hover,
+:global(html[data-motion="reduced"]) .ui-card--clickable:focus-visible {
+  transform: none;
 }
 
 /* 语义色条 — 左侧 2px */

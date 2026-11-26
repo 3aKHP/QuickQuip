@@ -25,6 +25,7 @@
           @toggle-theme="toggleTheme"
         />
         <main ref="contentEl" class="content" :class="routeMotionClass">
+          <div :key="routeTraceKey" class="route-trace" aria-hidden="true" />
           <div class="page-stage">
             <router-view v-slot="{ Component, route: viewRoute }">
               <Transition name="page-shell">
@@ -34,14 +35,6 @@
           </div>
         </main>
       </div>
-
-      <!-- Toast -->
-      <Transition name="toast">
-        <div v-if="toastMsg" class="toast" :class="toastType">
-          <UiIcon :name="toastType === 'error' ? 'CircleX' : 'Info'" :size="16" />
-          <span>{{ toastMsg }}</span>
-        </div>
-      </Transition>
     </div>
 
     <!-- Checking auth -->
@@ -51,6 +44,23 @@
         <p class="muted">稍等，正在确认当前浏览器会话是否仍然有效。</p>
       </UiCard>
     </div>
+
+    <!-- Toast（提升至 app-root 级，登录页同样可提示；悬停暂停、点击关闭） -->
+    <Transition name="toast">
+      <div
+        v-if="toastMsg"
+        class="toast"
+        :class="toastType"
+        :role="toastType === 'error' ? 'alert' : 'status'"
+        :aria-live="toastType === 'error' ? 'assertive' : 'polite'"
+        @click="dismissToast"
+        @mouseenter="pauseToast"
+        @mouseleave="resumeToast"
+      >
+        <UiIcon :name="toastType === 'error' ? 'CircleX' : 'Info'" :size="16" class="toast__icon" />
+        <span class="toast__text">{{ toastMsg }}</span>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -63,7 +73,7 @@ import StatusBar from './components/layout/StatusBar.vue'
 import LightField from './components/background/LightField.vue'
 import UiCard from './components/ui/UiCard.vue'
 import UiIcon from './components/ui/UiIcon.vue'
-import { toastMsg, toastType } from './toast'
+import { dismissToast, pauseToast, resumeToast, toastMsg, toastType } from './toast'
 import { NAV_ITEMS, NAV_SECTIONS } from './config/nav'
 import { useAuth } from './composables/useAuth'
 import { useTheme } from './composables/useTheme'
@@ -84,6 +94,7 @@ const { theme, loadTheme, toggleTheme } = useTheme()
 const route = useRoute()
 const contentEl = ref<HTMLElement | null>(null)
 const routeMotionClass = ref('route-motion-forward')
+const routeTraceKey = ref(0)
 
 function routeDepth(path: string): number {
   if (path === '/') return 0
@@ -103,6 +114,8 @@ watch(
     } else {
       routeMotionClass.value = 'route-motion-switch'
     }
+
+    routeTraceKey.value += 1
 
     void nextTick(() => {
       contentEl.value?.scrollTo({ top: 0 })
@@ -134,6 +147,7 @@ onBeforeUnmount(() => {
   display: flex;
   flex-direction: column;
   height: 100vh;
+  height: 100dvh;
   overflow: hidden;
   position: relative;
 }
@@ -167,26 +181,20 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
-/* Route trace sweep — 换页时顶部一道蓝青光带横扫 */
-.content::before {
-  content: "";
-  position: absolute;
-  top: var(--qq-gap-md);
-  left: var(--qq-gap-lg);
-  right: var(--qq-gap-lg);
+/* Route trace sweep — 每次换页重新挂载触发顶部一道蓝青光带横扫 */
+.route-trace {
+  position: sticky;
+  top: 0;
   z-index: 6;
   height: 1px;
+  margin-bottom: -1px;
+  flex-shrink: 0;
   pointer-events: none;
   opacity: 0;
   background:
     linear-gradient(90deg, transparent, var(--qq-route-trace-color), transparent 42%),
     linear-gradient(90deg, transparent 56%, var(--qq-route-trace-secondary), transparent);
   transform: translateX(-42%);
-}
-
-.content.route-motion-forward::before,
-.content.route-motion-back::before,
-.content.route-motion-switch::before {
   animation: route-trace-sweep 360ms linear 1;
 }
 
@@ -199,6 +207,7 @@ onBeforeUnmount(() => {
   position: relative;
   z-index: 1;
   height: 100vh;
+  height: 100dvh;
   display: grid;
   place-items: center;
   padding: var(--qq-gap-lg);
@@ -229,6 +238,7 @@ onBeforeUnmount(() => {
   display: inline-flex;
   align-items: center;
   gap: var(--qq-gap-sm);
+  max-width: min(92vw, 480px);
   background:
     linear-gradient(180deg, var(--qq-shell-glass-highlight), transparent 58%),
     var(--qq-shell-drawer-bg);
@@ -236,23 +246,30 @@ onBeforeUnmount(() => {
   border-radius: var(--qq-radius-card);
   padding: 10px 18px;
   font-size: var(--qq-text-sm);
+  line-height: 1.45;
   color: var(--qq-text);
-  z-index: 9999;
-  pointer-events: none;
-  white-space: nowrap;
+  z-index: var(--qq-z-toast);
+  pointer-events: auto;
+  cursor: pointer;
+  white-space: normal;
+  word-break: break-word;
   backdrop-filter: blur(16px) saturate(1.2);
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
-  box-shadow: var(--qq-shadow-md);
+  box-shadow: var(--qq-shadow-lg);
+}
+
+.toast__icon {
+  flex-shrink: 0;
 }
 
 .toast.error {
   border-color: var(--qq-toast-border-error);
-  color: var(--qq-danger);
+  color: var(--qq-danger-ink);
 }
 
 .toast.info {
   border-color: var(--qq-toast-border-info);
-  color: var(--qq-primary);
+  color: var(--qq-primary-ink);
 }
 
 /* Responsive */
@@ -266,15 +283,15 @@ onBeforeUnmount(() => {
     padding-bottom: calc(var(--qq-gap-lg) + env(safe-area-inset-bottom, 0px));
   }
 
-  .content::before {
-    left: var(--qq-gap-md);
-    right: var(--qq-gap-md);
-  }
-
   .toast {
     bottom: auto;
     top: calc(var(--qq-status-bar-height) + 56px + env(safe-area-inset-top, 0px));
     transform: translateX(-50%);
+  }
+
+  .toast.toast-enter-from,
+  .toast.toast-leave-to {
+    transform: translate(-50%, -8px);
   }
 }
 </style>

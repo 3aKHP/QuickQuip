@@ -14,7 +14,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, useSlots } from 'vue'
 import UiIcon from './UiIcon.vue'
 
 const props = withDefaults(defineProps<{
@@ -34,7 +34,9 @@ defineEmits<{
   click: [e: MouseEvent]
 }>()
 
+const slots = useSlots()
 const iconSize = computed(() => props.size === 'sm' ? 14 : 16)
+const isIconOnly = computed(() => !slots.default && Boolean(props.icon || props.loading))
 
 // 按图标语义自动分配 hover 微动效：刷新类旋转，方向类前移
 const SPIN_ICONS = new Set(['RefreshCw', 'RotateCw'])
@@ -50,6 +52,7 @@ const classes = computed(() => [
   'ui-btn',
   `ui-btn--${props.variant}`,
   `ui-btn--${props.size}`,
+  { 'ui-btn--icon-only': isIconOnly.value },
 ])
 </script>
 
@@ -66,7 +69,12 @@ const classes = computed(() => [
   font-weight: 500;
   cursor: pointer;
   white-space: nowrap;
-  transition: all var(--qq-transition-fast);
+  transition:
+    background-color var(--qq-transition-fast),
+    border-color var(--qq-transition-fast),
+    color var(--qq-transition-fast),
+    box-shadow var(--qq-transition-fast),
+    transform var(--qq-transition-fast);
   user-select: none;
 }
 
@@ -95,6 +103,16 @@ const classes = computed(() => [
   font-size: var(--qq-text-sm);
 }
 
+.ui-btn--md.ui-btn--icon-only {
+  width: 36px;
+  padding: 0;
+}
+
+.ui-btn--sm.ui-btn--icon-only {
+  width: 28px;
+  padding: 0;
+}
+
 .ui-btn--default {
   background: var(--qq-surface);
   color: var(--qq-text);
@@ -113,14 +131,14 @@ const classes = computed(() => [
 }
 
 .ui-btn--primary:hover:not(:disabled) {
-  background: var(--qq-primary-deep);
-  border-color: var(--qq-primary-deep);
+  background: var(--qq-primary-hover);
+  border-color: var(--qq-primary-hover);
 }
 
 .ui-btn--secondary {
   background: transparent;
-  color: var(--qq-primary);
-  border: 1px solid var(--qq-primary);
+  color: var(--qq-primary-ink);
+  border: 1px solid var(--qq-primary-border);
 }
 
 .ui-btn--secondary:hover:not(:disabled) {

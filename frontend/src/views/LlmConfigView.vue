@@ -10,7 +10,7 @@
         <UiButton icon="Save" :disabled="!store.document.value || store.busy.value || !store.dirty.value || store.conflict.value" :loading="store.saving.value" @click="save">
           保存草稿<template v-if="store.dirty.value"> ●</template>
         </UiButton>
-        <UiButton variant="primary" icon="Rocket" :disabled="!store.document.value || store.busy.value || store.dirty.value || store.conflict.value || store.activeOperation.value" :loading="store.applying.value" @click="apply">应用到 Bot</UiButton>
+        <UiButton variant="primary" icon="Rocket" :title="applyDisabledTitle" :disabled="!store.document.value || store.busy.value || store.dirty.value || store.conflict.value || store.activeOperation.value" :loading="store.applying.value" @click="apply">应用到 Bot</UiButton>
       </template>
     </UiPageHeader>
 
@@ -51,7 +51,7 @@
 
       <div v-if="editingQuickNote" class="quick-note-bar">
         <input
-          v-model="quickNoteText"
+          v-model="store.draftNote.value"
           class="quick-note-bar__input"
           maxlength="120"
           placeholder="输入版本备注，显示为 YYYY-MM-DD HH:mm (备注)"
@@ -171,6 +171,60 @@
           <template v-else-if="section === 'tools'">
             <McpPanel v-show="activeSubTab === 'all' || activeSubTab === 'mcp'" />
             <SettingsGroup v-show="activeSubTab === 'all' || activeSubTab === 'tools'" :blocks="SETTINGS_BLOCKS.tools" />
+            <UiCard v-show="activeSubTab === 'all' || activeSubTab === 'tools'" padding="lg" class="group-history-card">
+              <h3 class="group-history-card__title">
+                群历史查询
+                <UiInfoTip text="LLM 按需只读检索本群归档历史的全局默认设置；单群可在群设置或 /llm history 覆盖。" />
+              </h3>
+              <div class="group-history-grid">
+                <SettingField
+                  class="group-history-grid__wide"
+                  :label="groupHistoryLabel('enabled').label"
+                  :hint="groupHistoryLabel('enabled').hint"
+                  :meta="groupHistoryMeta('enabled')"
+                  :model-value="groupHistory.enabled"
+                  @update:model-value="patchGroupHistory({ enabled: $event })"
+                />
+                <div class="group-history-grid__wide">
+                  <p class="group-history-sub-label">
+                    {{ groupHistoryLabel('investigation_provider_id').label }}
+                    <UiInfoTip v-if="groupHistoryLabel('investigation_provider_id').hint" :text="groupHistoryLabel('investigation_provider_id').hint" />
+                  </p>
+                  <ProviderPicker
+                    :provider-id="groupHistory.investigation_provider_id"
+                    :model="groupHistory.investigation_model"
+                    :providers="providers"
+                    empty-provider-label="跟随当前对话渠道"
+                    @update:provider-id="patchGroupHistory({ investigation_provider_id: $event })"
+                    @update:model="patchGroupHistory({ investigation_model: $event })"
+                  />
+                </div>
+                <SettingField
+                  :label="groupHistoryLabel('investigation_timeout_seconds').label"
+                  :hint="groupHistoryLabel('investigation_timeout_seconds').hint"
+                  :unit="groupHistoryLabel('investigation_timeout_seconds').unit"
+                  :meta="groupHistoryMeta('investigation_timeout_seconds')"
+                  :model-value="groupHistory.investigation_timeout_seconds"
+                  @update:model-value="patchGroupHistory({ investigation_timeout_seconds: $event })"
+                />
+                <SettingField
+                  :label="groupHistoryLabel('investigation_max_calls').label"
+                  :hint="groupHistoryLabel('investigation_max_calls').hint"
+                  :unit="groupHistoryLabel('investigation_max_calls').unit"
+                  :meta="groupHistoryMeta('investigation_max_calls')"
+                  :model-value="groupHistory.investigation_max_calls"
+                  @update:model-value="patchGroupHistory({ investigation_max_calls: $event })"
+                />
+                <SettingField
+                  :label="groupHistoryLabel('investigation_tool_calls').label"
+                  :hint="groupHistoryLabel('investigation_tool_calls').hint"
+                  :unit="groupHistoryLabel('investigation_tool_calls').unit"
+                  :meta="groupHistoryMeta('investigation_tool_calls')"
+                  :model-value="groupHistory.investigation_tool_calls"
+                  @update:model-value="patchGroupHistory({ investigation_tool_calls: $event })"
+                />
+              </div>
+            </UiCard>
             <SettingsGroup v-show="activeSubTab === 'all' || activeSubTab === 'skills'" :blocks="SETTINGS_BLOCKS.skills" />
           </template>
           <template v-else-if="section === 'reports'">
@@ -185,6 +239,17 @@
         </div>
       </main>
     </div>
+
+    <div v-if="store.dirty.value && !store.conflict.value" class="unsaved-bar" role="status">
+      <span class="unsaved-bar__text">
+        <span class="unsaved-bar__dot" />
+        草稿有未保存修改（按 Ctrl+S 快速保存）
+      </span>
+      <div class="unsaved-bar__actions">
+        <UiButton size="sm" variant="ghost" :disabled="store.busy.value" @click="reload">放弃修改</UiButton>
+        <UiButton size="sm" variant="primary" icon="Save" :loading="store.saving.value" :disabled="store.busy.value" @click="save">保存草稿</UiButton>
+      </div>
+    </div>
   </div>
 </template>
 
@@ -192,11 +257,14 @@
 import { computed, nextTick, onMounted, onUnmounted, ref, watch } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import UiButton from '../components/ui/UiButton.vue'
+import UiCard from '../components/ui/UiCard.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
 import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import UiLoading from '../components/ui/UiLoading.vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import ProvidersPanel from '../components/llm-config/ProvidersPanel.vue'
+import ProviderPicker from '../components/llm-config/ProviderPicker.vue'
+import SettingField from '../components/llm-config/SettingField.vue'
 import RoutesPanel from '../components/llm-config/RoutesPanel.vue'
 import PricingPanel from '../components/llm-config/PricingPanel.vue'
 import StylesPanel from '../components/llm-config/StylesPanel.vue'
@@ -209,7 +277,7 @@ import ExchangePanel from '../components/llm-config/ExchangePanel.vue'
 import * as api from '../api/llmConfiguration'
 import { getLlmConfigStore, provideLlmConfigStore } from '../composables/useLlmConfigStore'
 import { toast } from '../toast'
-import { configWarningText } from '../lib/llmConfig'
+import { SETTINGS_FIELD_LABELS, configWarningText, isObject, type JsonObject } from '../lib/llmConfig'
 
 const store = getLlmConfigStore(api)
 provideLlmConfigStore(store)
@@ -243,6 +311,7 @@ const SECTION_ALIASES: Record<string, { section: string; subTab?: string }> = {
   styles: { section: 'conversation', subTab: 'styles' },
   mcp: { section: 'tools', subTab: 'mcp' },
   skills: { section: 'tools', subTab: 'skills' },
+  group_history: { section: 'tools', subTab: 'tools' },
   routes: { section: 'reports' },
   exchange: { section: 'publish', subTab: 'exchange' },
 }
@@ -281,28 +350,14 @@ const SECTION_META: Record<string, { title: string; desc: string; links?: { labe
   providers: {
     title: '渠道与模型',
     desc: '管理 LLM 供应商 API 地址、密钥变量名、模型清单、别名及模型级参数覆盖。左栏选渠道、右栏编辑详情，左栏随页面滚动吸附在视口顶部。',
-    links: [
-      { label: '诊断与批量探活', path: '/diagnostics', icon: 'Stethoscope' },
-      { label: '按群覆盖模型', path: '/group-settings', icon: 'SlidersHorizontal' },
-    ],
   },
   conversation: {
     title: '对话与上下文',
     desc: '统一管理全局总开关、群聊触发与回复节奏、纪元（Epoch）压缩水位、长期记忆提取以及可复用的回复风格档案。',
-    links: [
-      { label: '群 LLM 覆盖', path: '/group-settings', icon: 'SlidersHorizontal' },
-      { label: '人格管理', path: '/personas', icon: 'Drama' },
-      { label: '纪元水位看板', path: '/epochs', icon: 'Hourglass' },
-      { label: '群记忆管理', path: '/memory', icon: 'Brain' },
-    ],
   },
   tools: {
     title: '工具与技能',
-    desc: '集中配置外部 MCP 服务（含实时连接状态与工具清单）、内置工具白名单、自动联网搜索，以及 Skill 脚本执行约束。',
-    links: [
-      { label: 'Skill 文件仓库', path: '/skills', icon: 'Sparkles' },
-      { label: '诊断与重载 MCP', path: '/diagnostics', icon: 'Stethoscope' },
-    ],
+    desc: '集中配置外部 MCP 服务（含实时连接状态与工具清单）、内置工具白名单、自动联网搜索、群历史查询，以及 Skill 脚本执行约束。',
   },
   reports: {
     title: '报告与路由',
@@ -315,16 +370,10 @@ const SECTION_META: Record<string, { title: string; desc: string; links?: { labe
   pricing: {
     title: '模型价格',
     desc: '配置各模型的输入/输出/缓存 Token 单价（美元 / 百万 Token），供用量看板实时估算成本。',
-    links: [
-      { label: '查看用量与成本看板', path: '/llm-usage', icon: 'Activity' },
-    ],
   },
   publish: {
     title: '发布与历史',
     desc: '对比草稿与已发布版本差异、设置「日期时间 (备注)」版本标记、应用到 Bot、回滚历史快照，或进行 JSON 导入导出。',
-    links: [
-      { label: '运行时诊断与重载', path: '/diagnostics', icon: 'Stethoscope' },
-    ],
   },
 }
 
@@ -398,37 +447,80 @@ const SETTINGS_BLOCKS: Record<string, SettingsBlock[]> = {
   ],
 }
 
+const providers = computed<JsonObject[]>(() =>
+  Array.isArray(store.document.value?.providers) ? store.document.value.providers.filter(isObject) : [],
+)
+
+const groupHistoryRaw = computed<JsonObject>(() => {
+  const settings = store.document.value?.settings
+  return isObject(settings) && isObject(settings.group_history) ? settings.group_history : {}
+})
+const groupHistory = computed(() => ({
+  enabled: groupHistoryRaw.value.enabled === true,
+  investigation_provider_id: String(groupHistoryRaw.value.investigation_provider_id ?? ''),
+  investigation_model: String(groupHistoryRaw.value.investigation_model ?? ''),
+  investigation_timeout_seconds: groupHistoryRaw.value.investigation_timeout_seconds ?? 240,
+  investigation_max_calls: groupHistoryRaw.value.investigation_max_calls ?? 10,
+  investigation_tool_calls: groupHistoryRaw.value.investigation_tool_calls ?? 30,
+}))
+function groupHistoryLabel(field: string) {
+  return SETTINGS_FIELD_LABELS.group_history?.[field] || { label: field }
+}
+function groupHistoryMeta(field: string) {
+  return store.metadata.value.settings?.group_history?.[field]
+}
+function patchGroupHistory(fields: JsonObject) {
+  store.updateSettingsSection('group_history', { ...groupHistoryRaw.value, ...fields })
+}
+
+const applyDisabledTitle = computed(() => {
+  if (store.conflict.value) return '草稿存在冲突，请先处理'
+  if (store.dirty.value) return '请先保存草稿再应用到 Bot'
+  if (store.activeOperation.value) return '当前有配置任务正在执行'
+  return ''
+})
+
 const editingQuickNote = ref(false)
-const quickNoteText = ref('')
 
 function toggleQuickNote() {
   editingQuickNote.value = !editingQuickNote.value
-  if (editingQuickNote.value) {
-    quickNoteText.value = store.status.value?.draft_version.note || ''
-  }
+}
+
+function pendingNote(): string | undefined {
+  const current = store.draftNote.value.trim()
+  const server = (store.status.value?.draft_version.note || '').trim()
+  if (editingQuickNote.value || current !== server) return current
+  return undefined
 }
 
 async function saveQuickNote() {
-  if (await store.saveNote('draft', quickNoteText.value.trim())) {
+  if (await store.saveNote('draft', store.draftNote.value.trim())) {
     editingQuickNote.value = false
     toast('当前草稿备注已更新')
   }
 }
 
 async function save() {
-  const note = editingQuickNote.value ? quickNoteText.value.trim() : undefined
-  if (await store.save(note)) {
+  if (await store.save(pendingNote())) {
     editingQuickNote.value = false
     toast('草稿已保存，应用到 Bot 后生效')
   }
 }
 
 async function apply() {
-  const note = editingQuickNote.value ? quickNoteText.value.trim() : undefined
-  if (await store.apply(note)) {
+  if (await store.apply(pendingNote())) {
     editingQuickNote.value = false
     section.value = 'publish'
     toast('配置任务已提交，等待 Bot 执行')
+  }
+}
+
+function onKeydown(event: KeyboardEvent) {
+  if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
+    event.preventDefault()
+    if (store.document.value && store.dirty.value && !store.busy.value && !store.conflict.value) {
+      void save()
+    }
   }
 }
 
@@ -462,8 +554,16 @@ function beforeUnload(event: BeforeUnloadEvent) {
 }
 
 onBeforeRouteLeave(() => !store.dirty.value || confirm('当前 LLM 配置有未保存修改，是否离开？'))
-onMounted(() => { store.start(); window.addEventListener('beforeunload', beforeUnload) })
-onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', beforeUnload) })
+onMounted(() => {
+  store.start()
+  window.addEventListener('beforeunload', beforeUnload)
+  window.addEventListener('keydown', onKeydown)
+})
+onUnmounted(() => {
+  store.stop()
+  window.removeEventListener('beforeunload', beforeUnload)
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <style scoped>
@@ -742,7 +842,7 @@ onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', bef
 
 .workshop-links {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: 1fr;
   gap: 4px;
   padding: 2px 2px 4px;
 }
@@ -831,6 +931,8 @@ onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', bef
 
 .section-subtabs {
   display: flex;
+  flex-wrap: wrap;
+  max-width: 100%;
   gap: 4px;
   background: var(--qq-surface-elevated);
   padding: 3px;
@@ -878,6 +980,79 @@ onUnmounted(() => { store.stop(); window.removeEventListener('beforeunload', bef
   flex-direction: column;
   gap: var(--qq-gap-md);
   padding-bottom: var(--qq-gap-md);
+}
+
+.group-history-card__title {
+  margin: 0 0 var(--qq-gap-md);
+  font-size: var(--qq-text-md);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.group-history-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--qq-gap-md) var(--qq-gap-lg);
+}
+
+.group-history-grid__wide {
+  grid-column: 1 / -1;
+}
+
+.group-history-sub-label {
+  margin: 0 0 6px;
+  color: var(--qq-text);
+  font-size: var(--qq-text-sm);
+  font-weight: 500;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.unsaved-bar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--qq-gap-md);
+  flex-wrap: wrap;
+  padding: 10px 14px;
+  border: 1px solid var(--qq-primary-border);
+  border-radius: var(--qq-radius-card);
+  background: var(--qq-surface);
+  box-shadow: var(--qq-shadow-lg, var(--qq-shadow-card));
+}
+
+.unsaved-bar__text {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--qq-text);
+  font-size: var(--qq-text-sm);
+  font-weight: 500;
+}
+
+.unsaved-bar__dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--qq-warn);
+  flex-shrink: 0;
+}
+
+.unsaved-bar__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+@media (max-width: 760px) {
+  .group-history-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 @media (max-width: 900px) {

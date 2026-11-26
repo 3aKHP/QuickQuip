@@ -2,12 +2,12 @@
   <div class="awakening-view">
     <UiPageHeader title="唤醒管理" subtitle="查看群级唤醒参数，管理各唤醒规则和无聊唤醒 opt-in">
       <template #actions>
-        <UiButton icon="RefreshCw" :loading="loading" @click="load">刷新</UiButton>
-        <UiButton variant="primary" icon="Plus" @click="startAdd">添加群</UiButton>
+        <UiButton icon="RefreshCw" :loading="loading" @click="onRefresh">刷新</UiButton>
+        <UiButton variant="primary" icon="Plus" :disabled="!data || loading" @click="startAdd">添加群</UiButton>
       </template>
     </UiPageHeader>
 
-    <p v-if="error" class="error">{{ error }}</p>
+    <div v-if="error" class="soft-note soft-note--danger awakening-banner" role="alert">{{ error }}</div>
     <p v-if="data?.load_error" class="warn">
       <UiIcon name="AlertTriangle" :size="14" />
       awakening.toml 加载失败：{{ data.load_error }}
@@ -32,22 +32,24 @@
           <span class="mono">{{ groups.length }}</span>
         </div>
         <UiEmpty v-if="!groups.length" icon="BellRing" title="暂无唤醒群组记录" />
-        <button
-          v-for="g in groups"
-          :key="g.group_id"
-          class="group-item qq-selectable"
-          :class="{ active: g.group_id === selectedGroupId }"
-          @click="selectGroup(g.group_id)"
-        >
-          <span class="mono group-id">{{ g.group_id }}</span>
-          <span class="tags">
-            <UiTag v-if="g.has_override" size="sm" variant="warn">override</UiTag>
-            <UiTag v-if="g.boredom_opt_in" size="sm" variant="success">无聊</UiTag>
-          </span>
-        </button>
+        <div v-else class="group-list">
+          <button
+            v-for="g in groups"
+            :key="g.group_id"
+            class="group-item qq-selectable"
+            :class="{ active: g.group_id === selectedGroupId }"
+            @click="selectGroup(g.group_id)"
+          >
+            <span class="mono group-id">{{ g.group_id }}</span>
+            <span class="tags">
+              <UiTag v-if="g.has_override" size="sm" variant="warn">override</UiTag>
+              <UiTag v-if="g.boredom_opt_in" size="sm" variant="success">无聊</UiTag>
+            </span>
+          </button>
+        </div>
       </aside>
 
-      <main class="detail-panel">
+      <section class="detail-panel" aria-label="群唤醒详情">
         <UiEmpty v-if="!selectedGroup" icon="BellRing" title="选择或添加一个群查看唤醒状态" />
         <template v-else>
           <div class="detail-head">
@@ -73,14 +75,22 @@
                   <span class="rule-label">{{ rule.label }}</span>
                   <span class="mono rule-name">{{ rule.name }}</span>
                 </div>
-                <UiToggle :model-value="rule.enabled" @update:model-value="toggleRule(rule.name, $event)" />
+                <UiToggle
+                  :model-value="rule.enabled"
+                  :disabled="pendingToggles.has(`${selectedGroup.group_id}:rule:${rule.name}`)"
+                  @update:model-value="toggleRule(rule.name, $event)"
+                />
               </div>
               <div class="rule-row boredom-row">
                 <div>
                   <span class="rule-label">无聊唤醒群启用<UiInfoTip text="本群是否加入无聊唤醒白名单。取消后该群的沉寂与冷却状态立即清除；群消息未被观察到时沉寂状态未知，不会触发无聊唤醒。" /></span>
                   <span class="mono rule-name">data/awakening_boredom_groups.json</span>
                 </div>
-                <UiToggle :model-value="selectedGroup.boredom_opt_in" @update:model-value="toggleBoredom" />
+                <UiToggle
+                  :model-value="selectedGroup.boredom_opt_in"
+                  :disabled="pendingToggles.has(`${selectedGroup.group_id}:boredom`)"
+                  @update:model-value="toggleBoredom"
+                />
               </div>
             </div>
           </section>
@@ -106,9 +116,9 @@
                     :max="field.max"
                     :placeholder="defaultValueText(field.key, field.unit)"
                   />
-                  <UiButton v-if="draft[field.key] !== ''" size="sm" variant="ghost" icon="X" @click="clearField(field.key)">跟随</UiButton>
+                  <UiButton v-if="normVal(draft[field.key]) !== ''" size="sm" variant="ghost" icon="X" @click="clearField(field.key)">跟随</UiButton>
                 </div>
-                <small v-if="field.hint" class="field-hint">{{ field.hint }}</small>
+                <small v-if="fieldHint(field)" class="field-hint">{{ fieldHint(field) }}</small>
               </label>
             </div>
             <p v-if="settingsError" class="error">{{ settingsError }}</p>
@@ -129,13 +139,14 @@
             </div>
           </section>
         </template>
-      </main>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import UiButton from '../components/ui/UiButton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
@@ -190,8 +201,11 @@ const error = ref<string | null>(null)
 const selectedGroupId = ref('')
 const savingSettings = ref(false)
 const settingsError = ref<string | null>(null)
-const draft = ref<Record<FieldKey, string>>(emptyDraft())
+const draft = ref<Record<FieldKey, string | number>>(emptyDraft())
 const originalDraft = ref<Record<FieldKey, string>>(emptyDraft())
+const pendingToggles = reactive(new Set<string>())
+let loadSeq = 0
+let addSeq = 0
 
 const groups = computed(() => data.value?.groups || [])
 // 扫描周期为全局字段：生效值由后端 effective_boredom_scan_interval 统一计算（单一来源），
@@ -211,23 +225,24 @@ const dndText = computed(() => {
   const s = selectedGroup.value?.settings || {}
   return s.boredom_dnd_start && s.boredom_dnd_end ? `${s.boredom_dnd_start}-${s.boredom_dnd_end}` : '未配置'
 })
+
+function normVal(value: unknown): string {
+  if (value === null || value === undefined) return ''
+  return String(value)
+}
+
 const hasDraftChanges = computed(() => {
-  return EDITABLE_FIELDS.some(field => draft.value[field.key] !== originalDraft.value[field.key])
+  return EDITABLE_FIELDS.some(field => normVal(draft.value[field.key]) !== normVal(originalDraft.value[field.key]))
 })
 
 function emptyDraft(): Record<FieldKey, string> {
   return Object.fromEntries(EDITABLE_FIELDS.map(field => [field.key, ''])) as Record<FieldKey, string>
 }
 
-function stringValue(value: unknown): string {
-  if (value === null || value === undefined) return ''
-  return String(value)
-}
-
 function snapshotFromGroup(group: any): Record<FieldKey, string> {
   const override = group?.override || {}
   return Object.fromEntries(
-    EDITABLE_FIELDS.map(field => [field.key, stringValue(override[field.key])]),
+    EDITABLE_FIELDS.map(field => [field.key, normVal(override[field.key])]),
   ) as Record<FieldKey, string>
 }
 
@@ -244,12 +259,21 @@ function defaultValueText(key: FieldKey, unit = ''): string {
   return `默认 ${value}${unit}`
 }
 
+function fieldHint(field: EditableField): string {
+  if (field.key === 'boredom_dnd_start' || field.key === 'boredom_dnd_end') {
+    const val = data.value?.defaults?.[field.key]
+    return val ? `默认 ${val}（留空跟随默认）` : '默认未配置（留空跟随默认）'
+  }
+  return field.hint || ''
+}
+
 function clearField(key: FieldKey) {
   draft.value[key] = ''
 }
 
 function resetDraft() {
   draft.value = { ...originalDraft.value }
+  settingsError.value = null
 }
 
 function parseDraftValue(key: FieldKey, raw: string): number | string | null {
@@ -274,37 +298,50 @@ function fieldLabel(key: FieldKey): string {
 function buildPayload(): Record<string, number | string | null> {
   const payload: Record<string, number | string | null> = {}
   for (const field of EDITABLE_FIELDS) {
-    if (draft.value[field.key] !== originalDraft.value[field.key]) {
-      payload[field.key] = parseDraftValue(field.key, draft.value[field.key])
+    const cur = normVal(draft.value[field.key])
+    const orig = normVal(originalDraft.value[field.key])
+    if (cur !== orig) {
+      payload[field.key] = parseDraftValue(field.key, cur)
     }
   }
   return payload
 }
 
+function onRefresh() {
+  if (hasDraftChanges.value && !confirm('当前唤醒参数未保存，刷新会丢失。是否继续？')) return
+  load()
+}
+
 async function load() {
+  const seq = ++loadSeq
   loading.value = true
   error.value = null
   try {
-    data.value = await fetchAwakening()
+    const res = await fetchAwakening()
+    if (seq !== loadSeq) return
+    data.value = res
     if (selectedGroupId.value && !groups.value.find((g: any) => g.group_id === selectedGroupId.value)) {
       selectedGroupId.value = ''
     }
     if (!selectedGroupId.value && groups.value.length) selectedGroupId.value = groups.value[0].group_id
     if (selectedGroup.value) applyDraft(selectedGroup.value)
   } catch (e: unknown) {
+    if (seq !== loadSeq) return
     error.value = (e as Error).message
   } finally {
-    loading.value = false
+    if (seq === loadSeq) loading.value = false
   }
 }
 
 async function selectGroup(groupId: string) {
-  if (groupId !== selectedGroupId.value && hasDraftChanges.value && !confirm('当前唤醒参数未保存，切换会丢失。是否继续？')) return
+  if (groupId === selectedGroupId.value) return
+  if (hasDraftChanges.value && !confirm('当前唤醒参数未保存，切换会丢失。是否继续？')) return
   selectedGroupId.value = groupId
   if (selectedGroup.value) applyDraft(selectedGroup.value)
 }
 
 async function startAdd() {
+  if (!data.value) return
   const raw = prompt('输入 5-12 位群号')
   if (!raw) return
   const gid = raw.trim()
@@ -312,8 +349,11 @@ async function startAdd() {
     toast('群号格式不合法', 'error')
     return
   }
+  if (gid !== selectedGroupId.value && hasDraftChanges.value && !confirm('当前唤醒参数未保存，切换会丢失。是否继续？')) return
+  const seq = ++addSeq
   try {
     const group = await fetchAwakeningGroup(gid)
+    if (seq !== addSeq || !data.value) return
     const list = groups.value
     const idx = list.findIndex((g: any) => g.group_id === gid)
     if (idx >= 0) list[idx] = group
@@ -325,38 +365,51 @@ async function startAdd() {
   }
 }
 
-async function refreshSelected() {
-  if (!selectedGroupId.value) return
-  const group = await fetchAwakeningGroup(selectedGroupId.value)
-  const idx = groups.value.findIndex((g: any) => g.group_id === selectedGroupId.value)
-  if (idx >= 0) groups.value[idx] = group
-  applyDraft(group)
+async function refreshGroupInPlace(gid: string) {
+  const group = await fetchAwakeningGroup(gid)
+  const list = groups.value
+  const idx = list.findIndex((g: any) => g.group_id === gid)
+  if (idx >= 0) list[idx] = group
+  else list.push(group)
 }
 
 async function toggleRule(ruleName: string, enabled: boolean) {
-  if (!selectedGroupId.value) return
+  const gid = selectedGroupId.value
+  if (!gid) return
+  const key = `${gid}:rule:${ruleName}`
+  if (pendingToggles.has(key)) return
+  pendingToggles.add(key)
   try {
-    await setAwakeningRule(selectedGroupId.value, ruleName, enabled)
-    await refreshSelected()
+    await setAwakeningRule(gid, ruleName, enabled)
+    await refreshGroupInPlace(gid)
     toast(`${ruleName} 已${enabled ? '启用' : '禁用'}`)
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
+  } finally {
+    pendingToggles.delete(key)
   }
 }
 
 async function toggleBoredom(enabled: boolean) {
-  if (!selectedGroupId.value) return
+  const gid = selectedGroupId.value
+  if (!gid) return
+  const key = `${gid}:boredom`
+  if (pendingToggles.has(key)) return
+  pendingToggles.add(key)
   try {
-    await setAwakeningBoredom(selectedGroupId.value, enabled)
-    await refreshSelected()
+    await setAwakeningBoredom(gid, enabled)
+    await refreshGroupInPlace(gid)
     toast(`无聊唤醒群启用已${enabled ? '开启' : '关闭'}`)
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
+  } finally {
+    pendingToggles.delete(key)
   }
 }
 
 async function saveSettings() {
-  if (!selectedGroupId.value) return
+  const gid = selectedGroupId.value
+  if (!gid) return
   settingsError.value = null
   let payload: Record<string, number | string | null>
   try {
@@ -368,23 +421,45 @@ async function saveSettings() {
   if (!Object.keys(payload).length) return
   savingSettings.value = true
   try {
-    const result = await updateAwakeningSettings(selectedGroupId.value, payload)
+    const result = await updateAwakeningSettings(gid, payload)
     const group = result.group
-    const idx = groups.value.findIndex((g: any) => g.group_id === selectedGroupId.value)
+    const idx = groups.value.findIndex((g: any) => g.group_id === gid)
     if (idx >= 0) groups.value[idx] = group
     else groups.value.push(group)
-    applyDraft(group)
+    if (selectedGroupId.value === gid) {
+      applyDraft(group)
+    }
     toast(result.queued ? '唤醒参数已保存，重载规则已入队' : '唤醒参数已保存')
   } catch (e: unknown) {
-    settingsError.value = (e as Error).message
+    if (selectedGroupId.value === gid) {
+      settingsError.value = (e as Error).message
+    }
     toast('保存失败', 'error')
   } finally {
     savingSettings.value = false
   }
 }
 
-watch(selectedGroup, (group) => {
-  if (group && !hasDraftChanges.value) applyDraft(group)
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (!hasDraftChanges.value) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeRouteLeave(() => !hasDraftChanges.value || confirm('当前唤醒参数有未保存修改，确定离开？'))
+
+watch(selectedGroup, (group, prev) => {
+  if (group && group.group_id !== prev?.group_id && !hasDraftChanges.value) {
+    applyDraft(group)
+  }
 })
 
 load()
@@ -392,11 +467,12 @@ load()
 
 <style scoped>
 .awakening-view { display: flex; flex-direction: column; flex: 1; min-height: 0; }
+.awakening-banner { margin-bottom: var(--qq-gap-md); }
 .error { color: var(--qq-danger); }
-.warn { display: inline-flex; align-items: center; gap: 6px; color: var(--qq-warn); font-size: var(--qq-text-sm); }
+.warn { display: inline-flex; align-items: center; gap: 6px; color: var(--qq-warn); font-size: var(--qq-text-sm); margin-bottom: var(--qq-gap-sm); }
 .mono { font-family: var(--qq-font-mono); }
 
-.defaults-strip { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: var(--qq-gap-sm); margin-bottom: var(--qq-gap-md); }
+.defaults-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: var(--qq-gap-sm); margin-bottom: var(--qq-gap-md); }
 .default-item, .setting { min-width: 0; padding: var(--qq-gap-sm); border-radius: var(--qq-radius-sm); background: var(--qq-surface-strong); }
 .default-item span, .setting span { display: inline-flex; align-items: center; gap: 4px; color: var(--qq-text-muted); font-size: var(--qq-text-xs); }
 .default-item strong, .setting strong { display: block; overflow: hidden; color: var(--qq-text); font-size: var(--qq-text-sm); text-overflow: ellipsis; white-space: nowrap; }
@@ -404,7 +480,8 @@ load()
 .shell { display: grid; grid-template-columns: 280px minmax(0, 1fr); gap: var(--qq-gap-md); flex: 1; min-height: 0; }
 .groups-panel, .detail-panel { min-width: 0; min-height: 0; overflow: hidden; border: 1px solid var(--qq-border); border-radius: var(--qq-radius-card); background: var(--qq-surface); box-shadow: var(--qq-shadow-card); }
 .groups-panel { display: flex; flex-direction: column; }
-.panel-head { display: flex; align-items: center; justify-content: space-between; height: 48px; padding: 0 var(--qq-gap-md); border-bottom: 1px solid var(--qq-border); color: var(--qq-text); font-size: var(--qq-text-sm); font-weight: 700; }
+.panel-head { display: flex; align-items: center; justify-content: space-between; height: 48px; flex-shrink: 0; padding: 0 var(--qq-gap-md); border-bottom: 1px solid var(--qq-border); color: var(--qq-text); font-size: var(--qq-text-sm); font-weight: 700; }
+.group-list { flex: 1; min-height: 0; overflow-y: auto; display: flex; flex-direction: column; }
 .group-item { display: flex; align-items: center; justify-content: space-between; gap: var(--qq-gap-sm); width: 100%; padding: var(--qq-gap-sm) var(--qq-gap-md); border: 0; border-bottom: 1px solid var(--qq-border); background: transparent; color: var(--qq-text); cursor: pointer; font-family: var(--qq-font-base); text-align: left; }
 .group-id { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .tags, .head-tags { display: flex; gap: var(--qq-gap-xs); flex-wrap: wrap; justify-content: flex-end; }
@@ -434,6 +511,6 @@ load()
 .field-hint { color: var(--qq-text-muted); font-size: var(--qq-text-xs); font-weight: 400; }
 .settings-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: var(--qq-gap-sm); }
 
-@media (max-width: 1000px) { .defaults-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); } .shell { grid-template-columns: 1fr; } .groups-panel { max-height: 240px; } }
-@media (max-width: 640px) { .defaults-strip { grid-template-columns: 1fr 1fr; } .detail-head, .section-head { align-items: flex-start; flex-direction: column; } .form-grid { grid-template-columns: 1fr; } }
+@media (max-width: 1000px) { .shell { grid-template-columns: 1fr; } .groups-panel { max-height: 240px; } }
+@media (max-width: 640px) { .detail-head, .section-head { align-items: flex-start; flex-direction: column; } .form-grid { grid-template-columns: 1fr; } }
 </style>

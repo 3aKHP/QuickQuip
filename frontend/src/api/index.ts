@@ -54,9 +54,18 @@ async function parseResponse(res: Response) {
   }
 
   if (!res.ok) {
-    const detail = typeof data === 'object' && data !== null && 'detail' in data
-      ? (data as Record<string, unknown>).detail
-      : res.statusText
+    let detail: unknown = res.statusText
+    if (typeof data === 'object' && data !== null) {
+      const record = data as Record<string, unknown>
+      if ('detail' in record) {
+        detail = record.detail
+      } else if (typeof record.message === 'string' && record.message) {
+        const fieldPath = typeof record.field_path === 'string' && record.field_path
+          ? `${record.field_path}: `
+          : ''
+        detail = `${fieldPath}${record.message}`
+      }
+    }
     const err = new ApiError(`${res.status} ${formatErrorDetail(detail)}`, res.status)
     err.data = data
     throw err
@@ -77,7 +86,9 @@ export async function request<T = any>(path: string, options: RequestInit = {}):
       Object.assign(headers, incoming)
     }
   }
-  if (options.body !== undefined && !headers['Content-Type']) {
+  const hasContentType = Object.keys(headers).some(k => k.toLowerCase() === 'content-type')
+  const isFormData = typeof FormData !== 'undefined' && options.body instanceof FormData
+  if (options.body !== undefined && !hasContentType && !isFormData) {
     headers['Content-Type'] = 'application/json'
   }
 

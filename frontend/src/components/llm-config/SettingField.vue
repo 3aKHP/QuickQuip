@@ -1,5 +1,5 @@
 <template>
-  <div :class="['setting-field', { 'setting-field--row': kind === 'toggle' }]">
+  <div :class="['setting-field', { 'setting-field--row': kind === 'toggle', 'setting-field--disabled': disabled }]">
     <div class="setting-field__head">
       <label :for="controlId" class="setting-field__label">
         {{ label }}
@@ -7,12 +7,13 @@
       </label>
       <span v-if="unit && kind !== 'toggle'" class="setting-field__unit">{{ unit }}</span>
     </div>
-    <UiToggle v-if="kind === 'toggle'" :model-value="modelValue === true" size="sm" @update:model-value="emit('update:modelValue', $event)" />
+    <UiToggle v-if="kind === 'toggle'" :model-value="modelValue === true" :disabled="disabled || readonly" size="sm" @update:model-value="emit('update:modelValue', $event)" />
     <select
       v-else-if="kind === 'select'"
       :id="controlId"
       class="setting-field__control"
       :value="stringValue"
+      :disabled="disabled || readonly"
       @change="onSelect"
     >
       <option v-for="option in selectOptions" :key="String(option.value)" :value="String(option.value)">{{ option.label }}</option>
@@ -27,7 +28,10 @@
       :max="meta?.maximum ?? undefined"
       :value="typeof modelValue === 'number' ? modelValue : ''"
       :placeholder="placeholder"
+      :disabled="disabled"
+      :readonly="readonly"
       @input="onNumber"
+      @blur="onNumberBlur"
     />
     <StringListEditor v-else-if="kind === 'list'" :model-value="listValue" :placeholder="placeholder" @update:model-value="emit('update:modelValue', $event)" />
     <textarea
@@ -37,9 +41,11 @@
       rows="3"
       :value="stringValue"
       :placeholder="placeholder"
+      :disabled="disabled"
+      :readonly="readonly"
       autocomplete="off"
       spellcheck="false"
-      @input="emit('update:modelValue', ($event.target as HTMLTextAreaElement).value)"
+      @input="onText"
     />
     <input
       v-else
@@ -47,9 +53,11 @@
       class="setting-field__control"
       :value="stringValue"
       :placeholder="placeholder"
+      :disabled="disabled"
+      :readonly="readonly"
       autocomplete="off"
       spellcheck="false"
-      @input="emit('update:modelValue', ($event.target as HTMLInputElement).value)"
+      @input="onText"
     />
     <p v-if="rangeHint" class="setting-field__range">{{ rangeHint }}</p>
   </div>
@@ -83,7 +91,9 @@ const props = withDefaults(defineProps<{
   /** 枚举字段的词典键（如 tools.enabled_mode），用于查中文显示名 */
   enumKey?: string
   multiline?: boolean
-}>(), { kind: undefined, meta: undefined, hint: undefined, unit: undefined, placeholder: undefined, options: undefined, enumKey: undefined, multiline: false })
+  disabled?: boolean
+  readonly?: boolean
+}>(), { kind: undefined, meta: undefined, hint: undefined, unit: undefined, placeholder: undefined, options: undefined, enumKey: undefined, multiline: false, disabled: false, readonly: false })
 
 const emit = defineEmits<{ 'update:modelValue': [value: JsonValue] }>()
 
@@ -127,6 +137,15 @@ function onSelect(event: Event) {
   emit('update:modelValue', (option ? option.value : text) as JsonValue)
 }
 
+function onText(event: Event) {
+  const text = (event.target as HTMLInputElement | HTMLTextAreaElement).value
+  if (text === '' && props.meta?.nullable) {
+    emit('update:modelValue', null)
+    return
+  }
+  emit('update:modelValue', text)
+}
+
 function onNumber(event: Event) {
   const text = (event.target as HTMLInputElement).value
   if (text === '') {
@@ -135,6 +154,14 @@ function onNumber(event: Event) {
   }
   const value = Number(text)
   if (Number.isFinite(value)) emit('update:modelValue', value)
+}
+
+function onNumberBlur(event: Event) {
+  if (props.meta?.nullable) return
+  const input = event.target as HTMLInputElement
+  if (input.value === '' || !Number.isFinite(Number(input.value))) {
+    input.value = typeof props.modelValue === 'number' ? String(props.modelValue) : ''
+  }
 }
 </script>
 
@@ -188,6 +215,12 @@ function onNumber(event: Event) {
   border-color: var(--qq-primary-border);
   outline: none;
   box-shadow: 0 0 0 2px var(--qq-primary-soft);
+}
+
+.setting-field__control:disabled {
+  opacity: 0.65;
+  cursor: not-allowed;
+  background: var(--qq-surface-strong);
 }
 
 textarea.setting-field__control {

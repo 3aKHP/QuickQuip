@@ -37,22 +37,22 @@ withDefaults(defineProps<{
 
 .ui-tag--info {
   background: var(--qq-primary-soft);
-  color: var(--qq-primary);
+  color: var(--qq-primary-ink);
 }
 
 .ui-tag--cyan {
   background: var(--qq-cyan-soft);
-  color: var(--qq-cyan-deep);
+  color: var(--qq-cyan-ink);
 }
 
 .ui-tag--accent {
   background: var(--qq-accent-soft);
-  color: var(--qq-accent);
+  color: var(--qq-accent-ink);
 }
 
 .ui-tag--success {
   background: var(--qq-success-soft);
-  color: var(--qq-success);
+  color: var(--qq-success-ink);
 }
 
 .ui-tag--warn {
@@ -62,6 +62,6 @@ withDefaults(defineProps<{
 
 .ui-tag--danger {
   background: var(--qq-danger-soft);
-  color: var(--qq-danger);
+  color: var(--qq-danger-ink);
 }
 </style>

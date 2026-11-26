@@ -217,3 +217,38 @@ def test_festival_greeting_sends_text_segment(monkeypatch):
 
     assert [item["group_id"] for item in sent] == [789]
     _assert_single_text_segment(sent[0]["message"], "【测试节】节日快乐")
+
+
+def test_cross_year_one_off_registers_date_trigger(monkeypatch, tmp_path):
+    """带 run_at 的一次性任务应注册为 date 触发器，不会在当年提前误触。"""
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from quickquip.common.constants import BEIJING_TIMEZONE
+
+    sent: list[dict] = []
+    bot = _capture_bot(sent)
+    sched = FakeCronScheduler()
+    monkeypatch.setattr(scheduler_plugin, "scheduler", sched)
+    monkeypatch.setattr(scheduler_plugin, "nonebot", types.SimpleNamespace(get_bot=lambda: bot))
+    monkeypatch.setattr(
+        scheduler_plugin, "bot_action_trace", lambda **kw: contextlib.nullcontext()
+    )
+
+    next_year = datetime.now(ZoneInfo(BEIJING_TIMEZONE)).year + 1
+    run_at = f"{next_year}-12-25T09:00:00+08:00"
+    store = ScheduledMessageStore(tmp_path / "sm.json")
+    job = store.add(
+        cron="0 9 25 12 *",
+        group_ids=[123],
+        message="明年圣诞快乐",
+        recurring=False,
+        run_at=run_at,
+    )
+
+    scheduler_plugin.reload_scheduled_message_jobs(store)
+    registered = sched.jobs[f"scheduled_msg_{job.id}"]
+    assert registered["trigger"] == "date"
+    assert registered["cron"]["run_date"].year == next_year
+    assert registered["cron"]["run_date"].month == 12
+    assert registered["cron"]["run_date"].day == 25

@@ -13,7 +13,7 @@
         <router-link to="/llm-config" custom v-slot="{ navigate }">
           <UiButton variant="ghost" icon="SlidersHorizontal" @click="navigate">LLM 配置中心</UiButton>
         </router-link>
-        <UiButton icon="RefreshCw" :disabled="saving" @click="load(currentKey)">重置</UiButton>
+        <UiButton icon="RefreshCw" :disabled="saving || !currentKey" @click="resetCurrent">重置</UiButton>
         <UiButton variant="primary" :loading="saving" :disabled="!loaded" icon="Save" @click="save">保存</UiButton>
       </template>
     </UiPageHeader>
@@ -30,8 +30,10 @@
         <button
           v-for="c in configs"
           :key="c.key"
+          type="button"
           class="config-item qq-selectable"
           :class="{ active: c.key === currentKey }"
+          :disabled="saving"
           @click="switchTo(c.key)"
         >
           <span class="config-item__label">{{ c.label }} <UiInfoTip v-if="c.description" :text="c.description" /></span>
@@ -40,16 +42,16 @@
         </button>
       </aside>
 
-      <main class="config-editor">
+      <section class="config-editor" aria-label="配置编辑器">
         <p v-if="loadError" class="error">{{ loadError }}</p>
-        <p v-if="saveError" class="error">{{ saveError }}</p>
         <UiLoading v-else-if="!loaded && currentKey" />
-
-        <template v-if="loaded">
+        <template v-else-if="loaded">
+          <p v-if="saveError" class="error">{{ saveError }}</p>
           <div class="editor-head">
             <div class="editor-meta">
               <span class="editor-kicker">当前文件</span>
               <h3>{{ currentFilename }}</h3>
+              <span class="editor-bytes">{{ byteCount }} / 64 KiB</span>
             </div>
             <div class="editor-state">
               <span v-if="current && current.exists === false" class="state-pill state-pill--warn">将创建新文件</span>
@@ -57,13 +59,18 @@
               <span v-else class="state-pill state-pill--ok">已同步</span>
             </div>
           </div>
-          <textarea v-model="content" class="toml-editor" spellcheck="false" autocomplete="off" />
+          <textarea
+            v-model="content"
+            class="toml-editor"
+            spellcheck="false"
+            autocomplete="off"
+            @keydown.tab.prevent="onTabIndent"
+          />
         </template>
-
         <div v-else class="empty-editor">
           <UiEmpty icon="Settings" title="从左侧选择一个配置文件开始编辑" />
         </div>
-      </main>
+      </section>
 
       <aside class="config-side">
         <div class="side-card">
@@ -74,6 +81,7 @@
           <h4>常见文件</h4>
           <ul>
             <li>LLM 配置通过「LLM 配置」页面管理</li>
+            <li>awakening.toml</li>
             <li>generation.toml</li>
             <li>chat_rules.toml</li>
             <li>games.toml</li>
@@ -87,7 +95,8 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
@@ -112,8 +121,61 @@ let configRequest = 0
 const current = computed(() => configs.value.find(c => c.key === currentKey.value) || null)
 const currentFilename = computed(() => current.value?.filename || '')
 const dirty = computed(() => loaded.value && content.value !== originalContent.value)
+const byteCount = computed(() => {
+  const bytes = typeof TextEncoder !== 'undefined' ? new TextEncoder().encode(content.value).length : content.value.length
+  return bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KiB`
+})
 
-onMounted(() => loadList())
+function onBeforeUnload(e: BeforeUnloadEvent) {
+  if (dirty.value) {
+    e.preventDefault()
+    e.returnValue = ''
+  }
+}
+
+function onGlobalKeydown(e: KeyboardEvent) {
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 's') {
+    e.preventDefault()
+    if (loaded.value && !saving.value) void save()
+  }
+}
+
+function onTabIndent(e: KeyboardEvent) {
+  const el = e.target as HTMLTextAreaElement
+  const start = el.selectionStart
+  const end = el.selectionEnd
+  content.value = content.value.slice(0, start) + '  ' + content.value.slice(end)
+  requestAnimationFrame(() => {
+    el.selectionStart = el.selectionEnd = start + 2
+  })
+}
+
+if (typeof onBeforeRouteLeave === 'function') {
+  onBeforeRouteLeave(() => !dirty.value || confirm('当前配置文件有未保存的修改，确定离开？'))
+}
+
+onMounted(() => {
+  loadList()
+  if (typeof window !== 'undefined') {
+    window.addEventListener('beforeunload', onBeforeUnload)
+    window.addEventListener('keydown', onGlobalKeydown)
+  }
+})
+
+if (typeof onBeforeUnmount === 'function') {
+  onBeforeUnmount(() => {
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('beforeunload', onBeforeUnload)
+      window.removeEventListener('keydown', onGlobalKeydown)
+    }
+  })
+}
+
+async function resetCurrent() {
+  if (!currentKey.value || saving.value) return
+  if (dirty.value && !confirm('确定放弃未保存的修改并重新读取文件？')) return
+  await load(currentKey.value)
+}
 
 async function loadList() {
   listError.value = null
@@ -129,7 +191,7 @@ async function loadList() {
 }
 
 async function switchTo(key: string) {
-  if (key === currentKey.value) return
+  if (saving.value || key === currentKey.value) return
   if (dirty.value && !confirm('当前文件有未保存的修改，切换后将丢失。是否继续？')) return
   await load(key)
 }
@@ -332,6 +394,13 @@ async function save() {
   line-height: 1.2;
   word-break: break-all;
   font-family: var(--qq-font-mono);
+}
+
+.editor-bytes {
+  color: var(--qq-text-muted);
+  font-family: var(--qq-font-mono);
+  font-size: var(--qq-text-xs);
+  white-space: nowrap;
 }
 
 .editor-state {

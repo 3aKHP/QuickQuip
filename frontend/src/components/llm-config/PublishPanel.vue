@@ -72,7 +72,7 @@
         <div class="note-editor__row">
           <input
             id="llm-draft-note-input"
-            v-model="draftNoteInput"
+            v-model="store.draftNote.value"
             class="note-editor__input"
             maxlength="120"
             placeholder="例如：接入 Claude 4 渠道 / 调低日报触发门槛"
@@ -193,17 +193,6 @@ import type * as apiModule from '../../api/llmConfiguration'
 
 const store = injectLlmConfigStore()
 
-const draftNoteInput = ref(store.status.value?.draft_version.note || '')
-watch(
-  () => store.status.value?.draft_version.note,
-  next => {
-    if (typeof next === 'string' && next !== draftNoteInput.value) {
-      draftNoteInput.value = next
-    }
-  },
-  { immediate: true },
-)
-
 const editingSnapshotRev = ref<number | null>(null)
 const editingSnapshotNote = ref('')
 
@@ -220,7 +209,7 @@ async function commitSnapshotNote(revision: number) {
 }
 
 async function saveDraftNote() {
-  if (await store.saveNote('draft', draftNoteInput.value.trim())) {
+  if (await store.saveNote('draft', store.draftNote.value.trim())) {
     toast('当前草稿备注已保存')
   }
 }
@@ -268,9 +257,9 @@ const componentChips = computed(() => {
 
 const impact = computed(() => {
   const diff = store.diff.value
-  if (!diff || !isObject(diff.components)) return []
+  if (!diff || !diff.components) return []
   const result: string[] = []
-  const components = diff.components as Record<string, JsonValue>
+  const components = diff.components
   if (components.mcp_reconnect === true) result.push('MCP 服务将重连')
   if (Array.isArray(components.reschedule) && components.reschedule.length) {
     result.push(`将重新调度：${components.reschedule.map(name => SETTINGS_SECTION_LABELS[String(name)] || String(name)).join('、')}`)
@@ -345,7 +334,7 @@ function pillClass(configured: boolean | null) {
 }
 
 async function apply() {
-  const note = draftNoteInput.value.trim()
+  const note = store.draftNote.value.trim()
   if (await store.apply(note)) toast('配置任务已提交，等待 Bot 执行')
 }
 
@@ -354,6 +343,18 @@ async function restore(snapshot: apiModule.ConfigSnapshot) {
   if (!confirm(`将版本「${label}」恢复为新草稿${store.dirty.value ? '，并覆盖当前未保存修改' : ''}。是否继续？`)) return
   if (await store.restore(snapshot.revision)) toast('已恢复为新草稿，需要单独应用')
 }
+
+let autoDiffAttemptedRev: number | null = null
+watch(
+  () => [store.status.value?.draft_revision, store.status.value?.published_revision, store.dirty.value] as const,
+  ([draftRev]) => {
+    if (draftRev && !store.inSync.value && !store.dirty.value && !store.diff.value && autoDiffAttemptedRev !== draftRev) {
+      autoDiffAttemptedRev = draftRev
+      void store.loadDiff()
+    }
+  },
+  { immediate: true },
+)
 
 onMounted(() => {
   void store.loadOperations()

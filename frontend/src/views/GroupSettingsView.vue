@@ -2,12 +2,12 @@
   <div class="gs-view">
     <UiPageHeader title="群组 LLM 设置" subtitle="按群覆盖 provider / model / persona / 触发方式等运行时参数">
       <template #actions>
-        <UiButton icon="RefreshCw" :disabled="loading" @click="reloadAll">刷新</UiButton>
+        <UiButton icon="RefreshCw" :loading="loading" :disabled="loading" @click="onRefresh">刷新</UiButton>
         <UiButton variant="primary" icon="Plus" @click="startAdd">添加群</UiButton>
       </template>
     </UiPageHeader>
 
-    <p v-if="loadError" class="error">{{ loadError }}</p>
+    <div v-if="loadError" class="soft-note soft-note--danger gs-banner" role="alert">{{ loadError }}</div>
     <p v-if="options && options.load_error" class="warn-text">
       <UiIcon name="AlertTriangle" :size="14" />
       LLM 配置 加载失败：{{ options.load_error }}；provider/persona 下拉可能为空
@@ -17,14 +17,19 @@
       <aside class="group-panel">
         <div class="panel-head">
           <span class="panel-title">覆盖对象<UiInfoTip text="一条覆盖（override）是针对单个群或私聊会话的参数定制记录，未覆盖的字段一律沿用 LLM 配置 全局默认；私聊对象以 private:QQ号 形式标识。" /></span>
-          <span class="panel-count">{{ groupList.length }}</span>
+          <span class="panel-count">{{ filteredGroups.length }}<template v-if="groupSearch.trim()"> / {{ groupList.length }}</template></span>
+        </div>
+
+        <div class="panel-search">
+          <input v-model="groupSearch" type="search" placeholder="筛选群号 / QQ / 模型 / 人格..." />
         </div>
 
         <UiLoading v-if="loading && !groupList.length" />
         <UiEmpty v-else-if="!groupList.length" icon="Users" title="尚无群级 override" />
+        <UiEmpty v-else-if="!filteredGroups.length" compact icon="Search" title="无匹配对象" />
         <div v-else class="group-list">
           <button
-            v-for="g in groupList"
+            v-for="g in filteredGroups"
             :key="g.group_id"
             class="group-item qq-selectable"
             :class="{ active: g.group_id === selectedGroupId }"
@@ -42,16 +47,21 @@
               <UiTag v-else-if="g.enabled === false" size="sm" variant="danger">LLM 关</UiTag>
             </span>
             <span class="group-item__meta">
-              <span v-if="g.persona_id" class="mono">{{ g.persona_id }}</span>
-              <span v-if="g.provider_id" class="mono">{{ g.provider_id }}</span>
-              <span v-if="g.model" class="mono">{{ g.model }}</span>
-              <span v-if="!g.persona_id && !g.provider_id && !g.model">仅覆盖开关或触发方式</span>
+              <template v-if="overrideCount(g) === 0">
+                <span>使用全局默认</span>
+              </template>
+              <template v-else>
+                <span v-if="g.persona_id" class="mono">{{ g.persona_id }}</span>
+                <span v-if="g.provider_id" class="mono">{{ g.provider_id }}</span>
+                <span v-if="g.model" class="mono">{{ g.model }}</span>
+                <span v-if="!g.persona_id && !g.provider_id && !g.model">已覆盖 {{ overrideCount(g) }} 项开关/参数</span>
+              </template>
             </span>
           </button>
         </div>
       </aside>
 
-      <main class="editor-panel">
+      <section class="editor-panel" aria-label="覆盖设置编辑器">
         <div v-if="!selectedGroupId" class="empty-editor">
           <UiEmpty icon="Settings" title="选择或添加一个群来编辑覆盖设置" />
         </div>
@@ -65,11 +75,44 @@
                   {{ selectedIsPrivate ? '私聊' : '群聊' }}
                 </UiTag>
                 <span class="mono">{{ displayId(selectedGroupId) }}</span>
+                <UiTag v-if="loadingDetail" size="sm" variant="info">加载中…</UiTag>
               </h3>
             </div>
             <div class="editor-actions">
-              <UiButton variant="danger" icon="Trash2" :disabled="saving" @click="onClear">清空全部 override</UiButton>
-              <UiButton variant="primary" icon="Save" :loading="saving" :disabled="!hasChanges" @click="onSave">保存</UiButton>
+              <UiButton
+                v-if="!detailReady && !loadingDetail"
+                variant="ghost"
+                icon="RefreshCw"
+                @click="loadOne(selectedGroupId)"
+              >
+                重试加载
+              </UiButton>
+              <UiButton
+                variant="ghost"
+                icon="RotateCcw"
+                :disabled="!detailReady || !hasChanges || saving || loadingDetail"
+                @click="onRevertDraft"
+              >
+                重置修改
+              </UiButton>
+              <UiButton
+                variant="danger"
+                icon="Trash2"
+                :loading="clearing"
+                :disabled="!detailReady || saving || loadingDetail"
+                @click="onClear"
+              >
+                清空全部 override
+              </UiButton>
+              <UiButton
+                variant="primary"
+                icon="Save"
+                :loading="saving && !clearing"
+                :disabled="!detailReady || !hasChanges || loadingDetail || clearing"
+                @click="onSave"
+              >
+                保存
+              </UiButton>
             </div>
           </div>
 
@@ -94,141 +137,195 @@
             </div>
           </section>
 
-          <section class="form-section">
-            <h4>运行状态</h4>
-            <div v-if="selectedIsPrivate" class="field">
-              <label>私聊响应：{{ selectedSessionActive ? '运行中' : '已暂停' }}</label>
-              <button type="button" :disabled="sessionSaving" @click="onToggleSession">
-                {{ selectedSessionActive ? '暂停响应' : '恢复响应' }}
-              </button>
-              <small>暂停和恢复会保留会话历史；参数配置单独保存。</small>
-            </div>
-            <div class="form-grid">
-              <div v-if="!selectedIsPrivate" class="field">
-                <label>LLM 启用<UiInfoTip text="控制该会话是否响应 LLM 触发；选「跟随默认」即沿用 LLM 配置 [runtime] 的 enabled（出厂默认关）。本区所有开关都是三态：开/关/跟随默认。" /></label>
-                <select v-model="draftTriState.enabled">
-                  <option :value="null">跟随默认（{{ defaultHint('enabled') }}）</option>
-                  <option :value="true">开</option>
-                  <option :value="false">关</option>
-                </select>
+          <fieldset class="editor-fieldset" :class="{ 'editor-fieldset--loading': loadingDetail || !detailReady }" :disabled="loadingDetail || !detailReady || saving">
+            <section class="form-section">
+              <h4>运行状态</h4>
+              <div v-if="selectedIsPrivate" class="field">
+                <label>私聊响应：{{ selectedSessionActive ? '运行中' : '已暂停' }}</label>
+                <div class="field-row">
+                  <UiButton :loading="sessionSaving" :disabled="loadingDetail" @click="onToggleSession">
+                    {{ selectedSessionActive ? '暂停响应' : '恢复响应' }}
+                  </UiButton>
+                </div>
+                <small>暂停和恢复会保留会话历史；参数配置单独保存。</small>
               </div>
-              <div class="field">
-                <label>记忆启用<UiInfoTip text="开启后回答前自动召回相关记忆，默认最多 5 条正文，并受输入预算限制；同时开启工具调用时，主模型可以维护条目。关闭后停止模型记忆读写，人工指令和管理页仍可使用。" /></label>
-                <select v-model="draftTriState.memory_enabled">
-                  <option :value="null">跟随默认（{{ defaultHint('memory_enabled') }}）</option>
-                  <option :value="true">开</option>
-                  <option :value="false">关</option>
-                </select>
+              <div class="form-grid">
+                <div v-if="!selectedIsPrivate" class="field" :class="{ 'field--overridden': draftTriState.enabled !== null }">
+                  <label>
+                    LLM 启用
+                    <span v-if="draftTriState.enabled !== null" class="override-badge">已覆盖</span>
+                    <UiInfoTip text="控制该会话是否响应 LLM 触发；选「跟随默认」即沿用 LLM 配置 [runtime] 的 enabled（出厂默认关）。本区所有开关都是三态：开/关/跟随默认。" />
+                  </label>
+                  <select v-model="draftTriState.enabled">
+                    <option :value="null">跟随默认（{{ defaultHint('enabled') }}）</option>
+                    <option :value="true">开</option>
+                    <option :value="false">关</option>
+                  </select>
+                </div>
+                <div class="field" :class="{ 'field--overridden': draftTriState.memory_enabled !== null }">
+                  <label>
+                    记忆启用
+                    <span v-if="draftTriState.memory_enabled !== null" class="override-badge">已覆盖</span>
+                    <UiInfoTip text="开启后回答前自动召回相关记忆，默认最多 5 条正文，并受输入预算限制；同时开启工具调用时，主模型可以维护条目。关闭后停止模型记忆读写，人工指令和管理页仍可使用。" />
+                  </label>
+                  <select v-model="draftTriState.memory_enabled">
+                    <option :value="null">跟随默认（{{ defaultHint('memory_enabled') }}）</option>
+                    <option :value="true">开</option>
+                    <option :value="false">关</option>
+                  </select>
+                </div>
+                <div v-if="!selectedIsPrivate" class="field" :class="{ 'field--overridden': draftTriState.history_enabled !== null }">
+                  <label>
+                    群历史查询
+                    <span v-if="draftTriState.history_enabled !== null" class="override-badge">已覆盖</span>
+                    <UiInfoTip text="开启后模型可按需搜索并阅读本群已归档的历史消息（只读工具 search_group_history / read_group_history，等效群内 /llm history on）。查询结果仅参与当前回答，不写入长期记录；全局默认在 LLM 配置 [group_history] 的 enabled。" />
+                  </label>
+                  <select v-model="draftTriState.history_enabled">
+                    <option :value="null">跟随默认（{{ defaultHint('history_enabled') }}）</option>
+                    <option :value="true">开</option>
+                    <option :value="false">关</option>
+                  </select>
+                </div>
+                <div class="field" :class="{ 'field--overridden': draftTriState.agent_delivery_intermediate_enabled !== null }">
+                  <label>
+                    中间轮发送
+                    <span v-if="draftTriState.agent_delivery_intermediate_enabled !== null" class="override-badge">已覆盖</span>
+                    <UiInfoTip text="开启后该会话的工具调用多轮回复中，非最终轮的正文照常作为消息发出（如「我先查一下…」这类过程文本）；关闭时中间轮只记录不发送。全局默认在 LLM 配置 的 agent_delivery_intermediate_enabled 配置。" />
+                  </label>
+                  <select v-model="draftTriState.agent_delivery_intermediate_enabled">
+                    <option :value="null">跟随默认（{{ defaultHint('agent_delivery_intermediate_enabled') }}）</option>
+                    <option :value="true">开</option>
+                    <option :value="false">关</option>
+                  </select>
+                </div>
+                <div class="field" :class="{ 'field--overridden': draftTriState.agent_delivery_final_enabled !== null }">
+                  <label>
+                    最终轮分段
+                    <span v-if="draftTriState.agent_delivery_final_enabled !== null" class="override-badge">已覆盖</span>
+                    <UiInfoTip text="开启后该会话的最终回复按自然段拆成多条消息发出；关闭时最终回复合并为一条。全局默认在 LLM 配置 的 agent_delivery_final_enabled 配置。" />
+                  </label>
+                  <select v-model="draftTriState.agent_delivery_final_enabled">
+                    <option :value="null">跟随默认（{{ defaultHint('agent_delivery_final_enabled') }}）</option>
+                    <option :value="true">开</option>
+                    <option :value="false">关</option>
+                  </select>
+                </div>
               </div>
-              <div v-if="!selectedIsPrivate" class="field">
-                <label>群历史查询<UiInfoTip text="开启后模型可按需搜索并阅读本群已归档的历史消息（只读工具 search_group_history / read_group_history，等效群内 /llm history on）。查询结果仅参与当前回答，不写入长期记录；全局默认在 LLM 配置 [group_history] 的 enabled。" /></label>
-                <select v-model="draftTriState.history_enabled">
-                  <option :value="null">跟随默认（{{ defaultHint('history_enabled') }}）</option>
-                  <option :value="true">开</option>
-                  <option :value="false">关</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>中间轮发送<UiInfoTip text="开启后该会话的工具调用多轮回复中，非最终轮的正文照常作为消息发出（如「我先查一下…」这类过程文本）；关闭时中间轮只记录不发送。全局默认在 LLM 配置 的 agent_delivery_intermediate_enabled 配置。" /></label>
-                <select v-model="draftTriState.agent_delivery_intermediate_enabled">
-                  <option :value="null">跟随默认（{{ defaultHint('agent_delivery_intermediate_enabled') }}）</option>
-                  <option :value="true">开</option>
-                  <option :value="false">关</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>最终轮分段<UiInfoTip text="开启后该会话的最终回复按自然段拆成多条消息发出；关闭时最终回复合并为一条。全局默认在 LLM 配置 的 agent_delivery_final_enabled 配置。" /></label>
-                <select v-model="draftTriState.agent_delivery_final_enabled">
-                  <option :value="null">跟随默认（{{ defaultHint('agent_delivery_final_enabled') }}）</option>
-                  <option :value="true">开</option>
-                  <option :value="false">关</option>
-                </select>
-              </div>
-            </div>
-          </section>
+            </section>
 
-          <section class="form-section">
-            <h4>模型与人格<UiInfoTip text="本区字段选「跟随默认」即沿用 LLM 配置 的全局配置；按群覆盖后该会话才使用所选值。" /></h4>
-            <div class="form-grid">
-              <div class="field">
-                <label>Provider</label>
-                <select v-model="draftTriState.provider_id">
-                  <option :value="null">跟随默认（{{ defaults.provider_id || '未设置' }}）</option>
-                  <option v-for="p in providers" :key="p.id" :value="p.id">{{ p.id }}</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>Model</label>
-                <div class="field-row">
-                  <input v-model="modelInput" :placeholder="modelPlaceholder" list="model-suggestions" />
-                  <datalist id="model-suggestions">
-                    <option v-for="m in modelSuggestions" :key="m" :value="m" />
-                  </datalist>
-                  <UiButton v-if="draftTriState.model !== null" size="sm" variant="ghost" icon="X" @click="clearModel">跟随</UiButton>
+            <section class="form-section">
+              <h4>模型与人格<UiInfoTip text="本区字段选「跟随默认」即沿用 LLM 配置 的全局配置；按群覆盖后该会话才使用所选值。" /></h4>
+              <div class="form-grid">
+                <div class="field" :class="{ 'field--overridden': draftTriState.provider_id !== null }">
+                  <label>
+                    Provider
+                    <span v-if="draftTriState.provider_id !== null" class="override-badge">已覆盖</span>
+                  </label>
+                  <select v-model="draftTriState.provider_id">
+                    <option :value="null">跟随默认（{{ defaults.provider_id || '未设置' }}）</option>
+                    <option v-for="p in providers" :key="p.id" :value="p.id">{{ p.id }}</option>
+                  </select>
+                </div>
+                <div class="field" :class="{ 'field--overridden': draftTriState.model !== null }">
+                  <label>
+                    Model
+                    <span v-if="draftTriState.model !== null" class="override-badge">已覆盖</span>
+                  </label>
+                  <div class="field-row">
+                    <input v-model="modelInput" :placeholder="modelPlaceholder" list="model-suggestions" />
+                    <datalist id="model-suggestions">
+                      <option v-for="m in modelSuggestions" :key="m" :value="m" />
+                    </datalist>
+                    <UiButton v-if="draftTriState.model !== null" size="sm" variant="ghost" icon="X" @click="clearModel">跟随</UiButton>
+                  </div>
+                </div>
+                <div class="field" :class="{ 'field--overridden': draftTriState.persona_id !== null }">
+                  <label>
+                    Persona
+                    <span v-if="draftTriState.persona_id !== null" class="override-badge">已覆盖</span>
+                  </label>
+                  <select v-model="draftTriState.persona_id">
+                    <option :value="null">跟随默认（{{ defaults.persona_id || '未设置' }}）</option>
+                    <option v-for="p in personas" :key="p.id" :value="p.id">
+                      {{ p.display_name || p.id }}（{{ p.id }}）
+                    </option>
+                  </select>
+                </div>
+                <div class="field" :class="{ 'field--overridden': draftTriState.reasoning_effort !== null }">
+                  <label>
+                    思考档位
+                    <span v-if="draftTriState.reasoning_effort !== null" class="override-badge">已覆盖</span>
+                    <UiInfoTip text="该会话的思考档位覆盖（等效群内指令 /llm effort）：六档 low/medium/high/xhigh/max/ultra；选「跟随 provider 配置档」即沿用 LLM 配置 中生效 provider 的 reasoning_effort，provider 留空时回模型默认档（不发送思考参数）。" />
+                  </label>
+                  <select v-model="draftTriState.reasoning_effort">
+                    <option :value="null">跟随 provider 配置档（当前：{{ effortFollowHint }}）</option>
+                    <option v-for="e in EFFORT_CHOICES" :key="e" :value="e">{{ e }}</option>
+                  </select>
                 </div>
               </div>
-              <div class="field">
-                <label>Persona</label>
-                <select v-model="draftTriState.persona_id">
-                  <option :value="null">跟随默认（{{ defaults.persona_id || '未设置' }}）</option>
-                  <option v-for="p in personas" :key="p.id" :value="p.id">
-                    {{ p.display_name || p.id }}（{{ p.id }}）
-                  </option>
-                </select>
-              </div>
-              <div class="field">
-                <label>思考档位<UiInfoTip text="该会话的思考档位覆盖（等效群内指令 /llm effort）：六档 low/medium/high/xhigh/max/ultra；选「跟随 provider 配置档」即沿用 LLM 配置 中生效 provider 的 reasoning_effort，provider 留空时回模型默认档（不发送思考参数）。" /></label>
-                <select v-model="draftTriState.reasoning_effort">
-                  <option :value="null">跟随 provider 配置档（当前：{{ effortFollowHint }}）</option>
-                  <option v-for="e in EFFORT_CHOICES" :key="e" :value="e">{{ e }}</option>
-                </select>
-              </div>
-            </div>
-          </section>
+            </section>
 
-          <section class="form-section">
-            <h4>触发方式</h4>
-            <div class="form-grid">
-              <div class="field">
-                <label>触发前缀<UiInfoTip text="以该前缀开头的消息会触发 LLM 回复。全局默认 /ai，可在 LLM 配置 的 [triggers] 调整。" /></label>
-                <div class="field-row">
-                  <input v-model="prefixInput" :placeholder="defaults.trigger_prefix || '/ai'" />
-                  <UiButton v-if="draftTriState.trigger_prefix !== null" size="sm" variant="ghost" icon="X" @click="clearPrefix">跟随</UiButton>
+            <section class="form-section">
+              <h4>触发方式</h4>
+              <div class="form-grid">
+                <div class="field" :class="{ 'field--overridden': draftTriState.trigger_prefix !== null }">
+                  <label>
+                    触发前缀
+                    <span v-if="draftTriState.trigger_prefix !== null" class="override-badge">已覆盖</span>
+                    <UiInfoTip text="以该前缀开头的消息会触发 LLM 回复。全局默认 /ai，可在 LLM 配置 的 [triggers] 调整。" />
+                  </label>
+                  <div class="field-row">
+                    <input v-model="prefixInput" :placeholder="defaults.trigger_prefix || '/ai'" />
+                    <UiButton v-if="draftTriState.trigger_prefix !== null" size="sm" variant="ghost" icon="X" @click="clearPrefix">跟随</UiButton>
+                  </div>
+                </div>
+                <div class="field" :class="{ 'field--overridden': draftTriState.allow_prefix !== null }">
+                  <label>
+                    允许前缀触发
+                    <span v-if="draftTriState.allow_prefix !== null" class="override-badge">已覆盖</span>
+                    <UiInfoTip text="关闭后即使消息以触发前缀开头也不进入 LLM，仅保留 @ 触发等方式。" />
+                  </label>
+                  <select v-model="draftTriState.allow_prefix">
+                    <option :value="null">跟随默认（{{ defaultHint('allow_prefix') }}）</option>
+                    <option :value="true">开</option>
+                    <option :value="false">关</option>
+                  </select>
+                </div>
+                <div class="field" :class="{ 'field--overridden': draftTriState.allow_at !== null }">
+                  <label>
+                    允许 @ 触发
+                    <span v-if="draftTriState.allow_at !== null" class="override-badge">已覆盖</span>
+                    <UiInfoTip text="开启后 @机器人 的消息直接触发 LLM 回复，无需前缀。" />
+                  </label>
+                  <select v-model="draftTriState.allow_at">
+                    <option :value="null">跟随默认（{{ defaultHint('allow_at') }}）</option>
+                    <option :value="true">开</option>
+                    <option :value="false">关</option>
+                  </select>
+                </div>
+                <div class="field" :class="{ 'field--overridden': draftTriState.history_limit !== null }">
+                  <label>
+                    历史条数
+                    <span v-if="draftTriState.history_limit !== null" class="override-badge">已覆盖</span>
+                    <UiInfoTip text="留空（跟随默认）时上下文由会话纪元自动管理；设置后该会话退化为固定保留最新 n 行的滚动窗，等效群内指令 /llm context_limit。范围 0–200 整数。" />
+                  </label>
+                  <div class="field-row">
+                    <input v-model.number="historyInput" type="number" min="0" max="200" step="1" :placeholder="String(defaults.history_limit ?? 10)" />
+                    <UiButton v-if="draftTriState.history_limit !== null" size="sm" variant="ghost" icon="X" @click="clearHistory">跟随</UiButton>
+                  </div>
                 </div>
               </div>
-              <div class="field">
-                <label>允许前缀触发<UiInfoTip text="关闭后即使消息以触发前缀开头也不进入 LLM，仅保留 @ 触发等方式。" /></label>
-                <select v-model="draftTriState.allow_prefix">
-                  <option :value="null">跟随默认（{{ defaultHint('allow_prefix') }}）</option>
-                  <option :value="true">开</option>
-                  <option :value="false">关</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>允许 @ 触发<UiInfoTip text="开启后 @机器人 的消息直接触发 LLM 回复，无需前缀。" /></label>
-                <select v-model="draftTriState.allow_at">
-                  <option :value="null">跟随默认（{{ defaultHint('allow_at') }}）</option>
-                  <option :value="true">开</option>
-                  <option :value="false">关</option>
-                </select>
-              </div>
-              <div class="field">
-                <label>历史条数<UiInfoTip text="留空（跟随默认）时上下文由会话纪元自动管理；设置后该会话退化为固定保留最新 n 行的滚动窗，等效群内指令 /llm context_limit。" /></label>
-                <div class="field-row">
-                  <input v-model.number="historyInput" type="number" min="0" max="200" :placeholder="String(defaults.history_limit ?? 10)" />
-                  <UiButton v-if="draftTriState.history_limit !== null" size="sm" variant="ghost" icon="X" @click="clearHistory">跟随</UiButton>
-                </div>
-              </div>
-            </div>
-          </section>
+            </section>
+          </fieldset>
         </template>
-      </main>
+      </section>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import UiButton from '../components/ui/UiButton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiIcon from '../components/ui/UiIcon.vue'
@@ -249,17 +346,23 @@ import type {
   GroupSettingsDefaults,
   GroupSettingsOptions,
 } from '../api/groupSettings'
-import { useGroupOverrideDraft } from '../composables/useGroupOverrideDraft'
+import { GROUP_OVERRIDE_FIELDS, useGroupOverrideDraft } from '../composables/useGroupOverrideDraft'
 import { toast } from '../toast'
 
 const options = ref<GroupSettingsOptions | null>(null)
 const groupList = ref<GroupOverrideEntry[]>([])
 const loading = ref(false)
+const loadingDetail = ref(false)
+const detailReady = ref(false)
 const loadError = ref<string | null>(null)
 const selectedGroupId = ref('')
+const selectedSessionActiveOverride = ref<boolean | null>(null)
+const groupSearch = ref('')
 const saving = ref(false)
+const clearing = ref(false)
 const saveError = ref<string | null>(null)
 const sessionSaving = ref(false)
+let loadSeq = 0
 
 const {
   draft: draftTriState,
@@ -272,6 +375,7 @@ const {
   clearHistory,
   applyData,
   resetDraft,
+  revertDraft,
   buildPatch,
 } = useGroupOverrideDraft()
 
@@ -280,16 +384,46 @@ function displayId(key: string): string {
   return key.startsWith('private:') ? key.slice('private:'.length) : key
 }
 
+function overrideCount(entry: GroupOverrideEntry): number {
+  let count = 0
+  for (const field of GROUP_OVERRIDE_FIELDS) {
+    if (entry[field] !== null && entry[field] !== undefined) count++
+  }
+  return count
+}
+
+const filteredGroups = computed(() => {
+  const q = groupSearch.value.trim().toLowerCase()
+  if (!q) return groupList.value
+  return groupList.value.filter((g) => {
+    const id = displayId(g.group_id).toLowerCase()
+    return (
+      g.group_id.toLowerCase().includes(q)
+      || id.includes(q)
+      || (g.persona_id || '').toLowerCase().includes(q)
+      || (g.provider_id || '').toLowerCase().includes(q)
+      || (g.model || '').toLowerCase().includes(q)
+    )
+  })
+})
+
 const selectedIsPrivate = computed(() => selectedGroupId.value.startsWith('private:'))
-const selectedSessionActive = computed(() =>
-  groupList.value.find((entry) => entry.group_id === selectedGroupId.value)?.session_active ?? false,
-)
+const selectedSessionActive = computed(() => {
+  if (selectedSessionActiveOverride.value !== null) return selectedSessionActiveOverride.value
+  return groupList.value.find((entry) => entry.group_id === selectedGroupId.value)?.session_active ?? false
+})
 
 async function onToggleSession() {
+  const gid = selectedGroupId.value
+  if (!gid) return
+  const nextActive = !selectedSessionActive.value
   sessionSaving.value = true
   try {
-    await setPrivateSessionState(displayId(selectedGroupId.value), !selectedSessionActive.value)
-    groupList.value = (await listGroupSettings()).groups
+    const res = await setPrivateSessionState(displayId(gid), nextActive)
+    if (selectedGroupId.value === gid) {
+      selectedSessionActiveOverride.value = typeof res?.active === 'boolean' ? res.active : nextActive
+    }
+    groupList.value = (await listGroupSettings()).groups || []
   } catch (error: unknown) {
     toast((error as Error).message, 'error')
   } finally {
@@ -330,6 +464,11 @@ const modelSuggestions = computed(() => {
   return provider?.models || []
 })
 
+function onRefresh() {
+  if (hasChanges.value && !confirm('当前修改未保存，刷新会丢失。是否继续？')) return
+  reloadAll()
+}
+
 async function reloadAll() {
   loading.value = true
   loadError.value = null
@@ -350,13 +489,33 @@ async function reloadAll() {
   }
 }
 
-async function loadOne(groupId: string) {
+function onRevertDraft() {
   saveError.value = null
+  revertDraft()
+}
+
+async function loadOne(groupId: string) {
+  const seq = ++loadSeq
+  loadingDetail.value = true
+  detailReady.value = false
+  saveError.value = null
+  selectedSessionActiveOverride.value = null
+  resetDraft()
   try {
     const data = await fetchGroupSettings(groupId)
+    if (seq !== loadSeq || selectedGroupId.value !== groupId) return
     applyData(data)
+    detailReady.value = true
+    if (typeof data.session_active === 'boolean') {
+      selectedSessionActiveOverride.value = data.session_active
+      const entry = groupList.value.find((e) => e.group_id === groupId)
+      if (entry) entry.session_active = data.session_active
+    }
   } catch (e: unknown) {
+    if (seq !== loadSeq || selectedGroupId.value !== groupId) return
     saveError.value = (e as Error).message
+  } finally {
+    if (seq === loadSeq) loadingDetail.value = false
   }
 }
 
@@ -367,7 +526,7 @@ async function selectGroup(groupId: string) {
   await loadOne(groupId)
 }
 
-function startAdd() {
+async function startAdd() {
   const raw = prompt('新增覆盖对象：\n- 群聊请填 5-12 位群号\n- 私聊请填 private:USER_ID（例 private:123456789）')
   if (!raw) return
   const key = raw.trim()
@@ -377,17 +536,28 @@ function startAdd() {
   }
   if (hasChanges.value && !confirm('当前修改未保存，切换会丢失。是否继续？')) return
   selectedGroupId.value = key
-  resetDraft()
+  await loadOne(key)
 }
 
 async function onSave() {
+  const gid = selectedGroupId.value
+  if (!gid) return
+  const limit = draftTriState.value.history_limit
+  if (limit !== null && (!Number.isInteger(limit) || limit < 0 || limit > 200)) {
+    saveError.value = '历史条数必须为 0–200 的整数'
+    toast(saveError.value, 'error')
+    return
+  }
   const diff = buildPatch()
-  if (selectedIsPrivate.value) delete diff.enabled
+  if (gid.startsWith('private:')) {
+    delete diff.enabled
+    delete diff.history_enabled
+  }
   if (!Object.keys(diff).length) return
   saving.value = true
   saveError.value = null
   try {
-    await saveGroupSettings(selectedGroupId.value, diff)
+    await saveGroupSettings(gid, diff)
     toast('已保存')
     await reloadAll()
   } catch (e: unknown) {
@@ -399,20 +569,50 @@ async function onSave() {
 }
 
 async function onClear() {
-  const label = (selectedIsPrivate.value ? '私聊 ' : '群 ') + displayId(selectedGroupId.value)
+  const gid = selectedGroupId.value
+  if (!gid) return
+  const label = (gid.startsWith('private:') ? '私聊 ' : '群 ') + displayId(gid)
   if (!confirm(`清空 ${label} 的全部 override？该会话将恢复到默认配置。`)) return
+  saving.value = true
+  clearing.value = true
+  saveError.value = null
   try {
-    await clearGroupSettings(selectedGroupId.value)
+    await clearGroupSettings(gid)
     toast('已清空')
-    selectedGroupId.value = ''
-    resetDraft()
+    if (selectedGroupId.value === gid) {
+      selectedGroupId.value = ''
+      selectedSessionActiveOverride.value = null
+      resetDraft()
+    }
     await reloadAll()
   } catch (e: unknown) {
     toast((e as Error).message, 'error')
+  } finally {
+    clearing.value = false
+    saving.value = false
   }
 }
 
-watch(selectedGroupId, () => { saveError.value = null })
+function handleBeforeUnload(e: BeforeUnloadEvent) {
+  if (!hasChanges.value) return
+  e.preventDefault()
+  e.returnValue = ''
+}
+
+onMounted(() => {
+  window.addEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('beforeunload', handleBeforeUnload)
+})
+
+onBeforeRouteLeave(() => !hasChanges.value || confirm('当前群 LLM 设置有未保存修改，确定离开？'))
+
+watch(selectedGroupId, () => {
+  saveError.value = null
+  selectedSessionActiveOverride.value = null
+})
 
 reloadAll()
 </script>
@@ -423,6 +623,10 @@ reloadAll()
   min-height: 0;
   flex: 1;
   flex-direction: column;
+}
+
+.gs-banner {
+  margin-bottom: var(--qq-gap-md);
 }
 
 .error {
@@ -472,6 +676,7 @@ reloadAll()
   align-items: center;
   justify-content: space-between;
   height: 48px;
+  flex-shrink: 0;
   padding: 0 var(--qq-gap-md);
   border-bottom: 1px solid var(--qq-border);
 }
@@ -488,9 +693,23 @@ reloadAll()
   font-size: var(--qq-text-xs);
 }
 
+.panel-search {
+  padding: var(--qq-gap-xs) var(--qq-gap-sm);
+  border-bottom: 1px solid var(--qq-border);
+  flex-shrink: 0;
+}
+
+.panel-search input {
+  width: 100%;
+  height: 32px;
+  min-height: 32px;
+  font-size: var(--qq-text-sm);
+}
+
 .group-list {
   display: flex;
   flex: 1;
+  min-height: 0;
   flex-direction: column;
   overflow-y: auto;
 }
@@ -510,7 +729,6 @@ reloadAll()
   text-align: left;
   transition: background var(--qq-transition-fast);
 }
-
 
 .group-item__top {
   display: flex;
@@ -543,6 +761,22 @@ reloadAll()
   gap: var(--qq-gap-md);
   overflow-y: auto;
   padding: var(--qq-gap-md);
+}
+
+.editor-fieldset {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--qq-gap-md);
+  transition: opacity var(--qq-transition-fast);
+}
+
+.editor-fieldset--loading {
+  opacity: 0.55;
+  pointer-events: none;
 }
 
 .empty-editor {
@@ -643,6 +877,23 @@ reloadAll()
   gap: var(--qq-gap-xs);
 }
 
+.field--overridden {
+  padding-left: var(--qq-gap-sm);
+  border-left: 2px solid var(--qq-primary);
+}
+
+.override-badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: var(--qq-radius-full);
+  background: var(--qq-primary-soft);
+  color: var(--qq-primary-ink);
+  font-size: 11px;
+  font-weight: 600;
+  line-height: 1.4;
+}
+
 .field label {
   display: inline-flex;
   align-items: center;
@@ -666,6 +917,11 @@ reloadAll()
 @media (max-width: 1100px) {
   .settings-shell {
     grid-template-columns: 1fr;
+  }
+
+  .group-panel {
+    max-height: 260px;
+    overflow-y: auto;
   }
 }
 

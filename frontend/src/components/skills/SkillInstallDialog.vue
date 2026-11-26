@@ -1,9 +1,9 @@
 <template>
-  <div class="install-overlay" @click.self="emit('close')">
-    <UiCard padding="lg" shadow="lg" class="install-card">
+  <div class="install-overlay" @click.self="requestClose">
+    <UiCard padding="lg" shadow="lg" class="install-card" role="dialog" aria-modal="true" aria-labelledby="skill-install-title">
       <div class="install-head">
-        <h3 class="install-title">安装 Skill</h3>
-        <button class="install-close" @click="emit('close')"><UiIcon name="X" :size="18" /></button>
+        <h3 id="skill-install-title" class="install-title">安装 Skill</h3>
+        <button class="install-close" :disabled="busy" aria-label="关闭" @click="requestClose"><UiIcon name="X" :size="18" /></button>
       </div>
 
       <UiTabs :model-value="tab" :tabs="SOURCE_TABS" class="install-tabs" @change="onTabChange" />
@@ -79,13 +79,13 @@
       </div>
 
       <div class="install-foot">
-        <UiButton variant="ghost" @click="emit('close')">取消</UiButton>
+        <UiButton variant="ghost" :disabled="busy" @click="requestClose">取消</UiButton>
         <UiButton
           v-if="candidates.length"
           variant="primary"
           icon="Check"
           :loading="confirming"
-          :disabled="!canConfirm"
+          :disabled="!canConfirm || busy"
           @click="onConfirm"
         >确认安装</UiButton>
       </div>
@@ -94,7 +94,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import UiCard from '../ui/UiCard.vue'
 import UiIcon from '../ui/UiIcon.vue'
 import UiButton from '../ui/UiButton.vue'
@@ -119,13 +119,15 @@ const SOURCE_TABS: { key: SourceTab; label: string }[] = [
 ]
 
 const ZIP_LIMIT = 16 * 1024 * 1024
-// 与后端 skill_import.MAX_IMPORT_ENTRIES / MAX_IMPORT_TOTAL_BYTES 对齐的客户端预检
+// 与后端 skill_import.MAX_IMPORT_ENTRIES / MAX_IMPORT_TOTAL_BYTES / 单文件上限对齐的客户端预检
 const MAX_IMPORT_ENTRIES = 500
+const MAX_SINGLE_FILE_BYTES = 1024 * 1024
 const MAX_IMPORT_TOTAL_BYTES = 32 * 1024 * 1024
 
 const tab = ref<SourceTab>('zip')
 const inspecting = ref(false)
 const confirming = ref(false)
+const busy = computed(() => inspecting.value || confirming.value)
 const error = ref<string | null>(null)
 const githubUrl = ref('')
 const sourceUrl = ref('')
@@ -133,6 +135,7 @@ const token = ref('')
 const candidates = ref<ImportCandidate[]>([])
 const selectedRoot = ref('')
 const overwrite = ref(false)
+let inspectSeq = 0
 
 const selected = computed(() => candidates.value.find(c => c.root === selectedRoot.value) || null)
 const canConfirm = computed(() => {
@@ -142,7 +145,17 @@ const canConfirm = computed(() => {
   return true
 })
 
+watch(selectedRoot, () => {
+  overwrite.value = false
+})
+
+function requestClose() {
+  if (busy.value) return
+  emit('close')
+}
+
 function onTabChange(key: string) {
+  if (busy.value) return
   const next = SOURCE_TABS.find(t => t.key === key)
   if (!next) return
   tab.value = next.key
@@ -150,6 +163,8 @@ function onTabChange(key: string) {
 }
 
 function resetResult() {
+  if (busy.value) return
+  ++inspectSeq
   token.value = ''
   candidates.value = []
   selectedRoot.value = ''
@@ -176,10 +191,12 @@ function candidateTitle(c: ImportCandidate): string {
 }
 
 async function runInspect(fn: () => Promise<{ token: string; candidates: ImportCandidate[] }>, source = '') {
+  const seq = ++inspectSeq
   inspecting.value = true
   error.value = null
   try {
     const res = await fn()
+    if (seq !== inspectSeq) return
     if (!res.candidates.length) {
       error.value = '未检出任何 SKILL.md，无法识别为 Skill'
       return
@@ -187,12 +204,14 @@ async function runInspect(fn: () => Promise<{ token: string; candidates: ImportC
     token.value = res.token
     candidates.value = res.candidates
     sourceUrl.value = source
+    overwrite.value = false
     const firstOk = res.candidates.find(c => c.ok)
     selectedRoot.value = (firstOk || res.candidates[0]).root
   } catch (e: unknown) {
+    if (seq !== inspectSeq) return
     error.value = (e as Error).message
   } finally {
-    inspecting.value = false
+    if (seq === inspectSeq) inspecting.value = false
   }
 }
 
@@ -214,9 +233,14 @@ async function onFolderChange(e: Event) {
   const list = Array.from(input.files || [])
   input.value = ''
   if (!list.length) return
-  // 序列化前的客户端预检：条目数与累计体积与后端摄取护栏对齐
+  // 序列化前的客户端预检：条目数、单文件体积与累计体积与后端摄取护栏对齐
   if (list.length > MAX_IMPORT_ENTRIES) {
     error.value = `文件夹包含 ${list.length} 个文件，超过 ${MAX_IMPORT_ENTRIES} 条目上限，请改用压缩包或 GitHub 导入`
+    return
+  }
+  const oversized = list.find(f => f.size > MAX_SINGLE_FILE_BYTES)
+  if (oversized) {
+    error.value = `文件「${oversized.webkitRelativePath || oversized.name}」体积 ${formatSize(oversized.size)} 超过单文件 1MiB 上限`
     return
   }
   const totalBytes = list.reduce((sum, f) => sum + f.size, 0)
@@ -245,7 +269,7 @@ async function onGithubInspect() {
 
 async function onConfirm() {
   const c = selected.value
-  if (!c || !canConfirm.value) return
+  if (!c || !canConfirm.value || busy.value) return
   confirming.value = true
   error.value = null
   try {
@@ -259,6 +283,20 @@ async function onConfirm() {
     confirming.value = false
   }
 }
+
+function onKeydown(event: KeyboardEvent) {
+  if (event.key === 'Escape') {
+    event.preventDefault()
+    requestClose()
+  }
+}
+
+onMounted(() => {
+  window.addEventListener('keydown', onKeydown)
+})
+onUnmounted(() => {
+  window.removeEventListener('keydown', onKeydown)
+})
 </script>
 
 <style scoped>
@@ -306,9 +344,14 @@ async function onConfirm() {
   border-radius: var(--qq-radius-sm);
 }
 
-.install-close:hover {
+.install-close:hover:not(:disabled) {
   color: var(--qq-text);
   background: var(--qq-surface-elevated);
+}
+
+.install-close:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .install-tabs {

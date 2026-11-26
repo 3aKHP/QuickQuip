@@ -18,7 +18,8 @@
             @change="setEntry(index, { provider_id: ($event.target as HTMLSelectElement).value, model: '' })"
           >
             <option v-if="!entryProvider(entry)" value="" disabled>选择渠道</option>
-            <option v-for="provider in providers" :key="String(provider.id)" :value="String(provider.id)">{{ provider.id }}</option>
+            <option v-if="isMissingProvider(entryProvider(entry))" :value="entryProvider(entry)">{{ entryProvider(entry) }}（不存在）</option>
+            <option v-for="provider in providers" :key="String(provider.id)" :value="String(provider.id)">{{ provider.id }}{{ provider.enabled === false ? '（已停用）' : '' }}</option>
           </select>
           <select
             class="cascade-editor__model"
@@ -26,6 +27,7 @@
             @change="setEntry(index, { provider_id: entryProvider(entry), model: ($event.target as HTMLSelectElement).value })"
           >
             <option value="" disabled>选择模型</option>
+            <option v-if="isMissingModel(entryProvider(entry), entryModel(entry))" :value="entryModel(entry)">{{ entryModel(entry) }}（不存在）</option>
             <option v-for="model in modelsOf(entryProvider(entry))" :key="model" :value="model">{{ model }}</option>
           </select>
         </template>
@@ -62,6 +64,12 @@ function modelsOf(providerId: string): string[] {
   const provider = props.providers.find(item => item.id === providerId)
   if (!provider || !Array.isArray(provider.models)) return []
   return provider.models.filter(isObject).map(model => String(model.model ?? '')).filter(Boolean)
+}
+function isMissingProvider(providerId: string): boolean {
+  return Boolean(providerId) && !props.providers.some(item => String(item.id ?? '') === providerId)
+}
+function isMissingModel(providerId: string, model: string): boolean {
+  return Boolean(model) && !modelsOf(providerId).includes(model)
 }
 
 function commit(next: JsonValue[]) { emit('update:modelValue', next) }

@@ -20,7 +20,9 @@
 
 .page-shell-leave-active {
   position: absolute;
-  inset: 0;
+  top: 0;
+  left: 0;
+  right: 0;
   z-index: 0;
   pointer-events: none;
 }
@@ -85,7 +87,7 @@
 .toast-enter-from,
 .toast-leave-to {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translate(-50%, 8px);
 }
 
 /* ── Slide-up（抽屉 / 模态）── */
@@ -97,6 +99,38 @@
 .slide-up-enter-from,
 .slide-up-leave-to {
   transform: translateX(-100%);
+}
+
+/* ── Drawer（遮罩淡入 + 仅抽屉本体滑入）── */
+.drawer-fade-enter-active,
+.drawer-fade-leave-active {
+  transition: opacity 180ms var(--qq-ease-out);
+}
+
+.drawer-fade-enter-active .drawer,
+.drawer-fade-leave-active .drawer {
+  transition: transform 220ms var(--qq-ease-out);
+}
+
+.drawer-fade-enter-from,
+.drawer-fade-leave-to {
+  opacity: 0;
+}
+
+.drawer-fade-enter-from .drawer,
+.drawer-fade-leave-to .drawer {
+  transform: translateX(-100%);
+}
+
+/* ── Modal（弹窗淡入 + 轻微缩放）── */
+.modal-fade-enter-active,
+.modal-fade-leave-active {
+  transition: opacity 160ms var(--qq-ease-out);
+}
+
+.modal-fade-enter-from,
+.modal-fade-leave-to {
+  opacity: 0;
 }
 
 /* ── List transitions ── */
@@ -117,6 +151,7 @@
 
 .list-leave-active {
   position: absolute;
+  width: 100%;
 }
 
 /* ── Icon 微动效（父级 hover 触发；需 UiIcon motion prop 打上类名）── */
@@ -172,7 +207,7 @@ a:hover .qq-ico--nudge {
   opacity: 0;
 }
 
-/* ── Reduced motion 降级 ── */
+/* ── Reduced motion 降级（系统偏好 + 站内低动态开关）── */
 @media (prefers-reduced-motion: reduce) {
   .page-shell-enter-active,
   .page-shell-leave-active,
@@ -180,6 +215,12 @@ a:hover .qq-ico--nudge {
   .toast-leave-active,
   .slide-up-enter-active,
   .slide-up-leave-active,
+  .drawer-fade-enter-active,
+  .drawer-fade-leave-active,
+  .drawer-fade-enter-active .drawer,
+  .drawer-fade-leave-active .drawer,
+  .modal-fade-enter-active,
+  .modal-fade-leave-active,
   .list-enter-active,
   .list-leave-active,
   .tab-pane-enter-active,
@@ -193,10 +234,33 @@ a:hover .qq-ico--nudge {
     transition: none;
   }
 
-  /* route trace sweep 是 animation 不是 transition，需单独抑制 */
-  .content.route-motion-forward::before,
-  .content.route-motion-back::before,
-  .content.route-motion-switch::before {
-    animation: none;
+  .route-trace {
+    animation: none !important;
   }
+}
+
+html[data-motion="reduced"] .page-shell-enter-active,
+html[data-motion="reduced"] .page-shell-leave-active,
+html[data-motion="reduced"] .toast-enter-active,
+html[data-motion="reduced"] .toast-leave-active,
+html[data-motion="reduced"] .slide-up-enter-active,
+html[data-motion="reduced"] .slide-up-leave-active,
+html[data-motion="reduced"] .drawer-fade-enter-active,
+html[data-motion="reduced"] .drawer-fade-leave-active,
+html[data-motion="reduced"] .drawer-fade-enter-active .drawer,
+html[data-motion="reduced"] .drawer-fade-leave-active .drawer,
+html[data-motion="reduced"] .modal-fade-enter-active,
+html[data-motion="reduced"] .modal-fade-leave-active,
+html[data-motion="reduced"] .list-enter-active,
+html[data-motion="reduced"] .list-leave-active,
+html[data-motion="reduced"] .tab-pane-enter-active,
+html[data-motion="reduced"] .tab-pane-leave-active,
+html[data-motion="reduced"] .icon-swap-enter-active,
+html[data-motion="reduced"] .icon-swap-leave-active,
+html[data-motion="reduced"] .qq-ico {
+  transition: none;
+}
+
+html[data-motion="reduced"] .route-trace {
+  animation: none !important;
 }

@@ -1,12 +1,12 @@
 <template>
   <div>
-    <UiPageHeader title="调度器监控" subtitle="Bot 进程 Cron 任务的调度状态与最近执行结果（只读）；群聊定时消息在「定时消息」页管理"><template #actions><UiButton icon="RefreshCw" :disabled="loading" @click="loadJobs">刷新</UiButton></template></UiPageHeader>
+    <UiPageHeader title="调度器监控" subtitle="Bot 进程 Cron 任务的调度状态与最近执行结果（只读）；群聊定时消息在「定时消息」页管理"><template #actions><UiButton icon="RefreshCw" :loading="loading" @click="loadJobs">刷新</UiButton></template></UiPageHeader>
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <UiSkeleton v-if="loading && !jobs.length" variant="table" :rows="6" />
-    <UiCard v-if="!loading && jobs.length" padding="none" shadow="sm">
-      <div class="table-scroll"><table class="job-table"><thead><tr><th>任务名称</th><th>触发器<UiInfoTip text="三种触发方式：cron = 周期表达式；interval = 固定间隔秒数；date = 一次性定点时刻。" /></th><th>下次执行</th><th>上次执行</th><th>状态<UiInfoTip text="上次执行结果，由 bot 进程在每次任务跑完后记录：正常 / 失败（悬停标签可看见报错）/ 未执行（job 自登记以来还没触发过）。" /></th></tr></thead><tbody><tr v-for="job in jobs" :key="job.id"><td class="name-cell">{{ job.name }}</td><td class="mono">{{ formatTrigger(job.trigger) }}</td><td class="mono">{{ formatTime(job.next_run) }}</td><td class="mono">{{ formatTime(job.last_run) }}</td><td><UiTag v-if="job.last_status === 'ok'" size="sm" variant="success">正常</UiTag><UiTag v-else-if="job.last_status === 'error'" size="sm" variant="danger" :title="job.last_error || ''">失败</UiTag><span v-else-if="!job.last_status && !job.last_run" class="no-data">未执行</span><span v-else class="no-data">&mdash;</span></td></tr></tbody></table></div>
+    <UiCard v-else-if="jobs.length" padding="none" shadow="sm">
+      <div class="table-scroll"><table class="job-table"><thead><tr><th>任务名称</th><th>触发器<UiInfoTip text="三种触发方式：cron = 周期表达式；interval = 固定间隔秒数；date = 一次性定点时刻。" /></th><th>下次执行</th><th>上次执行</th><th>状态<UiInfoTip text="上次执行结果，由 bot 进程在每次任务跑完后记录：正常 / 失败（点击展开报错详情）/ 未执行（job 自登记以来还没触发过）。" /></th></tr></thead><tbody><template v-for="job in jobs" :key="job.id"><tr><td class="name-cell">{{ job.name }}</td><td class="mono">{{ formatTrigger(job.trigger) }}</td><td class="mono">{{ formatTime(job.next_run) }}</td><td class="mono">{{ formatTime(job.last_run) }}</td><td><UiTag v-if="job.last_status === 'ok'" size="sm" variant="success">正常</UiTag><button v-else-if="job.last_status === 'error'" type="button" class="err-tag-btn" :aria-expanded="expandedErrorId === job.id" :title="job.last_error || ''" @click="toggleError(job.id)"><UiTag size="sm" variant="danger">失败</UiTag><UiIcon :name="expandedErrorId === job.id ? 'ChevronUp' : 'ChevronDown'" :size="12" /></button><span v-else-if="!job.last_status && !job.last_run" class="no-data">未执行</span><span v-else class="no-data">&mdash;</span></td></tr><tr v-if="job.last_status === 'error' && expandedErrorId === job.id" class="err-detail-row"><td colspan="5"><pre class="err-detail">{{ job.last_error || '（无报错详情）' }}</pre></td></tr></template></tbody></table></div>
     </UiCard>
-    <UiEmpty v-else-if="!loading" icon="Clock" :title="emptyTitle" :description="emptyDescription" />
+    <UiEmpty v-else icon="Clock" :title="emptyTitle" :description="emptyDescription" />
     <div v-if="jobs.length || snapshotAt" class="refresh"><UiIcon name="RefreshCw" :size="12" /><span>每 30 秒自动刷新，快照时间 {{ snapshotText }}</span><UiInfoTip text="数据来自 bot 进程定期写入的状态文件：生产部署下 Web 与 bot 是两个进程，只能读文件。" /><span v-if="snapshotStale" class="stale">快照超过 5 分钟未更新，bot 进程可能未运行</span></div>
   </div>
 </template>
@@ -17,10 +17,21 @@ import UiPageHeader from '../components/ui/UiPageHeader.vue'; import UiButton fr
 import { fetchCronDashboard, type CronJob } from '../api/cronDashboard'
 
 const jobs = ref<CronJob[]>([]); const loading = ref(false); const loadError = ref<string | null>(null); const snapshotAt = ref<string | null>(null)
+const expandedErrorId = ref<string | null>(null)
 const POLL_INTERVAL = 30_000; const POLL_BACKOFF_CAP = 120_000
 let _timer: ReturnType<typeof setTimeout> | null = null; let _failures = 0; let _stopped = false
 
-function formatTime(iso: string | null): string { if (!iso) return '—'; try { const d = new Date(iso); const pad = (n: number) => String(n).padStart(2, '0'); return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}` } catch { return iso } }
+function toggleError(id: string) {
+  expandedErrorId.value = expandedErrorId.value === id ? null : id
+}
+
+function formatTime(iso: string | null): string {
+  if (!iso) return '—'
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return iso
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
+}
 function formatTrigger(raw: string): string { const m = raw.match(/^cron\[(.*)\]$/); return m ? m[1] : raw }
 
 const snapshotText = computed(() => snapshotAt.value ? formatTime(snapshotAt.value) : '—')
@@ -39,8 +50,9 @@ const emptyDescription = computed(() => {
 async function loadJobs() { loading.value = true; loadError.value = null; try { const d = await fetchCronDashboard(); jobs.value = d.jobs || []; snapshotAt.value = d.updated_at ?? null; _failures = 0 } catch (e: unknown) { loadError.value = (e as Error).message; _failures += 1 } finally { nowTick.value = Date.now(); loading.value = false } }
 function scheduleNext() { if (!_stopped) _timer = setTimeout(tick, Math.min(POLL_INTERVAL * 2 ** _failures, POLL_BACKOFF_CAP)) }
 async function tick() { if (!document.hidden) await loadJobs(); scheduleNext() } // 隐藏标签页跳过本轮，节拍本身保持
-onMounted(() => { _stopped = false; void loadJobs().then(scheduleNext) })
-onUnmounted(() => { _stopped = true; if (_timer) { clearTimeout(_timer); _timer = null } })
+function onVisibilityChange() { if (!document.hidden && !loading.value) void loadJobs() }
+onMounted(() => { _stopped = false; void loadJobs().then(scheduleNext); document.addEventListener('visibilitychange', onVisibilityChange) })
+onUnmounted(() => { _stopped = true; if (_timer) { clearTimeout(_timer); _timer = null }; document.removeEventListener('visibilitychange', onVisibilityChange) })
 </script>
 
 <style scoped>
@@ -49,6 +61,9 @@ onUnmounted(() => { _stopped = true; if (_timer) { clearTimeout(_timer); _timer 
 .name-cell { font-weight: 500; }
 .mono { font-family: var(--qq-font-mono); font-size: 12px; color: var(--qq-text-muted); }
 .no-data { color: var(--qq-text-muted); }
+.err-tag-btn { display: inline-flex; align-items: center; gap: 4px; border: 0; padding: 0; background: transparent; color: var(--qq-danger-ink); cursor: pointer; }
+.err-detail-row td { background: var(--qq-danger-soft); }
+.err-detail { margin: 0; font-family: var(--qq-font-mono); font-size: var(--qq-text-xs); color: var(--qq-danger-ink); white-space: pre-wrap; word-break: break-word; max-height: 180px; overflow: auto; }
 .refresh { display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--qq-text-muted); margin-top: var(--qq-gap-md); }
 .stale { color: var(--qq-danger); }
 </style>

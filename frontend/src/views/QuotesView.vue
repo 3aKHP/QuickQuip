@@ -50,8 +50,8 @@
             <tr v-for="q in entries" :key="q.id">
               <td class="num">{{ q.group_seq }}</td>
               <td class="content-cell">
-                <span class="quote-text">{{ q.content_display ?? q.content }}</span>
-                <details><summary>查看原文</summary><pre>{{ q.content }}</pre></details>
+                <span class="quote-text" :title="q.content_display ?? q.content">{{ q.content_display ?? q.content }}</span>
+                <details v-if="needsRawDetails(q)" class="quote-raw"><summary>查看原文</summary><pre>{{ q.content }}</pre></details>
               </td>
               <td class="sender">
                 <template v-if="q.sender_changed">
@@ -82,7 +82,6 @@ import { computed, onMounted, ref } from 'vue'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiCard from '../components/ui/UiCard.vue'
 import UiButton from '../components/ui/UiButton.vue'
-import UiLoading from '../components/ui/UiLoading.vue'
 import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import UiEmpty from '../components/ui/UiEmpty.vue'
 import UiStatStrip from '../components/ui/UiStatStrip.vue'
@@ -97,6 +96,7 @@ const selectedGroup = ref('')
 const loading = ref(false)
 const entries = ref<any[]>([])
 const total = ref(0)
+let quotesSeq = 0
 
 const stripItems = computed(() => {
   const items = [{ label: '群组数', value: groups.value.length, icon: 'Users' }]
@@ -105,7 +105,6 @@ const stripItems = computed(() => {
 })
 const hasMore = ref(false)
 const keyword = ref('')
-const offset = ref(0)
 const pageSize = 50
 const LIST_SOFT_CAP = 500
 const reachedSoftCap = computed(() => entries.value.length >= LIST_SOFT_CAP)
@@ -114,6 +113,7 @@ onMounted(() => loadGroups())
 
 async function loadGroups() {
   groupLoading.value = true
+  loadError.value = null
   try {
     const data = await listGroups()
     groups.value = data.groups || []
@@ -122,25 +122,40 @@ async function loadGroups() {
 }
 
 async function loadQuotes(reset: boolean = true) {
-  if (!selectedGroup.value) return
-  if (reset) { offset.value = 0; entries.value = [] }
+  const seq = ++quotesSeq
+  if (!selectedGroup.value) {
+    loading.value = false
+    entries.value = []
+    total.value = 0
+    hasMore.value = false
+    loadError.value = null
+    return
+  }
+  const gid = selectedGroup.value
+  const reqOffset = reset ? 0 : entries.value.length
+  if (reset) { entries.value = []; total.value = 0; hasMore.value = false }
   loading.value = true
+  loadError.value = null
   try {
-    const data = await listQuotes(selectedGroup.value, offset.value, pageSize, keyword.value)
+    const data = await listQuotes(gid, reqOffset, pageSize, keyword.value)
+    if (seq !== quotesSeq || selectedGroup.value !== gid) return
     if (reset) {
       entries.value = data.entries || []
     } else {
-      entries.value = [...entries.value, ...(data.entries || [])]
+      const seen = new Set(entries.value.map(item => item.id))
+      entries.value = [...entries.value, ...(data.entries || []).filter((item: any) => !seen.has(item.id))]
     }
     total.value = data.total || 0
     hasMore.value = data.has_more || false
-  } catch (e: any) { loadError.value = e.message || String(e) }
-  finally { loading.value = false }
+  } catch (e: any) {
+    if (seq !== quotesSeq) return
+    loadError.value = e.message || String(e)
+  } finally {
+    if (seq === quotesSeq) loading.value = false
+  }
 }
 
 function search() {
-  offset.value = 0
-  entries.value = []
   loadQuotes(true)
 }
 
@@ -150,8 +165,7 @@ function clearSearch() {
 }
 
 function loadMore() {
-  if (reachedSoftCap.value) return
-  offset.value += pageSize
+  if (reachedSoftCap.value || loading.value) return
   loadQuotes(false)
 }
 
@@ -161,13 +175,23 @@ async function doDelete(q: any) {
     await deleteQuote(q.id)
     entries.value = entries.value.filter(e => e.id !== q.id)
     total.value = Math.max(0, total.value - 1)
+    const grp = groups.value.find(g => g.group_id === selectedGroup.value)
+    if (grp && typeof grp.count === 'number') grp.count = Math.max(0, grp.count - 1)
     toast('已删除')
   } catch (e: any) { toast(e.message || '删除失败', 'error') }
 }
 
+function needsRawDetails(q: any): boolean {
+  const display = q.content_display ?? q.content ?? ''
+  const raw = q.content ?? ''
+  return raw !== display || raw.length > 42 || raw.includes('\n')
+}
+
 function formatTime(ts: number): string {
   const d = new Date(ts * 1000)
-  return d.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit' })
+  if (Number.isNaN(d.getTime())) return '—'
+  const pad = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
 </script>
 
@@ -200,12 +224,14 @@ function formatTime(ts: number): string {
 }
 .search-input:focus { border-color: var(--qq-accent); box-shadow: 0 0 0 3px var(--qq-accent-soft); }
 .data-table { width: 100%; border-collapse: collapse; font-size: var(--qq-text-sm); margin-top: var(--qq-gap-sm); }
-.data-table th { text-align: left; padding: 6px 10px; border-bottom: 2px solid var(--qq-border); color: var(--qq-text-muted); font-weight: 600; }
+.data-table th { text-align: left; padding: 6px 10px; border-bottom: 2px solid var(--qq-border); color: var(--qq-text-muted); font-weight: 600; white-space: nowrap; }
 .data-table td { padding: 6px 10px; border-bottom: 1px solid var(--qq-border); }
-.num { text-align: right; width: 40px; font-variant-numeric: tabular-nums; }
+.num { text-align: right; min-width: 52px; white-space: nowrap; font-variant-numeric: tabular-nums; }
 .act { width: 60px; text-align: center; }
-.content-cell { max-width: 320px; }
+.content-cell { max-width: 360px; }
 .quote-text { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.quote-raw { margin-top: 4px; font-size: var(--qq-text-xs); color: var(--qq-text-muted); }
+.quote-raw pre { margin-top: 4px; padding: 6px 8px; border-radius: var(--qq-radius-sm); background: var(--qq-surface-strong); white-space: pre-wrap; word-break: break-word; overflow-x: auto; max-height: 180px; font-family: var(--qq-font-mono); color: var(--qq-text); }
 .sender { white-space: nowrap; color: var(--qq-text-muted); font-size: var(--qq-text-xs); }
 .sender-old { color: var(--qq-text-muted); opacity: 0.75; }
 .sender-qq { margin-top: 2px; opacity: 0.7; font-variant-numeric: tabular-nums; }

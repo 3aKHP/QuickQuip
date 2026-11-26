@@ -1,25 +1,33 @@
 import { onUnmounted, ref, watch } from 'vue'
 import type { Ref } from 'vue'
+import { useMotionPrefs } from './useMotionPrefs'
 
 /**
  * 数字滚动：目标值变化时以 ease-out 曲线从当前值过渡到新值。
- * prefers-reduced-motion 下直接跳到目标值。
+ * prefers-reduced-motion 或站内低动态模式下直接跳到目标值。
  */
 export function useCountUp(target: () => number | undefined, duration = 600): Ref<number> {
   const display = ref(0)
+  const { lowMotion } = useMotionPrefs()
   let raf = 0
 
   function reducedMotion(): boolean {
-    return window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    return lowMotion.value || window.matchMedia('(prefers-reduced-motion: reduce)').matches
   }
 
   watch(
     target,
     (to) => {
-      if (to === undefined || !Number.isFinite(to)) return
-      if (raf) cancelAnimationFrame(raf)
+      if (raf) {
+        cancelAnimationFrame(raf)
+        raf = 0
+      }
+      if (to === undefined || !Number.isFinite(to)) {
+        display.value = 0
+        return
+      }
       const from = display.value
-      if (reducedMotion() || from === to) {
+      if (reducedMotion() || duration <= 0 || from === to) {
         display.value = to
         return
       }

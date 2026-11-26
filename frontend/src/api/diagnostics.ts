@@ -97,9 +97,13 @@ export async function probeProviders(body: ProbeRequestBody): Promise<Diagnostic
   })
 }
 
-export async function fetchDiagnosticOperation<T>(id: string): Promise<DiagnosticOperation<T>> {
+export async function fetchDiagnosticOperation<T>(id: string, signal?: AbortSignal): Promise<DiagnosticOperation<T>> {
+  const timeoutSignal = AbortSignal.timeout(10_000)
+  const combined = signal && typeof AbortSignal.any === 'function'
+    ? AbortSignal.any([timeoutSignal, signal])
+    : signal ?? timeoutSignal
   return request(`/api/llm-configuration/operations/${encodeURIComponent(id)}`, {
-    signal: AbortSignal.timeout(10_000),
+    signal: combined,
   })
 }
 

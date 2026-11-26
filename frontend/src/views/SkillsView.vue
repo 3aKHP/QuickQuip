@@ -87,6 +87,10 @@
             />
           </template>
           <template v-else-if="repairDiagnostics">
+            <div class="detail-bar">
+              <h3 class="section-title mono">{{ selectedName }}</h3>
+              <UiButton size="sm" variant="danger" icon="Trash2" title="删除整个 Skill 目录" @click="onDeleteSkill">删除</UiButton>
+            </div>
             <div class="diag-banner soft-note soft-note--danger">
               <UiIcon name="AlertTriangle" :size="15" />
               <div class="diag-list">
@@ -100,7 +104,6 @@
               <p class="repair-text">该 Skill 的 SKILL.md 缺失或未通过解析校验，运行时会被扫描跳过。修复 SKILL.md 并保存后即可恢复加载，也可以直接删除整个目录。</p>
               <div class="repair-actions">
                 <UiButton size="sm" variant="primary" icon="Pencil" @click="openSkillFileForRepair">编辑 SKILL.md</UiButton>
-                <UiButton size="sm" variant="danger" icon="Trash2" @click="onDeleteSkill">删除该 Skill</UiButton>
               </div>
             </div>
             <SkillFileEditor
@@ -127,7 +130,8 @@
 </template>
 
 <script setup lang="ts">
-import { nextTick, onMounted, ref } from 'vue'
+import { nextTick, onMounted, onUnmounted, ref } from 'vue'
+import { onBeforeRouteLeave } from 'vue-router'
 import UiPageHeader from '../components/ui/UiPageHeader.vue'
 import UiButton from '../components/ui/UiButton.vue'
 import UiTag from '../components/ui/UiTag.vue'
@@ -160,7 +164,25 @@ const presetPanelRef = ref<InstanceType<typeof PresetSyncPanel> | null>(null)
 
 const installOpen = ref(false)
 
-onMounted(loadList)
+function beforeUnload(event: BeforeUnloadEvent) {
+  if (editorRef.value?.dirty) {
+    event.preventDefault()
+    event.returnValue = ''
+  }
+}
+
+if (typeof onBeforeRouteLeave === 'function') {
+  onBeforeRouteLeave(() => confirmEditorLeave())
+}
+onMounted(() => {
+  void loadList()
+  window.addEventListener('beforeunload', beforeUnload)
+})
+if (typeof onUnmounted === 'function') {
+  onUnmounted(() => {
+    window.removeEventListener('beforeunload', beforeUnload)
+  })
+}
 
 function onRefresh() {
   if (!confirmEditorLeave()) return
