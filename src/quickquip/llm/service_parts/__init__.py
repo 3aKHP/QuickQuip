@@ -2,6 +2,7 @@ from .draw_svg import DrawSvgToolMixin
 from .health import HealthMixin
 from .images import ImagesMixin
 from .mcp_lifecycle import McpLifecycleMixin
+from .quote_tools import QuoteToolMixin
 from .schedule_messages_tool import ScheduleMessagesToolMixin
 from .single_shot import SingleShotEntriesMixin
 from .skills import SkillsToolMixin
@@ -13,6 +14,7 @@ __all__ = [
     "HealthMixin",
     "ImagesMixin",
     "McpLifecycleMixin",
+    "QuoteToolMixin",
     "ScheduleMessagesToolMixin",
     "SingleShotEntriesMixin",
     "SkillsToolMixin",

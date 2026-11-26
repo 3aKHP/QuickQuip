@@ -286,6 +286,8 @@ class ToolMixin(McpLifecycleMixin):
         self.register_draw_svg_tool()
         # manage_scheduled_messages 独立成 ScheduleMessagesToolMixin（同上）
         self.register_schedule_messages_tool()
+        # query_group_quotes 独立成 QuoteToolMixin（同上）
+        self.register_quote_tools()
 
     def register_tool(self, spec: LLMToolSpec, handler) -> None:
         self.tool_registry.register(spec, handler)

@@ -179,6 +179,33 @@ def test_resolve_display_unknown_snapshot_shows_resolved_only():
     assert (resolved, changed) == ("新名片", False)
 
 
+def test_search_filtered_supports_keyword_sender_combined_and_isolation(store):
+    store.add("g1", "u1", "Alice", "今天写代码真快乐", "u2")
+    store.add("g1", "u1", "Alice", "明天去吃饭", "u2")
+    store.add("g1", "u3", "Bob", "今天写代码很困", "u2")
+    store.add("g2", "u1", "Alice", "群2写代码", "u2")
+
+    # 关键词 + 发言人组合
+    rows, total = store.search_filtered("g1", keyword="写代码", user_ids=["u1"])
+    assert total == 1
+    assert rows[0]["content"] == "今天写代码真快乐"
+
+    # 仅发言人（分页）
+    rows_sender, total_sender = store.search_filtered("g1", user_ids=["u1"], offset=0, limit=1)
+    assert total_sender == 2
+    assert len(rows_sender) == 1
+
+    # 无条件最新倒序
+    rows_all, total_all = store.search_filtered("g1", offset=0, limit=10)
+    assert total_all == 3
+    assert all(r["group_id"] == "g1" for r in rows_all)
+
+    # 不可用抛 RuntimeError
+    store._unavailable = True
+    with pytest.raises(RuntimeError, match="数据库不可用"):
+        store.search_filtered("g1", keyword="写代码")
+
+
 def test_resolve_display_unchanged_name_not_marked_changed():
     resolved, changed = resolve_quote_display_name(
         "u1", "同名", user_names={"u1": "同名"}, identity_index=None,

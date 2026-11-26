@@ -27,7 +27,12 @@ TOOL_SEARCH_NAME = "tool_search"
 TOOL_LIST_NAME = "tool_list"
 SEARCH_TOOL_FAILSAFE_MAX_ROUNDS = 64
 SEARCH_TOOL_FAILSAFE_MAX_CALLS_PER_ROUND = 64
-PRIVATE_UNAVAILABLE_TOOLS = {"get_group_stats", "get_rule_status", "manage_scheduled_messages"}
+PRIVATE_UNAVAILABLE_TOOLS = {
+    "get_group_stats",
+    "get_rule_status",
+    "manage_scheduled_messages",
+    "query_group_quotes",
+}
 DEFAULT_ALWAYS_LOADED_TOOLS = [
     TOOL_SEARCH_NAME,
     TOOL_LIST_NAME,
@@ -54,6 +59,7 @@ DEFAULT_ENABLED_TOOLS = [
     "delete_memory",
     SEARCH_TOOL_NAME,
     "search_recent_messages",
+    "query_group_quotes",
     "search_group_history",
     "read_group_history",
     "investigate_group_history",
