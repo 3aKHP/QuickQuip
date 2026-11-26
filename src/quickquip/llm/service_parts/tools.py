@@ -2,6 +2,7 @@ from __future__ import annotations
 
 
 import logging
+from collections.abc import Sequence
 from dataclasses import replace
 from typing import TYPE_CHECKING
 
@@ -416,21 +417,62 @@ class ToolMixin(McpLifecycleMixin):
         )
         return deferred_tokens > min_schema_tokens
 
+    def _resolve_loaded_tool_names(
+        self,
+        chat_type: str = "group",
+        *,
+        provider_id: str | None = None,
+        history_enabled: bool = False,
+        extra_loaded_names: Sequence[str] | None = None,
+    ) -> list[str]:
+        """计算 discovery 开启时当前实际生效的已装载工具名（常驻 + 纪元粘性，受上限截断）。"""
+        names = list(
+            self._get_always_loaded_tool_names(
+                chat_type=chat_type,
+                provider_id=provider_id,
+                history_enabled=history_enabled,
+            )
+        )
+        if not extra_loaded_names:
+            return names
+        enabled_set = set(
+            self._get_enabled_tool_names(
+                chat_type=chat_type,
+                provider_id=provider_id,
+                history_enabled=history_enabled,
+            )
+        )
+        cap = max(1, min(self.config.tools.discovery_max_loaded_tools, 64))
+        seen = set(names)
+        for name in extra_loaded_names:
+            if len(names) >= cap:
+                break
+            if (
+                name in enabled_set
+                and name not in seen
+                and self.tool_registry.has_tool(name)
+            ):
+                names.append(name)
+                seen.add(name)
+        return names
+
     def _get_enabled_tool_specs(
         self,
         chat_type: str = "group",
         *,
         provider_id: str | None = None,
         history_enabled: bool = False,
+        extra_loaded_names: Sequence[str] | None = None,
     ) -> list[LLMToolSpec]:
         if self._is_tool_discovery_enabled(
             chat_type, provider_id=provider_id, history_enabled=history_enabled
         ):
             return self.tool_registry.get_specs(
-                self._get_always_loaded_tool_names(
+                self._resolve_loaded_tool_names(
                     chat_type=chat_type,
                     provider_id=provider_id,
                     history_enabled=history_enabled,
+                    extra_loaded_names=extra_loaded_names,
                 )
             )
         return self.tool_registry.list_specs(
@@ -474,6 +516,7 @@ class ToolMixin(McpLifecycleMixin):
         *,
         provider_id: str | None = None,
         history_enabled: bool = False,
+        extra_loaded_names: Sequence[str] | None = None,
     ) -> list[str]:
         """discovery 开启时按名延迟加载的工具清单（信封公告用，仅名字）。"""
         if not self.config.runtime.tool_calling_enabled:
@@ -484,9 +527,14 @@ class ToolMixin(McpLifecycleMixin):
             chat_type, provider_id=provider_id, history_enabled=history_enabled
         ):
             return []
-        loaded = set(self._get_always_loaded_tool_names(
-            chat_type=chat_type, provider_id=provider_id, history_enabled=history_enabled
-        ))
+        loaded = set(
+            self._resolve_loaded_tool_names(
+                chat_type=chat_type,
+                provider_id=provider_id,
+                history_enabled=history_enabled,
+                extra_loaded_names=extra_loaded_names,
+            )
+        )
         meta_names = {TOOL_SEARCH_NAME, TOOL_LIST_NAME}
         return [
             name

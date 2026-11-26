@@ -8,7 +8,7 @@ messages 拼装等运行时依赖由 service 调用点以绑定可调用现取�
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -271,6 +271,8 @@ class TurnRequestAssembler:
     system_prompt: str
 
     tools_allowed: bool = False
+    get_tool_specs: Callable[[], list["LLMToolSpec"]] | None = None
+    get_loaded_tool_names: Callable[[], Sequence[str]] | None = None
 
     # 装配产物（assemble() 每次重建）
     history: list[dict[str, object]] = field(default_factory=list)
@@ -339,6 +341,8 @@ class TurnRequestAssembler:
             "provider_id": self.provider.id,
             "history_enabled": self.history_enabled,
         }
+        if self.get_loaded_tool_names is not None:
+            envelope_kwargs["extra_loaded_names"] = self.get_loaded_tool_names()
         if matched_lore:
             envelope_kwargs["persona_lore"] = matched_lore
         self.envelope_parts = self.build_turn_envelope(
@@ -388,7 +392,11 @@ class TurnRequestAssembler:
             messages=self.messages,
             temperature=self.provider.temperature,
             max_output_tokens=self.provider.max_output_tokens,
-            tools=self.tool_specs,
+            tools=(
+                self.get_tool_specs()
+                if self.get_tool_specs is not None
+                else self.tool_specs
+            ),
             allow_tool_calls=self.tools_allowed,
             tool_choice="auto",
             builtin_search=self.builtin_search_active,

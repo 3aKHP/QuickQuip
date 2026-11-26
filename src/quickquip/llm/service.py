@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 from collections import OrderedDict
+from collections.abc import Sequence
 from dataclasses import asdict, replace
 from copy import deepcopy
 import json
@@ -454,6 +455,7 @@ class LLMService(
         persona_lore: list[object] | tuple[object, ...] | None = None,
         provider_id: str | None = None,
         history_enabled: bool = False,
+        extra_loaded_names: Sequence[str] | None = None,
     ) -> dict[str, str]:
         # 时钟唯一注入点：信封以外的 prompt 组装全链路无时钟。返回分段分解，
         # join 由 TurnRequestAssembler 统一执行（字节口径单点）。
@@ -467,7 +469,10 @@ class LLMService(
             mention_profiles=mention_profiles,
             persona_lore=persona_lore,
             deferred_tool_names=self._get_deferred_tool_names(
-                chat_type, provider_id=provider_id, history_enabled=history_enabled
+                chat_type,
+                provider_id=provider_id,
+                history_enabled=history_enabled,
+                extra_loaded_names=extra_loaded_names,
             ),
         )
 
@@ -799,6 +804,12 @@ class LLMService(
             request_guard=request_guard,
             on_provider_activity=lambda: self._epochs.note_activity(
                 epoch_key, epoch_id=request.epoch_id,
+            ),
+            on_tools_loaded=lambda names: self._epochs.remember_loaded_tools(
+                epoch_key,
+                names,
+                epoch_id=request.epoch_id,
+                max_tools=self.config.tools.discovery_max_loaded_tools,
             ),
             build_provider_client=build_provider_client,
             tool_registry=self.tool_registry,
@@ -1386,6 +1397,19 @@ class LLMService(
             is_non_vision=is_non_vision,
             tool_specs=tool_specs,
             tools_allowed=self.config.runtime.tool_calling_enabled,
+            get_tool_specs=(
+                (
+                    lambda: self._get_enabled_tool_specs(
+                        chat_type=request.chat_type,
+                        provider_id=provider.id,
+                        history_enabled=history_enabled,
+                        extra_loaded_names=self._epochs.loaded_tools(epoch_key),
+                    )
+                )
+                if self.config.runtime.tool_calling_enabled
+                else (lambda: [])
+            ),
+            get_loaded_tool_names=lambda: self._epochs.loaded_tools(epoch_key),
             builtin_search_active=builtin_search_active,
             system_prompt=system_prompt,
             persona=persona,
