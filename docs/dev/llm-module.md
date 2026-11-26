@@ -560,13 +560,16 @@ ASR 当前支持 `openai_transcriptions` 协议，即 OpenAI-compatible `POST /a
 
 当前搜索结果由当前搜索后端返回摘要与来源链接，不自动写入长期记忆。
 
-LLM 侧的联网搜索有两条互斥路径：
+LLM 侧的联网搜索由 `search_policy.resolve_search_mode` 统一路由为互斥路径（任一原生搜索激活时均移除本地 `search_web` 工具并切换对应提示词引导）：
 
-- **`search_web` 工具**（默认）：客户端执行，走项目内 SearXNG，受 `auto_search` 提示词引导与每轮调用上限约束。
-- **provider 内置搜索**：`gemini` 或 `claude` provider 配置 `builtin_search = true` 后启用（均不依赖 `tool_calling_enabled`）。
+- **`search_web` 工具（`local` / 默认）**：客户端执行，走项目内 SearXNG，受 `tool_calling_enabled`、`auto_search` 提示词引导与每轮调用上限约束。
+- **provider 内置搜索（`gemini_grounding` / `claude_web_search`）**：`gemini` 或 `claude` provider 配置 `builtin_search = true` 后启用，不依赖 `tool_calling_enabled`。
   - `gemini`：请求在 `tools` 中追加独立的 `{"google_search": {}}` 声明；当同次请求同时携带客户端 `functionDeclarations` 时，自动注入 `toolConfig.includeServerSideToolInvocations = true`（若 `extra_body` 另行配置了字典型 `toolConfig`，对其做深度合并而非浅覆盖）。服务端产生的 `toolCall` / `toolResponse` 块在当前工具循环及同 owner 跨轮原生回放中按序保留，预算首档剥离 `thought` 块时予以保留，`thoughtSignature` 在 token 预算估算中按单块上限封顶；跨上游验签失败降级重试时移除历史服务端工具块并为其客户端 `functionCall` 补齐跳过哨兵。检索由 provider 侧 grounding 完成；响应解析 `groundingMetadata` 提取检索词与来源，保存正文以「标题 — 域名」形式附至多 3 条来源，完整 grounding 来源另存元数据，QQ 显示层隐藏来源尾块。模型约束：`google_search` 与 function calling 在同一请求中组合仅 Gemini 3 系列模型支持；2.x 模型上两者并存的请求会被 API 拒绝，需关闭该 provider 的 `builtin_search` 或全局工具调用。
   - `claude`：请求在 `tools` 中追加 `{"type": "web_search_20250305", "name": "web_search", "max_uses": 5}`（可与客户端 `tools` 共存）；非流式与流式 SSE 统一从 `server_tool_use`、`web_search_tool_result` 与 `citations` / `citations_delta` 提取 `LLMWebSearchReport`（优先保留被引用来源，设置 `link_urls=True`，元数据不保存 `encrypted_content` 密文），`native_blocks` 不落盘服务端搜索块以避免历史上下文膨胀，完整流式响应仍保留在 HTTP trace 中。
-  - 开启后该 provider 的会话移除 `search_web` 工具并切换提示词引导，检索成本在 provider 侧计费，本地轮次上限不覆盖。
+- **Responses 托管搜索（`responses_hosted`）**：`openai_responses` provider 配置 `responses_profile = "codex-relay-hosted-tools"` 且 `tool_calling_enabled = true` 时启用，请求侧显式声明 `{"type": "web_search"}` 与 `include: ["web_search_call.action.sources"]`；关闭工具调用时停止声明并降级含搜索的历史 Loop（详见第 2 节）。
+- **Responses 独立搜索（`responses_standalone`）**：`openai_responses` provider 配置 `responses_profile = "codex-relay-standalone-search"` 且 `tool_calling_enabled = true` 时启用，通过原生 namespace `web.run` 与 `/alpha/search` 执行独立搜索，不声明 hosted `web_search`；关闭工具调用时路由为 `none`（详见第 2 节与 [ADR-0031](adr/0031-standalone-search-evidence.md)）。
+- **跨轮正文恢复边界**：在无状态全量回放（`store: false`）契约下，服务端托管搜索（Responses `web_search`、Claude `web_search_20250305`、Gemini 纯 `google_search`）仅在历史中保留调用动作或来源 URL 元数据，不保证跨轮恢复首轮回复中未披露的网页正文。需要跨轮可读正文证据时，支持 `/alpha/search` 的 Responses 渠道应选用 `codex-relay-standalone-search`（明文 `output` 作为标准工具结果落库回放）；其余托管搜索渠道在追问未披露细节时由模型重新检索。
+- 原生搜索激活后，检索成本在对应服务端或独立搜索端点计费，不受本地 SearXNG 轮次上限约束；QQ 显示层隐藏自动来源尾块。
 
 权限规则：
 
@@ -588,7 +591,7 @@ LLM 侧的联网搜索有两条互斥路径：
 - `data/` 需要持久化
 - 镜像构建时通过 `COPY src/` + `pip install --no-deps .` 安装项目包
 - API key 通过环境变量注入
-- 使用 `/search` 或 `search_web` 时需提供可访问的 SearXNG；开启 `builtin_search` 的 gemini / claude provider 不依赖 SearXNG；Tavily 等外部搜索能力通过 MCP 工具接入
+- 使用 `/search` 或 `search_web` 时需提供可访问的 SearXNG；开启 `builtin_search` 的 `gemini` / `claude` provider，以及配置 `codex-relay-hosted-tools` / `codex-relay-standalone-search` 的 `openai_responses` provider（开启工具调用时）不依赖 SearXNG；Tavily 等外部搜索能力通过 MCP 工具接入
 
 根目录 `.dockerignore` 已经做了收紧，避免把以下内容送进 Docker build 上下文：
 

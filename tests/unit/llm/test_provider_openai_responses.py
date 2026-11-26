@@ -1803,6 +1803,21 @@ def test_hosted_search_include_follows_tool_gate():
         assert "reasoning.encrypted_content" in payload["include"]
 
 
+def test_hosted_profile_drops_web_search_and_rejects_replay_when_builtin_search_false():
+    cfg = _config(responses_profile="codex-relay-hosted-tools")
+    payload = _payload(
+        _request([LLMConversationMessage(role="user", content="画一只猫")],
+                 allow_tool_calls=True, builtin_search=False),
+        cfg,
+    )
+    assert payload["tools"] == [{"type": "image_generation", "output_format": "png"}]
+    assert "web_search_call.action.sources" not in payload["include"]
+
+    replay = LLMConversationMessage(role="assistant", content="", native_content=[_search_item()])
+    with pytest.raises(LLMProviderError, match="搜索未启用"):
+        _payload(_request([replay], allow_tool_calls=True, builtin_search=False), cfg)
+
+
 @pytest.mark.parametrize("action", [{"type": "unknown"}, {"type": "search", "queries": "bad"}])
 def test_search_rejects_unknown_or_malformed_actions(action):
     with pytest.raises(LLMProviderError):

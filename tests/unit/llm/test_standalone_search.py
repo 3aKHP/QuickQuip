@@ -81,6 +81,16 @@ def test_namespace_and_generic_history_preserve_function_pair():
     assert body["input"][1]["call_id"] == "call1"
 
 
+def test_standalone_profile_omits_tools_and_search_include_when_tool_calls_disallowed():
+    r = request()
+    r.messages = [LLMConversationMessage("user", "搜索")]
+    r.allow_tool_calls = False
+    body = build_responses_payload(r, provider(), stream=True, prepared_images=[[]])
+    assert "tools" not in body
+    assert "web_search_call.action.sources" not in body["include"]
+    assert body["store"] is False
+
+
 def test_namespace_response_retains_native_identity_but_dispatches_registered_name():
     item = {
         "type": "function_call",
