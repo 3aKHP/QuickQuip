@@ -60,8 +60,10 @@ export function createLlmConfigStore(api: Api) {
   const errorDetails = ref<unknown>(null)
   const pollError = ref('')
   const conflict = ref(false)
+  const draftNote = ref('')
 
   let requestVersion = 0
+  let lastServerDraftNote = ''
   let pollTimer: ReturnType<typeof setTimeout> | undefined
   let clockTimer: ReturnType<typeof setInterval> | undefined
   let pollEpoch = 0
@@ -159,6 +161,11 @@ export function createLlmConfigStore(api: Api) {
     status.value = value
     statusReceivedAt.value = Date.now() / 1000
     observedTime.value = statusReceivedAt.value
+    const serverNote = value.draft_version?.note ?? ''
+    if (serverNote !== lastServerDraftNote) {
+      draftNote.value = serverNote
+      lastServerDraftNote = serverNote
+    }
   }
 
   async function refreshStatus() { acceptStatus(await api.fetchLlmConfigStatus()) }
@@ -166,6 +173,11 @@ export function createLlmConfigStore(api: Api) {
   /** 历史列表只用于版本标记，刷新失败不打断主流程 */
   async function refreshHistory() {
     try { history.value = (await api.fetchLlmConfigHistory()).snapshots } catch { /* 保留旧列表 */ }
+  }
+
+  /** 最近任务静默刷新（不覆盖全局错误态） */
+  async function refreshOperationsQuiet() {
+    try { recentOperations.value = (await api.fetchLlmConfigOperations()).operations } catch { /* 保留旧列表 */ }
   }
 
   async function saveNote(source: 'draft' | 'published' | number, note: string) {
@@ -206,7 +218,7 @@ export function createLlmConfigStore(api: Api) {
       const sameEntries = document.value !== null && providerEntries(document.value)
         .every((provider, index) => providerEditState(provider) === sentProviderStates[index])
       if (JSON.stringify(document.value) === sent && sameEntries) document.value = result.document
-      await refreshStatus()
+      await refreshStatus().catch(() => {})
       return true
     } catch (cause) {
       showError(cause)
@@ -231,7 +243,7 @@ export function createLlmConfigStore(api: Api) {
       applying.value = false
     }
     // 任务已入队；标记刷新失败交给轮询补齐，不把提交误报为失败
-    await Promise.all([refreshStatus().catch(() => {}), refreshHistory()])
+    await Promise.all([refreshStatus().catch(() => {}), refreshHistory(), refreshOperationsQuiet()])
     return true
   }
 
@@ -240,13 +252,20 @@ export function createLlmConfigStore(api: Api) {
     try {
       // 隐藏标签页不制造请求；finally 照常按节拍续链，回到前台自动恢复
       if (pageHidden()) return
+      const wasActive = !!operation.value && !isOperationFinished(operation.value.status)
       const results = await Promise.all([
         api.fetchLlmConfigStatus(),
-        operation.value && !isOperationFinished(operation.value.status) ? api.fetchLlmConfigOperation(operation.value.id) : Promise.resolve(null),
+        wasActive ? api.fetchLlmConfigOperation(operation.value!.id) : Promise.resolve(null),
       ])
       if (stopped || epoch !== pollEpoch) return
       acceptStatus(results[0])
-      if (results[1]) operation.value = results[1]
+      if (results[1]) {
+        operation.value = results[1]
+        if (wasActive && isOperationFinished(results[1].status)) {
+          diff.value = null
+          void Promise.all([refreshHistory(), refreshOperationsQuiet()])
+        }
+      }
       pollError.value = ''
       pollFailures = 0
     } catch (cause) {
@@ -285,8 +304,10 @@ export function createLlmConfigStore(api: Api) {
     mutating.value = true
     clearError()
     try {
-      accept(await api.importLlmConfiguration(preview.document, preview.expected_draft_revision))
-      await refreshStatus()
+      const data = await api.importLlmConfiguration(preview.document, preview.expected_draft_revision)
+      ++requestVersion
+      accept(data)
+      await refreshStatus().catch(() => {})
       return true
     } catch (cause) {
       showError(cause)
@@ -297,11 +318,14 @@ export function createLlmConfigStore(api: Api) {
   }
 
   async function restore(target: number) {
+    if (busy.value || conflict.value) return false
     mutating.value = true
     clearError()
     try {
-      accept(await api.restoreLlmConfigSnapshot(target, revision.value))
-      await refreshStatus()
+      const data = await api.restoreLlmConfigSnapshot(target, revision.value)
+      ++requestVersion
+      accept(data)
+      await refreshStatus().catch(() => {})
       return true
     } catch (cause) {
       showError(cause)
@@ -343,27 +367,44 @@ export function createLlmConfigStore(api: Api) {
     try {
       operation.value = await api.probeLlmConfiguration(pendingProbe.source, pendingProbe.provider, pendingProbe.model, pendingProbe.requestId)
       pendingProbe = null
-      return true
     } catch (cause) {
       showError(cause)
       return false
     } finally {
       mutating.value = false
     }
+    void refreshOperationsQuiet()
+    return true
   }
 
   /** 页面刷新后找回进行中任务（仅当前标签页会话内） */
-  async function recoverOperation(storage: Pick<Storage, 'getItem'> = sessionStorage) {
+  async function recoverOperation(storage: Pick<Storage, 'getItem'> & Partial<Pick<Storage, 'removeItem'>> = sessionStorage) {
     try {
       const id = storage.getItem('llm-config-operation')
-      if (id) operation.value = await api.fetchLlmConfigOperation(id)
+      if (!id) return
+      const fetched = await api.fetchLlmConfigOperation(id)
+      operation.value = fetched
+      if (isOperationFinished(fetched.status)) {
+        try { storage.removeItem?.('llm-config-operation') } catch { /* 浏览器可能禁用存储 */ }
+      }
     } catch (cause) {
+      const candidate = cause as { status?: number }
+      if (candidate?.status === 404) {
+        try { storage.removeItem?.('llm-config-operation') } catch { /* 浏览器可能禁用存储 */ }
+        return
+      }
       pollError.value = configError(cause).message
     }
   }
 
   watch(operation, value => {
-    try { if (value) sessionStorage.setItem('llm-config-operation', value.id) } catch { /* 浏览器可能禁用存储 */ }
+    try {
+      if (value && !isOperationFinished(value.status)) {
+        sessionStorage.setItem('llm-config-operation', value.id)
+      } else {
+        sessionStorage.removeItem?.('llm-config-operation')
+      }
+    } catch { /* 浏览器可能禁用存储 */ }
   })
 
   /** 从任务列表找回未结束的任务（新标签页没有 sessionStorage 时兜底） */
@@ -404,7 +445,7 @@ export function createLlmConfigStore(api: Api) {
 
   return {
     document, original, revision, metadata, status, history, environment, validation, diff,
-    operation, recentOperations, loading, saving, applying, mutating, error, errorDetails, pollError, conflict,
+    operation, recentOperations, loading, saving, applying, mutating, error, errorDetails, pollError, conflict, draftNote,
     observedTime, canEditProviderId, busy, dirty, activeOperation, bot, botStale, inSync,
     versionLabel, draftLabel, publishedLabel, botLoadedLabel, saveNote, refreshHistory,
     accept, updateSection, updateSettingsSection, reload, save, apply, validate, previewImportText, commitImport, restore,

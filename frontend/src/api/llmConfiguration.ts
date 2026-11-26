@@ -30,7 +30,11 @@ export const validateLlmConfiguration = (document: JsonObject) => post<ConfigVal
 export const previewLlmConfigImport = (document: JsonObject, revision: number) => post<ImportPreview>('/import/preview', { document, expected_draft_revision: revision })
 export const importLlmConfiguration = (document: JsonObject, revision: number) => post<ConfigEnvelope>('/import', { document, expected_draft_revision: revision })
 export const exportLlmConfiguration = (source: string) => request<JsonObject>(`${ROOT}/export?source=${encodeURIComponent(source)}`)
-export const diffLlmConfiguration = () => request<{ changes: ConfigChange[]; components: JsonValue[] }>(`${ROOT}/diff?source=draft&target=published`)
+export interface ConfigDiffComponents {
+  mcp_reconnect?: boolean
+  reschedule?: string[]
+}
+export const diffLlmConfiguration = () => request<{ changes: ConfigChange[]; components: ConfigDiffComponents }>(`${ROOT}/diff?source=draft&target=published`)
 export const applyLlmConfiguration = (revision: number, requestId: string, note?: string) => post<ConfigOperation>('/apply', { expected_draft_revision: revision, request_id: requestId, note })
 export const fetchLlmConfigOperation = (id: string) => request<ConfigOperation>(`${ROOT}/operations/${encodeURIComponent(id)}`)
 export const cancelLlmConfigOperation = (id: string) => post<ConfigOperation>(`/operations/${encodeURIComponent(id)}/cancel`, {})

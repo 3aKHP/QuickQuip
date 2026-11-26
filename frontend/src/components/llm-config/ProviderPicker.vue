@@ -2,10 +2,12 @@
   <div class="provider-picker">
     <select :value="providerId" @change="onProvider">
       <option value="">{{ emptyProviderLabel }}</option>
+      <option v-if="fallbackProviderOption" :value="fallbackProviderOption.value">{{ fallbackProviderOption.label }}</option>
       <option v-for="provider in enabledProviders" :key="String(provider.id)" :value="String(provider.id)">{{ provider.id }}</option>
     </select>
     <select :value="model" :disabled="!providerId" @change="emit('update:model', ($event.target as HTMLSelectElement).value)">
       <option value="">{{ allowEmptyModel ? '渠道默认模型' : '选择模型' }}</option>
+      <option v-if="fallbackModelOption" :value="fallbackModelOption.value">{{ fallbackModelOption.label }}</option>
       <option v-for="name in models" :key="name" :value="name">{{ name }}</option>
     </select>
   </div>
@@ -28,10 +30,27 @@ const props = withDefaults(defineProps<{
 const emit = defineEmits<{ 'update:providerId': [value: string]; 'update:model': [value: string] }>()
 
 const enabledProviders = computed(() => props.providers.filter(provider => provider.enabled !== false))
+const fallbackProviderOption = computed(() => {
+  if (!props.providerId) return null
+  if (enabledProviders.value.some(provider => String(provider.id ?? '') === props.providerId)) return null
+  const disabled = props.providers.some(provider => String(provider.id ?? '') === props.providerId)
+  return {
+    value: props.providerId,
+    label: disabled ? `${props.providerId}（已停用）` : `${props.providerId}（不存在）`,
+  }
+})
 const models = computed(() => {
   const provider = props.providers.find(item => item.id === props.providerId)
   if (!provider || !Array.isArray(provider.models)) return []
   return provider.models.filter(isObject).map(model => String(model.model ?? '')).filter(Boolean)
+})
+const fallbackModelOption = computed(() => {
+  if (!props.providerId || !props.model) return null
+  if (models.value.includes(props.model)) return null
+  return {
+    value: props.model,
+    label: `${props.model}（不存在）`,
+  }
 })
 
 function onProvider(event: Event) {

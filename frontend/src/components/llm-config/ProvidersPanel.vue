@@ -76,15 +76,20 @@
             </label>
           </header>
           <div class="form-grid">
-            <SettingField label="渠道 ID" :model-value="String(current.id ?? '')" :hint="L.id.hint" placeholder="my-provider" @update:model-value="onIdInput" />
+            <SettingField label="渠道 ID" :model-value="String(current.id ?? '')" :hint="L.id.hint" :disabled="!store.canEditProviderId(current)" placeholder="my-provider" @update:model-value="onIdInput" />
             <SettingField label="协议" :model-value="String(current.protocol ?? 'openai')" :options="protocolOptions" @update:model-value="onProtocolChange(String($event))" />
             <SettingField label="请求指纹 Profile" :model-value="String(current.client_fingerprint ?? 'default')" :options="fingerprintOptions" hint="QuickQuip Profile 会发送品牌 UA 和专有请求头；显式 UA 设置优先生效。" @update:model-value="patch({ client_fingerprint: String($event) })" />
             <SettingField label="认证方式" :model-value="String(current.auth_method ?? 'api_key')" :options="authOptions" @update:model-value="patch({ auth_method: String($event) })" />
             <SettingField class="form-grid__wide" label="API 地址" :model-value="String(current.base_url ?? '')" :hint="L.base_url.hint" :placeholder="L.base_url.placeholder" @update:model-value="patch({ base_url: String($event) })" />
             <div class="form-grid__wide api-key-row">
-              <a :href="`#/environment?variable=${encodeURIComponent(String(current.api_key_env ?? ''))}`" target="_blank" rel="noopener">新增或覆写密钥（打开环境变量管理）</a>
               <SettingField label="密钥环境变量" :model-value="String(current.api_key_env ?? '')" :hint="L.api_key_env.hint" :placeholder="L.api_key_env.placeholder" @update:model-value="patch({ api_key_env: String($event) })" />
-              <span v-if="keyEnvState" class="env-badge" :class="`env-badge--${keyEnvState.kind}`">{{ keyEnvState.text }}</span>
+              <div class="api-key-row__meta">
+                <span v-if="keyEnvState" class="env-badge" :class="`env-badge--${keyEnvState.kind}`">{{ keyEnvState.text }}</span>
+                <a class="env-manage-link" :href="`#/environment?variable=${encodeURIComponent(String(current.api_key_env ?? ''))}`" target="_blank" rel="noopener">
+                  <UiIcon name="ExternalLink" :size="12" />
+                  <span>新增或覆写密钥（打开环境变量管理）</span>
+                </a>
+              </div>
             </div>
             <SettingField label="默认模型" :model-value="String(current.default_model ?? '')" :options="defaultModelOptions" :hint="L.default_model.hint" @update:model-value="patch({ default_model: String($event) })" />
             <SettingField label="代理" :model-value="String(current.proxy ?? '')" :placeholder="L.proxy.placeholder" @update:model-value="patch({ proxy: String($event) })" />
@@ -94,7 +99,7 @@
             </div>
             <div class="form-grid__wide">
               <p class="sub-label">附加请求头 <UiInfoTip :text="L.headers.hint" /></p>
-              <KeyValueEditor :model-value="objectValue(current.headers)" value-placeholder="值（密钥用 ${变量名} 引用）" @update:model-value="patch({ headers: $event })" />
+              <KeyValueEditor :key="`${selected}-${providersResetGen}`" :model-value="objectValue(current.headers)" value-placeholder="值（密钥用 ${变量名} 引用）" @update:model-value="patch({ headers: $event })" />
             </div>
           </div>
         </UiCard>
@@ -134,7 +139,7 @@
             </div>
             <details class="model-row__params">
               <summary>模型级参数覆盖 <span v-if="overrideCount(model)" class="override-count">已覆盖 {{ overrideCount(model) }} 项</span></summary>
-              <ParamsEditor level="model" :model-value="objectValue(model.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patchModel(index, { parameters: $event })" />
+              <ParamsEditor level="model" :protocol="String(current.protocol ?? '')" :model-value="objectValue(model.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patchModel(index, { parameters: $event })" />
             </details>
           </div>
         </UiCard>
@@ -160,7 +165,7 @@
           <header class="detail-card__head">
             <h3>渠道级默认参数覆盖 <UiInfoTip text="覆盖全局默认的请求参数；模型级覆盖优先于渠道级。" /></h3>
           </header>
-          <ParamsEditor level="provider" :model-value="objectValue(current.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patch({ parameters: $event })" />
+          <ParamsEditor level="provider" :protocol="String(current.protocol ?? '')" :model-value="objectValue(current.parameters)" :metadata="parametersMeta" :style-profiles="styleProfileNames" @update:model-value="patch({ parameters: $event })" />
         </UiCard>
 
         <UiCard v-show="activeTab === 'all' || activeTab === 'params'" padding="lg" class="detail-card">
@@ -175,16 +180,18 @@
             <UiButton size="sm" :disabled="!effectiveModel || store.dirty.value" :title="store.dirty.value ? '先保存草稿再查看' : ''" @click="loadEffective">计算生效参数</UiButton>
           </div>
           <p v-if="store.dirty.value" class="muted">有未保存修改，需先保存草稿才能计算最新生效参数或发起探测。</p>
-          <table v-if="effective" class="effective-table">
-            <thead><tr><th>参数</th><th>最终生效值</th><th>生效来源</th></tr></thead>
-            <tbody>
-              <tr v-for="(parameter, key) in effective.parameters" :key="key">
-                <td>{{ paramLabel(String(key)) }}</td>
-                <td class="mono">{{ formatValue(parameter.value) }}</td>
-                <td><UiTag size="sm" :variant="parameter.source === 'unknown' ? 'warn' : 'info'">{{ PARAM_SOURCE_LABELS[parameter.source] || parameter.source }}</UiTag></td>
-              </tr>
-            </tbody>
-          </table>
+          <div v-if="effective" class="effective-table-wrap">
+            <table class="effective-table">
+              <thead><tr><th>参数</th><th>最终生效值</th><th>生效来源</th></tr></thead>
+              <tbody>
+                <tr v-for="(parameter, key) in effective.parameters" :key="key">
+                  <td>{{ paramLabel(String(key)) }}</td>
+                  <td class="mono">{{ formatValue(parameter.value) }}</td>
+                  <td><UiTag size="sm" :variant="parameter.source === 'unknown' ? 'warn' : 'info'">{{ PARAM_SOURCE_LABELS[parameter.source] || parameter.source }}</UiTag></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
           <div class="probe-bar">
             <p class="muted">探测会让 Bot 用该模型发起一次真实请求，<strong>可能产生费用</strong>，且不会自动重试。</p>
             <div class="probe-bar__controls">
@@ -245,9 +252,12 @@ const modelNames = computed(() => models.value.map(model => String(model.model ?
 const parametersMeta = computed(() => store.metadata.value.parameters || {})
 const styleProfileNames = computed(() => isObject(store.document.value?.style_profiles) ? Object.keys(store.document.value.style_profiles) : [])
 const protocolOptions = computed(() => (store.metadata.value.protocols?.length ? store.metadata.value.protocols : Object.keys(PROTOCOL_LABELS)).map(value => ({ value, label: PROTOCOL_LABELS[value] || value })))
-const fingerprintOptions = computed(() => (store.metadata.value.client_fingerprints || [])
-  .filter(profile => profile.protocols.includes(String(current.value?.protocol ?? 'openai')))
-  .map(profile => ({ value: profile.id, label: profile.label })))
+const fingerprintOptions = computed(() => {
+  const matched = (store.metadata.value.client_fingerprints || [])
+    .filter(profile => profile.protocols.includes(String(current.value?.protocol ?? 'openai')))
+    .map(profile => ({ value: profile.id, label: profile.label }))
+  return matched.length ? matched : [{ value: 'default', label: 'Default' }]
+})
 const authOptions = [{ value: 'api_key', label: 'API Key（x-api-key）' }, { value: 'bearer', label: 'Bearer Token' }]
 const defaultModelOptions = computed(() => [{ value: '', label: models.value.length ? '（未选择）' : '（先添加模型）' }, ...modelNames.value.map(name => ({ value: name, label: name }))])
 
@@ -258,6 +268,13 @@ const detailTabs = computed(() => [
   { key: 'params' as const, label: '默认参数与探测' },
 ])
 
+const EMPTY_OBJ: JsonObject = Object.freeze({})
+const providersResetGen = ref(0)
+let selfProviderCommit = false
+watch(() => store.document.value?.providers, () => {
+  if (selfProviderCommit) { selfProviderCommit = false; return }
+  providersResetGen.value += 1
+})
 watch(providers, list => { if (selected.value > Math.max(0, list.length - 1)) selected.value = Math.max(0, list.length - 1) })
 
 function protocolLabel(value: JsonValue) { return PROTOCOL_LABELS[String(value)] || String(value ?? '—') }
@@ -271,7 +288,7 @@ function setAsDefaultProvider() {
   toast(`已将「${current.value.id}」设为全局默认渠道（保存并应用后生效）`)
 }
 function stringList(value: JsonValue | undefined): string[] { return Array.isArray(value) ? value.map(String) : [] }
-function objectValue(value: JsonValue | undefined): JsonObject { return isObject(value) ? value : {} }
+function objectValue(value: JsonValue | undefined): JsonObject { return isObject(value) ? value : EMPTY_OBJ }
 function overrideCount(model: JsonObject) { return Object.values(objectValue(model.parameters)).filter(value => value !== null && value !== undefined).length }
 
 /** 环境变量配置状态（来自 Bot 心跳上报）：任一明确缺失才算 missing；未检查的变量不算缺失 */
@@ -293,11 +310,20 @@ const keyEnvState = computed(() => {
   return null
 })
 
-function commit(next: JsonObject[]) { store.updateSection('providers', next) }
+function commit(next: JsonObject[]) { selfProviderCommit = true; store.updateSection('providers', next) }
 function patch(fields: JsonObject) { if (current.value) commit(providers.value.map((provider, i) => i === selected.value ? { ...provider, ...fields } : provider)) }
 function onProtocolChange(protocol: string) {
   if (!current.value) return
   const fields: JsonObject = { protocol }
+  const currentFp = String(current.value.client_fingerprint ?? 'default')
+  if (currentFp !== 'default') {
+    const allowedFps = (store.metadata.value.client_fingerprints || [])
+      .filter(profile => profile.protocols.includes(protocol))
+      .map(profile => profile.id)
+    if (!allowedFps.length || !allowedFps.includes(currentFp)) {
+      fields.client_fingerprint = 'default'
+    }
+  }
   if (store.canEditProviderId(current.value)) {
     const prevProtocol = String(current.value.protocol ?? '')
     const prevRec = PROTOCOL_RECOMMENDED_PARAMS[prevProtocol] || {}
@@ -367,7 +393,13 @@ function removeAlias(index: number) { patch({ aliases: aliases.value.filter((_, 
 const effectiveModel = ref('')
 const effective = ref<Awaited<ReturnType<typeof api.fetchLlmEffectiveParameters>> | null>(null)
 const probeSource = ref('published')
-watch(current, () => { effective.value = null; effectiveModel.value = '' })
+watch(selected, () => { effective.value = null; effectiveModel.value = '' })
+watch(current, () => {
+  effective.value = null
+  if (effectiveModel.value && !modelNames.value.includes(effectiveModel.value)) {
+    effectiveModel.value = ''
+  }
+})
 async function loadEffective() {
   if (!current.value?.id || !effectiveModel.value) return
   try { effective.value = await api.fetchLlmEffectiveParameters(String(current.value.id), effectiveModel.value) }
@@ -623,6 +655,29 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
   gap: 6px;
 }
 
+.api-key-row__meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.env-manage-link {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--qq-primary);
+  font-size: var(--qq-text-xs);
+  font-weight: 500;
+  text-decoration: none;
+}
+
+.env-manage-link:hover {
+  text-decoration: underline;
+  color: var(--qq-primary-hover, var(--qq-primary));
+}
+
 .env-badge {
   font-size: var(--qq-text-xs);
 }
@@ -751,11 +806,15 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
   margin-bottom: 8px;
 }
 
+.effective-table-wrap {
+  overflow-x: auto;
+  margin: 8px 0 12px;
+}
+
 .effective-table {
   width: 100%;
   border-collapse: collapse;
   font-size: var(--qq-text-xs);
-  margin: 8px 0 12px;
 }
 
 .effective-table th,
@@ -798,7 +857,7 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
 
 .danger-row .muted { flex: 1; min-width: 220px; }
 
-@media (max-width: 900px) {
+@media (max-width: 1200px) {
   .providers-panel {
     grid-template-columns: 1fr;
   }
@@ -815,6 +874,21 @@ onMounted(() => { if (!store.environment.value) void store.loadEnvironment() })
   .providers-panel__list-scroll {
     display: none;
   }
+}
+
+@media (max-width: 900px) {
   .form-grid { grid-template-columns: 1fr; }
+}
+
+@media (max-width: 600px) {
+  .alias-row {
+    grid-template-columns: 1fr auto;
+  }
+  .alias-row__arrow {
+    display: none;
+  }
+  .alias-row select {
+    grid-column: 1 / -1;
+  }
 }
 </style>

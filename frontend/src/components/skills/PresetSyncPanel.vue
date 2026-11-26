@@ -5,7 +5,7 @@
       <UiInfoTip text="对照仓库 skills.example/ 预置目录：missing 为尚未安装，diverged 为本地与预置不一致。同步 diverged 项前会将现有副本备份至 .preset-backups/。" />
       <span class="preset-spacer" />
       <UiButton size="sm" :disabled="!dirtyPresetCount || applying" :loading="applying" @click="onApply(false)">同步所选（{{ dirtyPresetCount }}）</UiButton>
-      <UiButton size="sm" variant="secondary" :disabled="applying" @click="onApply(true)">一键同步全部待处理</UiButton>
+      <UiButton size="sm" variant="secondary" :disabled="applying || syncableCount === 0" @click="onApply(true)">一键同步全部待处理</UiButton>
     </div>
     <p v-if="loadError" class="error">{{ loadError }}</p>
     <div v-if="presets.length" class="preset-table-wrap">
@@ -65,7 +65,9 @@ const localOnly = ref<string[]>([])
 const loadError = ref<string | null>(null)
 const selected = ref<Set<string>>(new Set())
 const applying = ref(false)
-const dirtyPresetCount = computed(() => presets.value.filter(p => selected.value.has(p.name)).length)
+const isSyncable = (p: PresetRow) => p.state === 'missing' || p.state === 'diverged'
+const syncableCount = computed(() => presets.value.filter(isSyncable).length)
+const dirtyPresetCount = computed(() => presets.value.filter(p => isSyncable(p) && selected.value.has(p.name)).length)
 // 面板渲染条件：有待处理项（missing/diverged/conflict）、加载失败，或存在仅本地 Skill
 // （「仅本地」属常驻信息，不随待处理项清空而隐藏）
 const hasPending = computed(() => presets.value.some(p => p.state !== 'current'))
@@ -86,6 +88,9 @@ async function reload() {
     const data = await listSkillPresets()
     presets.value = data.presets || []
     localOnly.value = data.local_only || []
+    const syncableNames = new Set(presets.value.filter(isSyncable).map(p => p.name))
+    const pruned = new Set([...selected.value].filter(name => syncableNames.has(name)))
+    if (pruned.size !== selected.value.size) selected.value = pruned
   } catch (e: unknown) {
     loadError.value = (e as Error).message
   }
@@ -106,7 +111,9 @@ function toggle(name: string) {
 }
 
 async function onApply(all: boolean) {
-  const names = all ? presets.value.filter(p => p.state === 'missing' || p.state === 'diverged').map(p => p.name) : [...selected.value]
+  const names = all
+    ? presets.value.filter(isSyncable).map(p => p.name)
+    : presets.value.filter(p => isSyncable(p) && selected.value.has(p.name)).map(p => p.name)
   if (!names.length) return
   if (props.beforeApply && !props.beforeApply()) return
   if (!confirm(all
