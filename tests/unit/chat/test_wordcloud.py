@@ -51,3 +51,36 @@ def test_build_word_frequencies_keeps_registered_name_mentions():
     freq = build_word_frequencies(messages, stopwords=frozenset())
     # 已登记成员的 @<规范名> 是正常社交信号，保留进词频
     assert freq.get("镜子", 0) >= 1
+
+
+@pytest.mark.skipif(not HAS_JIEBA, reason="jieba not installed")
+def test_build_word_frequencies_excludes_blocked_words_and_keeps_soft(tmp_path):
+    from quickquip.common.sensitive_filter import SensitiveFilter
+
+    toml_path = tmp_path / "sensitive.toml"
+    toml_path.write_text(
+        '[block.cat]\nwords = ["违禁短语"]\n[soft.watch]\nwords = ["擦边观察"]\n',
+        encoding="utf-8",
+    )
+    sf = SensitiveFilter.from_toml(toml_path)
+    messages = [
+        {"text": "今天聊了违禁短语和Python开发"},
+        {"text": "还有擦边观察与正常话题"},
+        {"text": "正常话题很好玩"},
+    ]
+    freq = build_word_frequencies(messages, stopwords=frozenset(), sensitive_filter=sf)
+    assert all("违禁" not in word and "短语" not in word for word in freq)
+    assert "Python" not in freq and "python" not in freq
+    assert freq.get("正常", 0) >= 2 or freq.get("话题", 0) >= 2
+    assert any("擦边" in word or "观察" in word for word in freq)
+
+
+@pytest.mark.skipif(not HAS_JIEBA, reason="jieba not installed")
+def test_build_word_frequencies_returns_empty_when_all_blocked(tmp_path):
+    from tests.fixtures.sensitive_filter import make_sensitive_filter
+
+    sf = make_sensitive_filter(tmp_path, "block", "全屏蔽词")
+    freq = build_word_frequencies(
+        [{"text": "全屏蔽词全屏蔽词"}], stopwords=frozenset(), sensitive_filter=sf
+    )
+    assert freq == {}

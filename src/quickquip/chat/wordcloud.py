@@ -4,6 +4,12 @@ import logging
 from collections import Counter
 from io import BytesIO
 from pathlib import Path
+from typing import TYPE_CHECKING
+
+from quickquip.common.sensitive_filter import get_filter
+
+if TYPE_CHECKING:
+    from quickquip.common.sensitive_filter import SensitiveFilter
 
 
 logger = logging.getLogger(__name__)
@@ -52,10 +58,18 @@ def _safe_group_id(group_id: int | str) -> str:
 # Word frequency builder (CPU-bound, call via asyncio.to_thread)
 # ---------------------------------------------------------------------------
 
-def build_word_frequencies(messages: list[dict], stopwords: frozenset[str]) -> dict[str, int]:
+def build_word_frequencies(
+    messages: list[dict],
+    stopwords: frozenset[str],
+    *,
+    sensitive_filter: SensitiveFilter | None = None,
+) -> dict[str, int]:
     """Tokenize message texts with jieba and return word frequency counts."""
     import re
     import jieba  # lazy import — only needed when generating
+
+    active_filter = sensitive_filter if sensitive_filter is not None else get_filter()
+    filter_loaded = active_filter.is_loaded
 
     counter: Counter[str] = Counter()
     for msg in messages:
@@ -65,6 +79,8 @@ def build_word_frequencies(messages: list[dict], stopwords: frozenset[str]) -> d
         text = re.sub(r'\[.*?\]', '', text)
         # 未登记成员的 @ 提及渲染为 @QQ<digits> 占位符，明文 QQ 号不得进入词频统计
         text = re.sub(r'@QQ\d*', '', text)
+        if filter_loaded and active_filter.scan(text).blocked:
+            continue
         for word in jieba.cut(text):
             word = word.strip()
             if len(word) < 2:

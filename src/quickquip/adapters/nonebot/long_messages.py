@@ -3,7 +3,8 @@ from __future__ import annotations
 import asyncio
 import logging
 
-from quickquip.adapters.nonebot._safe_send import send_group_image
+from quickquip.adapters.nonebot._safe_send import send_group_image, send_group_text
+from quickquip.common.sensitive_filter import DEFAULT_OUTPUT_FALLBACK, scan_and_log
 from quickquip.common.text_image import render_text_to_image
 
 logger = logging.getLogger(__name__)
@@ -47,6 +48,14 @@ async def send_long_group_message(
     log_name: str,
 ) -> None:
     """优先以群合并转发发送长文；失败时降级渲染为单张长图发送，避免多条文本刷屏。"""
+    scan_result = scan_and_log(
+        content,
+        channel=f"outbound_long:{log_name}",
+        scope=str(group_id),
+    )
+    if scan_result.blocked:
+        await send_group_text(bot, group_id, DEFAULT_OUTPUT_FALLBACK)
+        return
     chunks = split_long_message(content)
     try:
         await bot.call_api(

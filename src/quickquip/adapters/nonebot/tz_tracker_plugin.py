@@ -31,6 +31,7 @@ from quickquip.adapters.nonebot.self_message_events import (
     register_self_message_matcher,
 )
 from quickquip.adapters.nonebot.lifecycle import register_lifecycle
+from quickquip.adapters.nonebot.outbound_guard import install_nonebot_outbound_guard
 from quickquip.common.bot_action_trace import install_nonebot_api_trace_hook
 
 
@@ -41,6 +42,7 @@ self_message_matcher = None
 if nonebot is not None:
     if Bot is not None:
         install_nonebot_api_trace_hook(Bot)
+        install_nonebot_outbound_guard(Bot)
         register_self_message_events()
     try:
         driver = nonebot.get_driver()
