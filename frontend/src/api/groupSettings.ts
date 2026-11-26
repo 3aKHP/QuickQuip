@@ -109,7 +109,12 @@ export async function listGroupSettings(): Promise<{ groups: GroupOverrideEntry[
   return request('/api/group-settings')
 }
 
-export async function fetchGroupSettings(groupId: string): Promise<GroupOverrideDraft> {
+/** GET /api/group-settings/{group_id} 响应：override 字段 + 私聊会话响应态（仅 private scope） */
+export interface GroupOverrideDetail extends GroupOverrideDraft {
+  session_active?: boolean
+}
+
+export async function fetchGroupSettings(groupId: string): Promise<GroupOverrideDetail> {
   return request(`/api/group-settings/${encodeURIComponent(groupId)}`)
 }
 

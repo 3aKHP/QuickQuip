@@ -7,10 +7,12 @@ import type {
 } from '../api/groupSettings'
 
 /** 可编辑字段表：草稿/原始快照/diff 的键集合唯一来源 */
-const FIELDS: readonly GroupOverrideField[] = [
+export const GROUP_OVERRIDE_FIELDS: readonly GroupOverrideField[] = [
   'enabled', 'memory_enabled', 'auto_memory_enabled', 'agent_delivery_intermediate_enabled', 'agent_delivery_final_enabled', 'provider_id', 'model', 'persona_id',
   'trigger_prefix', 'allow_prefix', 'allow_at', 'history_limit', 'history_enabled', 'reasoning_effort',
 ]
+
+const FIELDS = GROUP_OVERRIDE_FIELDS
 
 function emptyDraft(): GroupOverrideDraft {
   // fromEntries 按 FIELDS 全量构造，键集合与 GroupOverrideDraft 一一对应
@@ -80,6 +82,11 @@ export function useGroupOverrideDraft() {
     draft.value = emptyDraft()
   }
 
+  /** 放弃未保存改动，将草稿回退到原始快照 */
+  function revertDraft() {
+    draft.value = { ...original.value }
+  }
+
   /** 相对原始快照的逐字段 diff；无变化时返回空对象 */
   function buildPatch(): GroupOverridePatch {
     const diff: GroupOverridePatch = {}
@@ -102,6 +109,7 @@ export function useGroupOverrideDraft() {
     clearHistory,
     applyData,
     resetDraft,
+    revertDraft,
     buildPatch,
   }
 }

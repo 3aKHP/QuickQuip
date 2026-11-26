@@ -11,6 +11,7 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 _UID_RE = re.compile(r"^\d{5,15}$")
+_GROUP_ID_RE = re.compile(r"^\d{5,12}$")
 
 
 class AdjustLengthBody(BaseModel):
@@ -20,10 +21,12 @@ class AdjustLengthBody(BaseModel):
 
 class SetLuckBody(BaseModel):
     luck: float = Field(gt=0)
+    reason: str = Field(default="", max_length=200)
 
 
 class SetFenceLuckBody(BaseModel):
     fence_luck: float = Field(gt=0)
+    reason: str = Field(default="", max_length=200)
 
 
 @router.get("/niuniu/rankings")
@@ -178,11 +181,11 @@ async def set_luck(uid: str, body: SetLuckBody, request: Request):
         target_type="niuniu_user",
         target_id=uid,
         summary_before={"luck": old_luck},
-        summary_after={"luck": body.luck},
+        summary_after={"luck": body.luck, "reason": body.reason},
     )
     logger.warning(
-        "niuniu luck adjusted uid=%s old=%.2f new=%.2f",
-        uid, old_luck, body.luck,
+        "niuniu luck adjusted uid=%s old=%.2f new=%.2f reason=%s",
+        uid, old_luck, body.luck, body.reason,
     )
     return {"ok": True, "old_luck": old_luck, "new_luck": body.luck}
 
@@ -208,11 +211,11 @@ async def set_fence_luck(uid: str, body: SetFenceLuckBody, request: Request):
         target_type="niuniu_user",
         target_id=uid,
         summary_before={"fence_luck": old_fence_luck},
-        summary_after={"fence_luck": body.fence_luck},
+        summary_after={"fence_luck": body.fence_luck, "reason": body.reason},
     )
     logger.warning(
-        "niuniu fence_luck adjusted uid=%s old=%.2f new=%.2f",
-        uid, old_fence_luck, body.fence_luck,
+        "niuniu fence_luck adjusted uid=%s old=%.2f new=%.2f reason=%s",
+        uid, old_fence_luck, body.fence_luck, body.reason,
     )
     return {"ok": True, "old_fence_luck": old_fence_luck, "new_fence_luck": body.fence_luck}
 
@@ -235,6 +238,9 @@ async def get_text_modes(request: Request):
 @router.post("/niuniu/text-mode/{group_id}")
 async def set_text_mode(group_id: str, body: SetTextModeBody, request: Request):
     """Set the text mode for a group."""
+    if not _GROUP_ID_RE.match(group_id):
+        raise HTTPException(422, "invalid group_id")
+
     from quickquip.app.message_pipeline import niuniu_store
 
     store: NiuNiuStore = niuniu_store
@@ -242,6 +248,14 @@ async def set_text_mode(group_id: str, body: SetTextModeBody, request: Request):
     ok = store.set_group_text_mode(group_id, body.mode)
     if not ok:
         raise HTTPException(400, f"unknown text mode: {body.mode}")
+    audit_logger.log(
+        request,
+        action="set_text_mode",
+        target_type="niuniu_group",
+        target_id=group_id,
+        summary_before={"mode": old_mode},
+        summary_after={"mode": body.mode},
+    )
     logger.warning(
         "niuniu text mode changed group=%s old=%s new=%s",
         group_id, old_mode, body.mode,
