@@ -102,6 +102,8 @@ class ToolExecutionContext:
     ephemeral_touched: bool = False
     # Request-owned standalone search executor; never shared across sessions.
     web_search: object | None = None
+    # Per-request cumulative token budget for query_group_quotes (#343).
+    quote_query_tokens_used: int = 0
     # 工具产出、需要直接发给用户的外发图片（与回喂模型的 images 语义相反）。
     # 每次请求新建的 context 即累加器，service 在工具循环结束后统一收进回复结果。
     outbound_images: list[LLMInlineImage] = field(default_factory=list)

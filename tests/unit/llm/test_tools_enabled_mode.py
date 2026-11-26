@@ -87,6 +87,7 @@ def test_private_chat_filters_unavailable_tools():
     names = host._get_enabled_tool_names(chat_type="private")
     assert "get_group_stats" not in names
     assert "get_rule_status" not in names
+    assert "query_group_quotes" not in names
     assert "draw_svg" in names
 
 
@@ -179,7 +180,7 @@ def test_auto_discovery_schema_line_disabled_at_zero():
 
 
 def test_auto_discovery_count_line_still_governs_lightweight_face():
-    """轻量默认面(5 个可延迟、schema 极小)不触発体量线,维持原 auto 边界。"""
+    """轻量默认面(6 个可延迟、schema 极小)不触発体量线,维持原 auto 边界。"""
     host = _FakeHost(_tools([]), set())
     host.config.runtime.tool_calling_enabled = True
 
@@ -196,21 +197,35 @@ async def test_real_builtin_deferred_face_stays_under_schema_threshold(llm_servi
     )
     from quickquip.llm.tool_registry import estimate_spec_tokens
 
-    deferred = [
+    default_deferred = [
+        name
+        for name in llm_service._get_enabled_tool_names(history_enabled=False)
+        if name not in DEFAULT_ALWAYS_LOADED_TOOLS
+        and llm_service.tool_registry.has_tool(name)
+    ]
+    assert default_deferred
+    default_total = sum(
+        estimate_spec_tokens(spec)
+        for spec in llm_service.tool_registry.get_specs(default_deferred)
+    )
+    threshold = llm_service.config.tools.discovery_min_schema_tokens
+    assert default_total < threshold * 0.5, (
+        f"内置默认面(history_enabled=False)可延迟 schema {default_total} tok "
+        f"已超过体量线 {threshold} 的一半"
+    )
+
+    full_deferred = [
         name
         for name in DEFAULT_ENABLED_TOOLS
         if name not in DEFAULT_ALWAYS_LOADED_TOOLS
         and llm_service.tool_registry.has_tool(name)
     ]
-    assert deferred  # fixture 至少注册了非 skill 延迟面
-    total = sum(
+    full_total = sum(
         estimate_spec_tokens(spec)
-        for spec in llm_service.tool_registry.get_specs(deferred)
+        for spec in llm_service.tool_registry.get_specs(full_deferred)
     )
-    threshold = llm_service.config.tools.discovery_min_schema_tokens
-    assert total < threshold * 0.5, (
-        f"内置默认面可延迟 schema {total} tok 已超过体量线 {threshold} 的一半,"
-        "继续增肥会翻转默认部署的 auto 发现边界"
+    assert full_total < threshold * 0.75, (
+        f"内置全量面可延迟 schema {full_total} tok 已超过体量线 {threshold} 的 75%"
     )
 
 

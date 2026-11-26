@@ -125,6 +125,7 @@ from quickquip.llm.service_parts import (
     HealthMixin,
     ImagesMixin,
     McpLifecycleMixin,
+    QuoteToolMixin,
     ScheduleMessagesToolMixin,
     SingleShotEntriesMixin,
     SkillsToolMixin,
@@ -191,6 +192,7 @@ class LLMService(
     ToolMixin,
     McpLifecycleMixin,
     DrawSvgToolMixin,
+    QuoteToolMixin,
     ScheduleMessagesToolMixin,
     SkillsToolMixin,
     SingleShotEntriesMixin,
@@ -225,6 +227,8 @@ class LLMService(
         self.recent_message_buffer: "RecentMessageBuffer | None" = None
         # #72 群历史查询服务（app 层注入；None = 未绑定，工具不执行）
         self.group_history_service = None
+        # #343 群语录存储（app 层注入；None = 未绑定，工具不执行）
+        self.group_quote_store = None
         self._init_mcp_lifecycle()
         self._session_presets: dict[str, str] = {}
         # 会话纪元锚点表（进程内）：进程重启 = 冷一次缓存，首请求按 CTX 跨度懒初始化

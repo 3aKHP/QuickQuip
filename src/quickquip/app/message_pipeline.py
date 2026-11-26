@@ -186,6 +186,7 @@ def _ensure_llm_bindings() -> None:
     svc.bind_rule_switch(rule_switch)
     svc.bind_recent_message_buffer(recent_messages)
     svc.bind_group_history(group_history_service)
+    svc.bind_group_quote_store(group_quote_store)
     _llm_bindings_done = True
 
 

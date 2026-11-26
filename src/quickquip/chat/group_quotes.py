@@ -277,6 +277,31 @@ class GroupQuoteStore:
             return None
         return project(row, self._snapshot(group_id, identity_snapshot))
 
+    def get_by_seq_with_count(
+        self,
+        group_id: str | int,
+        seq: int,
+        *,
+        identity_snapshot: IdentitySnapshot | None = None,
+    ) -> tuple[dict | None, int]:
+        """线程安全独立连接读取单条语录与群总数，避免工作线程共享 self._db。"""
+        if self._unavailable:
+            raise RuntimeError("群语录 数据库不可用")
+        gid = str(group_id)
+        snapshot = self._snapshot(group_id, identity_snapshot)
+        with closing(sqlite3.connect(self._path)) as conn:
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                f"SELECT {_QUOTE_ROW_COLUMNS} FROM quotes WHERE group_id=? AND group_seq=?",
+                (gid, int(seq)),
+            ).fetchone()
+            total_row = conn.execute(
+                "SELECT COUNT(*) AS c FROM quotes WHERE group_id=?",
+                (gid,),
+            ).fetchone()
+        total = int(total_row["c"]) if total_row else 0
+        return (project(row, snapshot) if row else None), total
+
     def search(
         self, group_id: str | int, keyword: str,
         offset: int = 0, limit: int = 50,
@@ -338,6 +363,72 @@ class GroupQuoteStore:
         ).fetchone()
         snapshot = self._snapshot(group_id, identity_snapshot)
         return [project(r, snapshot) for r in rows], int(total_row["c"]) if total_row else 0
+
+    def search_filtered(
+        self,
+        group_id: str | int,
+        *,
+        keyword: str = "",
+        user_ids: Sequence[str | int] = (),
+        name_pattern: str = "",
+        offset: int = 0,
+        limit: int = 50,
+        identity_snapshot: IdentitySnapshot | None = None,
+    ) -> tuple[list[dict], int]:
+        """组合过滤检索：支持关键词、发言人 QQ/名片及两者联合，线程安全独立连接。"""
+        if self._unavailable:
+            raise RuntimeError("群语录 数据库不可用")
+        gid = str(group_id)
+        safe_offset = max(0, int(offset))
+        safe_limit = max(1, int(limit))
+        kw = str(keyword or "").strip()
+        ids = [str(u).strip() for u in user_ids if str(u).strip()]
+        pattern = f"%{name_pattern.strip()}%" if name_pattern and name_pattern.strip() else ""
+
+        params: list[object] = [gid]
+        where = " WHERE group_id=?"
+        sender_conds: list[str] = []
+        if ids:
+            placeholders = ",".join("?" for _ in ids)
+            sender_conds.append(f"quoted_user_id IN ({placeholders})")
+            params.extend(ids)
+        if pattern:
+            sender_conds.append("quoted_sender_name LIKE ?")
+            params.append(pattern)
+        if sender_conds:
+            where += f" AND ({' OR '.join(sender_conds)})"
+
+        snapshot = self._snapshot(group_id, identity_snapshot)
+        with closing(sqlite3.connect(self._path)) as conn:
+            conn.row_factory = sqlite3.Row
+            if not kw:
+                rows = conn.execute(
+                    f"SELECT {_QUOTE_ROW_COLUMNS} FROM quotes{where} "
+                    "ORDER BY id DESC LIMIT ? OFFSET ?",
+                    (*params, safe_limit, safe_offset),
+                ).fetchall()
+                total_row = conn.execute(
+                    f"SELECT COUNT(*) AS c FROM quotes{where}",
+                    params,
+                ).fetchone()
+                return (
+                    [project(r, snapshot) for r in rows],
+                    int(total_row["c"]) if total_row else 0,
+                )
+
+            matcher = RecordQuery(kw, snapshot)
+            result: list[dict] = []
+            total = 0
+            cursor = conn.execute(
+                f"SELECT {_QUOTE_ROW_COLUMNS} FROM quotes{where} ORDER BY id DESC",
+                params,
+            )
+            for row in cursor:
+                if matcher.matches(dict(row)):
+                    if safe_offset <= total < safe_offset + safe_limit:
+                        result.append(project(row, snapshot))
+                    total += 1
+            return result, total
 
     def delete(self, quote_id: int) -> bool:
         if self._unavailable:
