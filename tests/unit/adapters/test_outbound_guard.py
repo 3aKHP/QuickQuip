@@ -102,13 +102,13 @@ def test_guard_blocks_nested_forward_nodes_and_preserves_sender_meta(tmp_path: P
             "type": "node",
             "data": {
                 "name": "日报小助手",
-                "uin": "1000000002",
+                "uin": "1000000001",
                 "content": [
                     {
                         "type": "node",
                         "data": {
                             "name": "嵌套节点",
-                            "uin": "1000000003",
+                            "uin": "1000000000",
                             "content": [{"type": "text", "data": {"text": "深层违禁词"}}],
                         },
                     }
@@ -125,7 +125,7 @@ def test_guard_blocks_nested_forward_nodes_and_preserves_sender_meta(tmp_path: P
             "type": "node",
             "data": {
                 "name": "日报小助手",
-                "uin": "1000000002",
+                "uin": "1000000001",
                 "content": [{"type": "text", "data": {"text": DEFAULT_OUTPUT_FALLBACK}}],
             },
         }
