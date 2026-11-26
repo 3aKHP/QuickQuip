@@ -11,18 +11,22 @@
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTheme } from '../../composables/useTheme'
 import { useMotionPrefs } from '../../composables/useMotionPrefs'
+import { getLightFieldDomain, subscribeLightField } from '../../lib/lightFieldBus'
 import { createLightFieldStage } from './light-field/stage'
 
-const props = defineProps<{
+const props = withDefaults(defineProps<{
   mode: 'showcase' | 'ambient'
-}>()
+  domain?: string
+}>(), {
+  domain: 'overview',
+})
 
 const { theme } = useTheme()
 const { lowMotion } = useMotionPrefs()
 const isDark = computed(() => theme.value === 'dark')
 const isShowcase = computed(() => props.mode === 'showcase')
 
-// 舞台负责粒子物理/视差投影/单帧编排；本组件只管生命周期与调度
+// 舞台负责粒子物理/视差投影/域染色/单帧编排；本组件只管生命周期与调度
 const stage = createLightFieldStage({
   isDark: () => isDark.value,
   isShowcase: () => isShowcase.value,
@@ -32,6 +36,7 @@ const canvasRef = ref<HTMLCanvasElement | null>(null)
 let raf = 0
 let resizeRaf = 0
 let reducedMotionMql: MediaQueryList | null = null
+let unsubscribeBus: (() => void) | null = null
 const systemReducedMotion = ref(false)
 
 /** 静态渲染判定：系统 reduced-motion 或用户开启低动态 */
@@ -70,7 +75,10 @@ function onWindowResize() {
 function syncLoop() {
   if (shouldStatic() || document.hidden) {
     if (raf) { cancelAnimationFrame(raf); raf = 0 }
-    if (shouldStatic()) draw(performance.now())
+    if (shouldStatic()) {
+      stage.settleStatic()
+      draw(performance.now())
+    }
   } else if (!raf) {
     stage.resetClock()
     raf = requestAnimationFrame(draw)
@@ -92,17 +100,35 @@ onMounted(() => {
     systemReducedMotion.value = reducedMotionMql.matches
     reducedMotionMql.addEventListener('change', onReducedMotionChange)
   } catch { /* ignore */ }
-  resize()
+  stage.setDomain(props.domain || getLightFieldDomain(), true)
+  const canvas = canvasRef.value
+  if (canvas) stage.resize(canvas)
   stage.centerPointer()
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('mousemove', onMouseMove, { passive: true })
   document.addEventListener('visibilitychange', onVisibilityChange)
-  // 尊重 reduced-motion / 低动态开关：只画一帧静态，不启动 RAF 循环
-  if (shouldStatic()) {
-    draw(performance.now())
-    return
-  }
-  raf = requestAnimationFrame(draw)
+
+  unsubscribeBus = subscribeLightField((event) => {
+    if (event.type === 'domain') {
+      const changed = stage.setDomain(event.domain, shouldStatic())
+      if (changed && shouldStatic()) draw(performance.now())
+      return
+    }
+    // 静态/低动态模式跳过跃迁与声呐动画
+    if (shouldStatic() || document.hidden) return
+    if (event.type === 'warp') {
+      stage.triggerWarp(event.direction)
+    } else if (event.type === 'sonar') {
+      stage.triggerSonar(event.payload)
+    }
+  })
+
+  syncLoop()
+})
+
+watch(() => props.domain, (domain) => {
+  const changed = stage.setDomain(domain || 'overview', shouldStatic())
+  if (changed && shouldStatic()) draw(performance.now())
 })
 
 watch(theme, () => {
@@ -114,6 +140,7 @@ watch(lowMotion, () => syncLoop())
 onUnmounted(() => {
   if (raf) cancelAnimationFrame(raf)
   if (resizeRaf) cancelAnimationFrame(resizeRaf)
+  unsubscribeBus?.()
   reducedMotionMql?.removeEventListener('change', onReducedMotionChange)
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('mousemove', onMouseMove)
