@@ -352,7 +352,7 @@ bash scripts/deploy/deploy-v4.sh --rollback --host-alias quickquip-prod
 | `../web_api.py` | `/app/web_api.py` | 只读 | Web 后端入口脚本 |
 | `../src` | `/app/src` | 只读 | Hybrid 混合模式下热更新 Python 源码 |
 
-> **权限隔离边界**：`quickquip`（Bot 主容器）对 `../config`、`../llm_about` 和共享 `skills/` 均保持**只读挂载（`:ro`）**，仅挂载可写的 `config/managed/` 与只读快照通道 `environment-control`（不挂载 `environment-write`）；`env-agent` 单独将部署根目录挂载到 `/host/project` 执行根 `.env` 事务写入，不挂载业务数据库或开放外部端口。
+> **权限隔离边界**：`quickquip`（Bot 主容器）对 `../config`、`../llm_about` 和共享 `skills/` 均保持**只读挂载（`:ro`）**，配置类目录中仅 `config/managed/` 可写（运行期数据写入 `../data`），并通过只读快照通道 `environment-control` 获取环境变量（不挂载 `environment-write`）；`env-agent` 单独将部署根目录挂载到 `/host/project`（应用逻辑仅读写根目录 `.env` 与 `data/environment/`，不访问业务数据库），不挂载 Docker Socket，也不开放外部网络端口。
 
 ---
 
@@ -405,7 +405,7 @@ docker compose --env-file ../.env exec -T quickquip python scripts/maintenance/b
 
 ## 日常维护
 
-启用环境变量在线管理（生产模板默认开启）后，通过 Web Admin“系统 → 环境变量”或 `qqsync` 更新已绑定渠道的 API Key 与贴吧关键词会在运行中自动热更新，无需重建容器。当你在服务器手动修改了根目录 `.env` 中的启动期参数（如 `ONEBOT_*` 连接配置、监听端口、`WEB_ADMIN_PASSWORD`）或调整了 Compose 编排与卷挂载时，需在实际 Compose 所在目录重新执行 `up -d` 创建容器使其生效（若仅修改了 `WEB_ADMIN_PASSWORD`，可单独重建 `web-admin` 容器）。
+启用环境变量在线管理（生产模板默认开启）后，通过 Web Admin“系统 → 环境变量”更新已绑定渠道的 API Key 与贴吧关键词会在运行中自动热更新，无需重建容器（若通过 `qqsync push` 同步 `.env` 文件变化，工具仍会先暂停服务并按新 `.env` 重新启动容器，详见[配置同步](config-sync.md)）。当你在服务器手动修改了根目录 `.env` 中的启动期参数（如 `ONEBOT_*` 连接配置、监听端口、`WEB_ADMIN_PASSWORD`）或调整了 Compose 编排与卷挂载时，需在实际 Compose 所在目录重新执行 `up -d` 创建容器使其生效（若仅修改了 `WEB_ADMIN_PASSWORD`，可单独重建 `web-admin` 容器）。
 
 > **提示**：如果是通过 `deploy-v4` 部署的版本目录（release）结构，在服务器手动执行以下命令前，请先按[手动访问步骤](../../scripts/deploy/README.md#manual-compose-access)导出环境变量，并将下方命令中的 `--env-file ../.env` 替换为 `--env-file "$QUICKQUIP_ENV_FILE"`。
 

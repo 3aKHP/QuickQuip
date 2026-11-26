@@ -35,5 +35,5 @@ superseded_by: []
 
 - [PR #359：Responses 客户端独立搜索](https://github.com/3aKHP/QuickQuip/pull/359)
 - [Codex SearchCommands 定义](https://github.com/openai/codex/blob/77873dd0d284aeba7ce849b995b28ee8f4498d73/codex-rs/codex-api/src/search.rs)、[Codex 搜索执行器参考](https://github.com/openai/codex/blob/77873dd0d284aeba7ce849b995b28ee8f4498d73/codex-rs/ext/web-search/src/tool.rs)
-- [LLM 模块说明](../llm-module.md#75-联网搜索)
+- [LLM 模块说明](../llm-module.md#67-联网搜索路由契约)
 - [原生回放资格](0013-native-replay-compatibility.md)、[纪元冻结](0003-epoch-history-freezing.md)、[来源引用显示投影](0030-citation-display-projection.md)
