@@ -1,20 +1,21 @@
 /* ==========================================================================
-   QuickQuip Transitions  v2.5 — 一次性过渡 ease-out，循环动画 linear
+   QuickQuip Transitions  v3.0 — M3 Expressive Z-Axis 空间转场、瀑布编排与景深
    ========================================================================== */
 
-/* ── 路由切换（page-shell 三态：前进 / 后退 / 切换）── */
+/* ── 路由切换（M3 Shared Z-Axis 空间景深三态：前进 / 后退 / 切换）── */
 .page-view {
   display: block;
   width: 100%;
 }
 
-.page-shell-enter-active,
-.page-shell-leave-active {
+.page-shell-enter-active {
+  position: relative;
+  z-index: 1;
   transition:
-    opacity 180ms var(--qq-ease-out),
-    transform 180ms var(--qq-ease-out),
-    filter 180ms var(--qq-ease-out);
-  transform-origin: 50% 18%;
+    opacity 250ms var(--qq-ease-out),
+    transform 280ms var(--qq-ease-out),
+    filter 250ms var(--qq-ease-out);
+  transform-origin: 50% 14%;
   will-change: opacity, transform, filter;
 }
 
@@ -25,56 +26,114 @@
   right: 0;
   z-index: 0;
   pointer-events: none;
-}
-
-.page-shell-enter-active {
-  position: relative;
-  z-index: 1;
+  transition:
+    opacity 170ms var(--qq-ease-out),
+    transform 190ms var(--qq-ease-out),
+    filter 170ms var(--qq-ease-out);
+  transform-origin: 50% 14%;
+  will-change: opacity, transform, filter;
 }
 
 .page-shell-enter-from {
   opacity: 0;
-  filter: saturate(0.92);
-  transform: translateY(10px);
+  filter: blur(2px) saturate(0.92);
+  transform: translateY(12px) scale(1.015);
 }
 
 .page-shell-leave-to {
   opacity: 0;
-  filter: saturate(0.92);
-  transform: translateY(-6px);
+  filter: saturate(0.9);
+  transform: translateY(-6px) scale(0.984);
 }
 
 .route-motion-back .page-shell-enter-from {
-  transform: translateY(-8px);
+  opacity: 0;
+  filter: blur(1.5px);
+  transform: translateY(-8px) scale(0.985);
 }
 
 .route-motion-back .page-shell-leave-to {
-  transform: translateY(8px);
+  opacity: 0;
+  transform: translateY(8px) scale(1.014);
 }
 
 .route-motion-switch .page-shell-enter-from {
-  transform: translateY(4px);
+  opacity: 0;
+  filter: blur(1.5px);
+  transform: translateY(8px) scale(0.99);
 }
 
 .route-motion-switch .page-shell-leave-to {
-  transform: translateY(-3px);
+  opacity: 0;
+  transform: translateY(-4px) scale(0.992);
 }
 
-/* ── Route Trace Sweep（换页顶部光带横扫）── */
+/* ── 登录解锁 → 工作台展开仪式转场 ── */
+.auth-unlock-enter-active {
+  transition:
+    opacity 320ms var(--qq-ease-out),
+    transform 360ms var(--qq-ease-out),
+    filter 320ms var(--qq-ease-out);
+  transform-origin: 50% 42%;
+}
+
+.auth-unlock-leave-active {
+  transition:
+    opacity 200ms var(--qq-ease-out),
+    transform 220ms var(--qq-ease-out),
+    filter 200ms var(--qq-ease-out);
+  transform-origin: 50% 48%;
+}
+
+.auth-unlock-enter-from {
+  opacity: 0;
+  transform: scale(0.968);
+  filter: blur(4px);
+}
+
+.auth-unlock-leave-to {
+  opacity: 0;
+  transform: scale(0.935);
+  filter: blur(3px);
+}
+
+/* ── 交错瀑布入场（Staggered Cascade；通过内联 --stagger-i 控制错峰）── */
+@keyframes qq-cascade-in {
+  from {
+    opacity: 0;
+    translate: 0 12px;
+    scale: 0.986;
+    filter: blur(2px);
+  }
+  to {
+    opacity: 1;
+    translate: none;
+    scale: none;
+    filter: none;
+  }
+}
+
+.qq-stagger-item {
+  animation: qq-cascade-in 380ms var(--qq-ease-out) both;
+  animation-delay: calc(var(--stagger-i, 0) * 38ms);
+}
+
+/* ── Route Trace Sweep（换页顶部蓝青辉光流带横扫）── */
 @keyframes route-trace-sweep {
   0% {
     opacity: 0;
-    transform: translateX(-42%);
+    transform: translateX(-48%) scaleX(0.65);
   }
-  16% {
-    opacity: 0.74;
+  18% {
+    opacity: 0.92;
+    transform: translateX(-12%) scaleX(1);
   }
-  82% {
-    opacity: 0.24;
+  80% {
+    opacity: 0.36;
   }
   100% {
     opacity: 0;
-    transform: translateX(42%);
+    transform: translateX(48%) scaleX(0.75);
   }
 }
 
@@ -153,25 +212,25 @@
   opacity: 0;
 }
 
-/* ── Command Palette（遮罩单调淡入 + 面板弹簧入场）── */
+/* ── Command Palette（遮罩单调淡入 + 面板弹性浮现）── */
 .palette-fade-enter-active {
-  transition: opacity 150ms var(--qq-ease-out);
+  transition: opacity 180ms var(--qq-ease-out);
 }
 
 .palette-fade-leave-active {
-  transition: opacity 120ms var(--qq-ease-out);
+  transition: opacity 140ms var(--qq-ease-out);
 }
 
 .palette-fade-enter-active .cmd-palette__panel {
   transition:
-    opacity 150ms var(--qq-ease-out),
+    opacity 180ms var(--qq-ease-out),
     transform var(--qq-transition-spring);
 }
 
 .palette-fade-leave-active .cmd-palette__panel {
   transition:
-    opacity 110ms var(--qq-ease-out),
-    transform 110ms var(--qq-ease-out);
+    opacity 130ms var(--qq-ease-out),
+    transform 130ms var(--qq-ease-out);
 }
 
 .palette-fade-enter-from,
@@ -181,12 +240,12 @@
 
 .palette-fade-enter-from .cmd-palette__panel {
   opacity: 0;
-  transform: translateY(-10px) scale(0.97);
+  transform: translateY(-14px) scale(0.955);
 }
 
 .palette-fade-leave-to .cmd-palette__panel {
   opacity: 0;
-  transform: translateY(-6px) scale(0.985);
+  transform: translateY(-8px) scale(0.975);
 }
 
 /* ── List transitions ── */
@@ -222,14 +281,14 @@ a:hover .qq-ico--spin {
 
 button:hover:not(:disabled) .qq-ico--nudge,
 a:hover .qq-ico--nudge {
-  transform: translateX(2px);
+  transform: translateX(3px);
 }
 
 /* ── Icon Swap（主题切换等图标替换：弹簧旋转 + 淡入）── */
 .icon-swap-enter-active {
   transition:
     opacity 150ms var(--qq-ease-out),
-    transform 240ms var(--qq-ease-spring);
+    transform 260ms var(--qq-ease-spring);
 }
 
 .icon-swap-leave-active {
@@ -240,19 +299,19 @@ a:hover .qq-ico--nudge {
 
 .icon-swap-enter-from {
   opacity: 0;
-  transform: rotate(-90deg) scale(0.6);
+  transform: rotate(-90deg) scale(0.55);
 }
 
 .icon-swap-leave-to {
   opacity: 0;
-  transform: rotate(90deg) scale(0.6);
+  transform: rotate(90deg) scale(0.55);
 }
 
 /* ── Tab Pane（标签页内容切换：淡入 + 微位移）── */
 .tab-pane-enter-active {
   transition:
-    opacity 160ms var(--qq-ease-out),
-    transform 160ms var(--qq-ease-out);
+    opacity 180ms var(--qq-ease-out),
+    transform 200ms var(--qq-ease-out);
 }
 
 .tab-pane-leave-active {
@@ -261,7 +320,7 @@ a:hover .qq-ico--nudge {
 
 .tab-pane-enter-from {
   opacity: 0;
-  transform: translateY(6px);
+  transform: translateY(8px);
 }
 
 .tab-pane-leave-to {
@@ -272,6 +331,8 @@ a:hover .qq-ico--nudge {
 @media (prefers-reduced-motion: reduce) {
   .page-shell-enter-active,
   .page-shell-leave-active,
+  .auth-unlock-enter-active,
+  .auth-unlock-leave-active,
   .toast-enter-active,
   .toast-leave-active,
   .slide-up-enter-active,
@@ -295,6 +356,10 @@ a:hover .qq-ico--nudge {
     transition: none;
   }
 
+  .qq-stagger-item {
+    animation: none !important;
+  }
+
   .qq-ico {
     transition: none;
   }
@@ -313,6 +378,8 @@ a:hover .qq-ico--nudge {
 
 html[data-motion="reduced"] .page-shell-enter-active,
 html[data-motion="reduced"] .page-shell-leave-active,
+html[data-motion="reduced"] .auth-unlock-enter-active,
+html[data-motion="reduced"] .auth-unlock-leave-active,
 html[data-motion="reduced"] .toast-enter-active,
 html[data-motion="reduced"] .toast-leave-active,
 html[data-motion="reduced"] .slide-up-enter-active,
@@ -335,6 +402,10 @@ html[data-motion="reduced"] .icon-swap-enter-active,
 html[data-motion="reduced"] .icon-swap-leave-active,
 html[data-motion="reduced"] .qq-ico {
   transition: none;
+}
+
+html[data-motion="reduced"] .qq-stagger-item {
+  animation: none !important;
 }
 
 html[data-motion="reduced"] button:hover:not(:disabled) .qq-ico--spin,

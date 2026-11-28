@@ -1,49 +1,52 @@
 <template>
-  <div class="app-root">
+  <div ref="appRootRef" class="app-root">
     <!-- Ambient light field -->
     <LightField :mode="authenticated ? 'ambient' : 'showcase'" :domain="activeDomain" />
 
-    <!-- Unauthenticated -->
-    <LoginView
-      v-if="authReady && !authenticated"
-      :submitting="authBusy"
-      :error="authError"
-      @submit="handleLogin"
-    />
+    <Transition name="auth-unlock" mode="out-in">
+      <!-- Unauthenticated -->
+      <LoginView
+        v-if="authReady && !authenticated"
+        key="login"
+        :submitting="authBusy"
+        :error="authError"
+        @submit="handleLogin"
+      />
 
-    <!-- Main layout -->
-    <div v-else-if="authReady" class="layout">
-      <StatusBar />
-      <div class="layout__body">
-        <AppNav
-          :items="NAV_ITEMS"
-          :sections="NAV_SECTIONS"
-          :logout-disabled="authBusy"
-          :theme-icon="theme === 'dark' ? 'Sun' : 'Moon'"
-          :theme-label="theme === 'dark' ? '亮色' : '暗色'"
-          @logout="handleLogout"
-          @toggle-theme="toggleTheme"
-        />
-        <main ref="contentEl" class="content" :class="routeMotionClass">
-          <div :key="routeTraceKey" class="route-trace" aria-hidden="true" />
-          <div class="page-stage">
-            <router-view v-slot="{ Component, route: viewRoute }">
-              <Transition name="page-shell">
-                <component :is="Component" :key="viewRoute.path" class="page-view" />
-              </Transition>
-            </router-view>
-          </div>
-        </main>
+      <!-- Main layout -->
+      <div v-else-if="authReady" key="layout" class="layout" :class="{ 'layout--receded': paletteOpen }">
+        <StatusBar />
+        <div class="layout__body">
+          <AppNav
+            :items="NAV_ITEMS"
+            :sections="NAV_SECTIONS"
+            :logout-disabled="authBusy"
+            :theme-icon="theme === 'dark' ? 'Sun' : 'Moon'"
+            :theme-label="theme === 'dark' ? '亮色' : '暗色'"
+            @logout="handleLogout"
+            @toggle-theme="toggleTheme"
+          />
+          <main ref="contentEl" class="content" :class="routeMotionClass">
+            <div :key="routeTraceKey" class="route-trace" aria-hidden="true" />
+            <div class="page-stage">
+              <router-view v-slot="{ Component, route: viewRoute }">
+                <Transition name="page-shell">
+                  <component :is="Component" :key="viewRoute.path" class="page-view" />
+                </Transition>
+              </router-view>
+            </div>
+          </main>
+        </div>
       </div>
-    </div>
 
-    <!-- Checking auth -->
-    <div v-else class="auth-shell">
-      <UiCard padding="lg" shadow="md" class="login-card">
-        <h2>正在检查登录状态</h2>
-        <p class="muted">稍等，正在确认当前浏览器会话是否仍然有效。</p>
-      </UiCard>
-    </div>
+      <!-- Checking auth -->
+      <div v-else key="checking" class="auth-shell">
+        <UiCard padding="lg" shadow="md" class="login-card">
+          <h2>正在检查登录状态</h2>
+          <p class="muted">稍等，正在确认当前浏览器会话是否仍然有效。</p>
+        </UiCard>
+      </div>
+    </Transition>
 
     <!-- Command Palette（全局 Cmd/Ctrl+K 快速跳转与操作） -->
     <CommandPalette
@@ -88,6 +91,7 @@ import { NAV_ITEMS, NAV_SECTIONS } from './config/nav'
 import { useAuth } from './composables/useAuth'
 import { useTheme } from './composables/useTheme'
 import { useCommandPalette } from './composables/useCommandPalette'
+import { usePointerGlow } from './composables/usePointerGlow'
 import { triggerRouteWarp, type WarpDirection } from './lib/lightFieldBus'
 
 const {
@@ -103,11 +107,15 @@ const {
 } = useAuth()
 
 const { theme, loadTheme, toggleTheme } = useTheme()
-const { recordVisitedPath } = useCommandPalette()
+const { paletteOpen, recordVisitedPath } = useCommandPalette()
 const route = useRoute()
+const appRootRef = ref<HTMLElement | null>(null)
 const contentEl = ref<HTMLElement | null>(null)
 const routeMotionClass = ref('route-motion-forward')
 const routeTraceKey = ref(0)
+
+// 全站统一指针物理引擎（单监听器驱动邻近追光、3D 玻璃微倾与微磁吸）
+usePointerGlow(appRootRef)
 
 const activeDomain = computed(() => {
   const item = NAV_ITEMS.find(entry => entry.path === route.path)
@@ -140,7 +148,9 @@ watch(
     routeTraceKey.value += 1
     recordVisitedPath(nextPath)
     if (prevPath !== undefined && prevPath !== nextPath) {
-      triggerRouteWarp(warpDir)
+      const prevDomain = NAV_ITEMS.find(entry => entry.path === prevPath)?.section || 'overview'
+      const nextDomain = NAV_ITEMS.find(entry => entry.path === nextPath)?.section || 'overview'
+      triggerRouteWarp(warpDir, prevDomain !== nextDomain ? 1.35 : 1)
     }
 
     void nextTick(() => {
@@ -185,6 +195,42 @@ onBeforeUnmount(() => {
   min-height: 0;
   position: relative;
   z-index: 1;
+  transform-origin: 50% 44%;
+  transition:
+    transform 240ms var(--qq-ease-out),
+    filter 240ms var(--qq-ease-out),
+    border-radius 240ms var(--qq-ease-out);
+}
+
+/* Command Palette 打开时主界面微微退后，形成桌面级空间景深 */
+.layout--receded {
+  transform: scale(0.986);
+  filter: blur(1.5px) brightness(0.94);
+  border-radius: 10px;
+  overflow: hidden;
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layout {
+    transition: none;
+  }
+
+  .layout--receded {
+    transform: none;
+    filter: none;
+    border-radius: 0;
+  }
+}
+
+html[data-motion="reduced"] .layout {
+  transition: none;
+}
+
+html[data-motion="reduced"] .layout--receded {
+  transform: none;
+  filter: none;
+  border-radius: 0;
 }
 
 .layout__body {
@@ -207,21 +253,22 @@ onBeforeUnmount(() => {
   width: 100%;
 }
 
-/* Route trace sweep — 每次换页重新挂载触发顶部一道蓝青光带横扫 */
+/* Route trace sweep — 每次换页重新挂载触发顶部一道蓝青辉光流带横扫 */
 .route-trace {
   position: sticky;
   top: 0;
   z-index: 6;
-  height: 1px;
-  margin-bottom: -1px;
+  height: 2px;
+  margin-bottom: -2px;
   flex-shrink: 0;
   pointer-events: none;
   opacity: 0;
+  border-radius: var(--qq-radius-full);
   background:
-    linear-gradient(90deg, transparent, var(--qq-route-trace-color), transparent 42%),
-    linear-gradient(90deg, transparent 56%, var(--qq-route-trace-secondary), transparent);
-  transform: translateX(-42%);
-  animation: route-trace-sweep 360ms linear 1;
+    linear-gradient(90deg, transparent, var(--qq-route-trace-color) 36%, var(--qq-route-trace-secondary) 64%, transparent);
+  box-shadow: 0 0 12px var(--qq-primary-glow);
+  transform: translateX(-48%);
+  animation: route-trace-sweep 420ms var(--qq-ease-out) 1;
 }
 
 .page-stage {
