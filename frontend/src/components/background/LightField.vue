@@ -44,14 +44,23 @@ function shouldStatic(): boolean {
   return lowMotion.value || systemReducedMotion.value
 }
 
-// 静态模式（低动效/reduced-motion）不消费指针视差，跳过坐标更新
+// 静态模式（低动效/reduced-motion）不消费指针视差与点击波纹
 const onMouseMove = (e: MouseEvent) => { if (!shouldStatic()) stage.onMouseMove(e) }
+const INTERACTIVE_SKIP_SELECTOR = 'input, textarea, select, button, a, label, canvas, pre, code, [contenteditable="true"], [role="button"], [role="switch"], [role="slider"], [role="option"], [role="dialog"]'
+const onPointerDown = (e: PointerEvent) => {
+  if (shouldStatic() || document.hidden || e.button !== 0 || e.pointerType === 'touch') return
+  const target = e.target instanceof Element ? e.target : null
+  // 交互控件、画布图表、代码区与弹窗内部点击不触发背景水波，避免与按钮涟漪或图表拖拽叠加
+  if (target && target.closest(INTERACTIVE_SKIP_SELECTOR)) return
+  stage.onPointerDown(e)
+}
 
 function draw(now: number) {
+  raf = 0
   const canvas = canvasRef.value
   if (!canvas) return
   if (!stage.draw(canvas, now)) return
-  if (!shouldStatic()) {
+  if (!shouldStatic() && !document.hidden) {
     raf = requestAnimationFrame(draw)
   }
 }
@@ -106,6 +115,7 @@ onMounted(() => {
   stage.centerPointer()
   window.addEventListener('resize', onWindowResize)
   window.addEventListener('mousemove', onMouseMove, { passive: true })
+  window.addEventListener('pointerdown', onPointerDown, { passive: true })
   document.addEventListener('visibilitychange', onVisibilityChange)
 
   unsubscribeBus = subscribeLightField((event) => {
@@ -117,7 +127,7 @@ onMounted(() => {
     // 静态/低动态模式跳过跃迁与声呐动画
     if (shouldStatic() || document.hidden) return
     if (event.type === 'warp') {
-      stage.triggerWarp(event.direction)
+      stage.triggerWarp(event.direction, event.intensity)
     } else if (event.type === 'sonar') {
       stage.triggerSonar(event.payload)
     }
@@ -144,6 +154,7 @@ onUnmounted(() => {
   reducedMotionMql?.removeEventListener('change', onReducedMotionChange)
   window.removeEventListener('resize', onWindowResize)
   window.removeEventListener('mousemove', onMouseMove)
+  window.removeEventListener('pointerdown', onPointerDown)
   document.removeEventListener('visibilitychange', onVisibilityChange)
 })
 </script>

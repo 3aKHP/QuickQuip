@@ -1,6 +1,8 @@
 <template>
-  <div ref="dashRootRef" class="dash-view">
-    <header class="dash-hero qq-glow-card" data-glow-card>
+  <div class="dash-view">
+    <header class="dash-hero qq-glow-card qq-stagger-item" style="--stagger-i: 0" data-glow-card>
+      <span class="qq-beam" aria-hidden="true" />
+      <span class="dash-hero__aurora" aria-hidden="true" />
       <div class="dash-hero__brand">
         <img class="dash-hero__logo" src="/brand.svg" alt="" width="48" height="48" aria-hidden="true">
         <div class="dash-hero__info">
@@ -27,11 +29,13 @@
     <template v-else-if="data">
       <div class="domain-grid">
         <router-link
-          v-for="section in NAV_SECTIONS.filter(s => s.key !== 'overview')"
+          v-for="(section, idx) in NAV_SECTIONS.filter(s => s.key !== 'overview')"
           :key="section.key"
-          class="domain-card qq-glow-card"
+          class="domain-card qq-glow-card qq-tilt-card qq-stagger-item"
           data-glow-card
-          :style="domainCardStyle(section.key)"
+          data-tilt-card
+          data-tilt-max="3.8"
+          :style="domainCardStyle(section.key, idx + 1)"
           :to="firstPath(section.key)"
         >
           <span class="domain-card__icon">
@@ -47,25 +51,25 @@
 
       <!-- Top stat cards -->
       <div class="dash-cards">
-        <UiStatCard label="活跃群组" variant="primary" icon="Users" :count-to="data.totalGroups" :count-format="fmt" tip="有过消息统计记录的群数量（自统计开始累计）；机器人自身发言不计入，也不等于机器人当前所在的全部群。" />
-        <UiStatCard label="累计消息" icon="MessageCircle" :count-to="data.totalMessages" :count-format="fmt" tip="各群成员消息数合计，机器人自己的回复不计；自统计开始累计、无时间窗口，重启不清零。" />
-        <UiStatCard label="活跃用户" icon="Radar" :count-to="data.totalUsers" :count-format="fmt" tip="统计中出现过的不同发言者数，同一 QQ 号跨群只计一次。" />
-        <UiStatCard label="金币用户" icon="Coins" :count-to="data.goldUserCount" :count-format="fmt" :sub="`总金币 ${fmt(data.totalGold)}`" tip="游戏经济中建有金币账户的用户数（按群开户，同一 QQ 在两个群算两个）；副标题为全部群的金币余额合计。" />
+        <UiStatCard class="qq-stagger-item" style="--stagger-i: 3" label="活跃群组" variant="primary" icon="Users" :count-to="data.totalGroups" :count-format="fmt" tip="有过消息统计记录的群数量（自统计开始累计）；机器人自身发言不计入，也不等于机器人当前所在的全部群。" />
+        <UiStatCard class="qq-stagger-item" style="--stagger-i: 4" label="累计消息" icon="MessageCircle" :count-to="data.totalMessages" :count-format="fmt" tip="各群成员消息数合计，机器人自己的回复不计；自统计开始累计、无时间窗口，重启不清零。" />
+        <UiStatCard class="qq-stagger-item" style="--stagger-i: 5" label="活跃用户" icon="Radar" :count-to="data.totalUsers" :count-format="fmt" tip="统计中出现过的不同发言者数，同一 QQ 号跨群只计一次。" />
+        <UiStatCard class="qq-stagger-item" style="--stagger-i: 6" label="金币用户" icon="Coins" :count-to="data.goldUserCount" :count-format="fmt" :sub="`总金币 ${fmt(data.totalGold)}`" tip="游戏经济中建有金币账户的用户数（按群开户，同一 QQ 在两个群算两个）；副标题为全部群的金币余额合计。" />
       </div>
 
       <!-- Row 2: rankings -->
       <div class="dash-row">
-        <UiCard padding="md" shadow="sm" class="dash-half">
+        <UiCard padding="md" shadow="sm" class="dash-half qq-stagger-item" style="--stagger-i: 7">
           <div class="dash-card-head">
             <h3 class="section-title">群消息排行 Top 5</h3>
-            <router-link to="/stats" class="dash-card-link">查看统计 <UiIcon name="ArrowRight" :size="14" /></router-link>
+            <router-link to="/stats" class="dash-card-link">查看统计 <UiIcon name="ArrowRight" :size="14" motion="nudge" /></router-link>
           </div>
           <div v-if="data.groupMessages.length" class="mini-bar-list">
             <div v-for="(g, i) in data.groupMessages" :key="g.gid" class="mini-bar-row">
               <span class="mini-bar-rank">{{ i + 1 }}</span>
               <span class="mono mini-bar-key" :title="g.gid">{{ g.gid }}</span>
               <div class="mini-bar-track">
-                <div class="mini-bar-fill" :style="{ width: pct(g.count, data.groupMessages[0].count) + '%' }" />
+                <div class="mini-bar-fill" :style="{ width: pct(g.count, data.groupMessages[0].count) + '%', '--bar-i': i }" />
               </div>
               <span class="mini-bar-val">{{ fmt(g.count) }}</span>
             </div>
@@ -73,17 +77,17 @@
           <UiEmpty v-else compact icon="BarChart3" title="暂无群消息数据" />
         </UiCard>
 
-        <UiCard padding="md" shadow="sm" class="dash-half">
+        <UiCard padding="md" shadow="sm" class="dash-half qq-stagger-item" style="--stagger-i: 8">
           <div class="dash-card-head">
             <h3 class="section-title">规则触发 Top 5<UiInfoTip text="机器人各类回复规则的触发次数：chat_rules.toml 关键词/复读等规则、LLM 对话触发（llm_chat）、唤醒规则与无聊主动搭话（awakening_boredom）均计入。" /></h3>
-            <router-link to="/rules" class="dash-card-link">规则开关 <UiIcon name="ArrowRight" :size="14" /></router-link>
+            <router-link to="/rules" class="dash-card-link">规则开关 <UiIcon name="ArrowRight" :size="14" motion="nudge" /></router-link>
           </div>
           <div v-if="data.ruleTriggers.length" class="mini-bar-list">
             <div v-for="(r, i) in data.ruleTriggers" :key="r.rule" class="mini-bar-row">
               <span class="mini-bar-rank">{{ i + 1 }}</span>
               <span class="mono mini-bar-key" :title="r.rule">{{ r.rule }}</span>
               <div class="mini-bar-track">
-                <div class="mini-bar-fill mini-bar-fill--warn" :style="{ width: pct(r.count, data.ruleTriggers[0].count) + '%' }" />
+                <div class="mini-bar-fill mini-bar-fill--warn" :style="{ width: pct(r.count, data.ruleTriggers[0].count) + '%', '--bar-i': i }" />
               </div>
               <span class="mini-bar-val">{{ fmt(r.count) }}</span>
             </div>
@@ -94,10 +98,10 @@
 
       <!-- Row 3: cron + LLM -->
       <div class="dash-row">
-        <UiCard padding="md" shadow="sm" class="dash-half">
+        <UiCard padding="md" shadow="sm" class="dash-half qq-stagger-item" style="--stagger-i: 9">
           <div class="dash-card-head">
             <h3 class="section-title">调度器<UiInfoTip text="定时任务（定时消息、节日问候、日报/简报生成等）最近一次执行的状态；「异常」表示最近一次运行报错，详情见调度页。" /></h3>
-            <router-link to="/cron-dashboard" class="dash-card-link">调度监控 <UiIcon name="ArrowRight" :size="14" /></router-link>
+            <router-link to="/cron-dashboard" class="dash-card-link">调度监控 <UiIcon name="ArrowRight" :size="14" motion="nudge" /></router-link>
           </div>
           <div class="cron-summary">
             <div class="cron-item">
@@ -114,10 +118,10 @@
           </div>
         </UiCard>
 
-        <UiCard padding="md" shadow="sm" class="dash-half">
+        <UiCard padding="md" shadow="sm" class="dash-half qq-stagger-item" style="--stagger-i: 10">
           <div class="dash-card-head">
             <h3 class="section-title">LLM 对话<UiInfoTip text="llm.db 会话存档中的消息总条数（群聊/私聊/已归档会话合计，用户与机器人轮次都计入），右侧为最近一条的时间。" /></h3>
-            <router-link to="/conversations" class="dash-card-link">查看对话 <UiIcon name="ArrowRight" :size="14" /></router-link>
+            <router-link to="/conversations" class="dash-card-link">查看对话 <UiIcon name="ArrowRight" :size="14" motion="nudge" /></router-link>
           </div>
           <div class="cron-summary">
             <span class="llm-count"><UiDigitRoll :value="fmt(data.llmConversations.count)" /></span>
@@ -143,10 +147,6 @@ import UiSkeleton from '../components/ui/UiSkeleton.vue'
 import UiInfoTip from '../components/ui/UiInfoTip.vue'
 import { fetchDashboardData, type DashboardData } from '../api/dashboard'
 import { NAV_ITEMS, NAV_SECTIONS } from '../config/nav'
-import { usePointerGlow } from '../composables/usePointerGlow'
-
-const dashRootRef = ref<HTMLElement | null>(null)
-usePointerGlow(dashRootRef)
 
 const data = ref<DashboardData | null>(null)
 const loading = ref(true)
@@ -181,7 +181,7 @@ function firstPath(sectionKey: string): string {
   return NAV_ITEMS.find(item => item.section === sectionKey)?.path || '/'
 }
 
-function domainCardStyle(sectionKey: string) {
+function domainCardStyle(sectionKey: string, staggerIndex: number) {
   const color = `var(--qq-domain-${sectionKey}, var(--qq-primary))`
   const soft = `var(--qq-domain-${sectionKey}-soft, var(--qq-primary-soft))`
   return {
@@ -189,6 +189,7 @@ function domainCardStyle(sectionKey: string) {
     '--card-domain-soft': soft,
     '--glow-color': color,
     '--glow-sheen': soft,
+    '--stagger-i': String(staggerIndex),
   }
 }
 
@@ -238,6 +239,24 @@ onMounted(() => { load() })
     var(--qq-surface);
   box-shadow: var(--qq-shadow-card);
   overflow: hidden;
+}
+
+/* Hero 缓慢流动的极光微晕 */
+.dash-hero__aurora {
+  position: absolute;
+  inset: -40% -20%;
+  pointer-events: none;
+  z-index: 0;
+  background:
+    radial-gradient(circle at 22% 45%, var(--qq-primary-soft), transparent 46%),
+    radial-gradient(circle at 78% 35%, var(--qq-cyan-soft), transparent 44%);
+  animation: dash-aurora-drift 12s ease-in-out infinite alternate;
+  opacity: 0.9;
+}
+
+@keyframes dash-aurora-drift {
+  0% { transform: translate3d(-3%, -2%, 0) scale(1); }
+  100% { transform: translate3d(4%, 3%, 0) scale(1.06); }
 }
 
 .dash-hero__brand {
@@ -315,12 +334,12 @@ onMounted(() => { load() })
   color: var(--qq-text);
   text-decoration: none;
   box-shadow: var(--qq-shadow-card);
-  transition: border-color var(--qq-transition-fast), transform var(--qq-transition-fast);
+  transition: border-color var(--qq-transition-fast), box-shadow var(--qq-transition-fast);
 }
 
 .domain-card:hover {
   border-color: var(--card-domain-color, var(--qq-primary));
-  transform: translateY(-1px);
+  box-shadow: var(--qq-shadow-card-hover);
 }
 
 .domain-card__icon {
@@ -475,21 +494,36 @@ onMounted(() => { load() })
 }
 
 .mini-bar-track {
-  height: 4px;
+  height: 5px;
   background: var(--qq-surface-strong);
   border-radius: var(--qq-radius-full);
   overflow: hidden;
 }
 
 .mini-bar-fill {
+  position: relative;
   height: 100%;
   border-radius: var(--qq-radius-full);
-  background: var(--qq-primary);
+  background: linear-gradient(90deg, var(--qq-primary), var(--qq-cyan));
+  transform-origin: left center;
+  animation: mini-bar-grow 540ms var(--qq-ease-out) both;
+  animation-delay: calc(120ms + var(--bar-i, 0) * 45ms);
   transition: width 0.5s var(--qq-ease-out);
 }
 
 .mini-bar-fill--warn {
-  background: var(--qq-warn);
+  background: linear-gradient(90deg, var(--qq-warn), var(--qq-accent));
+}
+
+@keyframes mini-bar-grow {
+  from {
+    transform: scaleX(0);
+    opacity: 0.4;
+  }
+  to {
+    transform: scaleX(1);
+    opacity: 1;
+  }
 }
 
 .mini-bar-val {
@@ -526,4 +560,26 @@ onMounted(() => { load() })
 
 .muted { color: var(--qq-text-muted); font-size: var(--qq-text-sm); }
 .mono { font-family: var(--qq-font-mono); }
+
+@media (prefers-reduced-motion: reduce) {
+  .dash-hero__aurora,
+  .mini-bar-fill {
+    animation: none;
+  }
+
+  .mini-bar-fill {
+    transition: none;
+  }
+}
+</style>
+
+<style>
+html[data-motion="reduced"] .dash-hero__aurora,
+html[data-motion="reduced"] .mini-bar-fill {
+  animation: none;
+}
+
+html[data-motion="reduced"] .mini-bar-fill {
+  transition: none;
+}
 </style>

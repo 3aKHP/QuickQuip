@@ -4,8 +4,10 @@
       <router-link to="/" custom v-slot="{ href, navigate, isActive }">
         <a
           :href="href"
-          class="brand-mark"
+          class="brand-mark qq-magnetic"
           :class="{ active: isActive }"
+          data-magnetic
+          data-magnetic-max="3"
           title="QuickQuip Admin"
           aria-label="QuickQuip Admin"
           :aria-current="isActive ? 'page' : undefined"
@@ -35,9 +37,11 @@
           :key="section.key"
           :ref="(el) => setDomainBtnRef(section.key, el)"
           type="button"
-          class="domain-btn"
+          class="domain-btn qq-magnetic"
           :class="{ active: activeSectionKey === section.key }"
           :style="domainStyle(section.key)"
+          data-magnetic
+          data-magnetic-max="2.6"
           :title="section.label"
           :aria-current="activeSectionKey === section.key ? 'true' : undefined"
           @click="goToSection(section.key)"
@@ -48,15 +52,17 @@
       </nav>
 
       <div class="domain-rail__tools">
-        <button type="button" class="rail-tool" :title="themeLabel" :aria-label="themeLabel" @click="$emit('toggleTheme', $event)">
+        <button type="button" class="rail-tool qq-magnetic" data-magnetic data-magnetic-max="3.2" :title="themeLabel" :aria-label="themeLabel" @click="$emit('toggleTheme', $event)">
           <Transition name="icon-swap" mode="out-in">
             <UiIcon :key="themeIcon" :name="themeIcon" :size="18" />
           </Transition>
         </button>
         <button
           type="button"
-          class="rail-tool"
+          class="rail-tool qq-magnetic"
           :class="{ 'rail-tool--on': lowMotion }"
+          data-magnetic
+          data-magnetic-max="3.2"
           :title="lowMotion ? '已开启低动态模式（减弱动画与静态光场）' : '动态效果正常，点击开启低动态模式'"
           :aria-label="lowMotion ? '关闭低动态模式' : '开启低动态模式'"
           :aria-pressed="lowMotion"
@@ -66,7 +72,7 @@
             <UiIcon :key="lowMotion ? 'off' : 'on'" :name="lowMotion ? 'ZapOff' : 'Zap'" :size="18" />
           </Transition>
         </button>
-        <button type="button" class="rail-tool" title="退出登录" aria-label="退出登录" :disabled="logoutDisabled" @click="$emit('logout')">
+        <button type="button" class="rail-tool qq-magnetic" data-magnetic data-magnetic-max="3.2" title="退出登录" aria-label="退出登录" :disabled="logoutDisabled" @click="$emit('logout')">
           <UiIcon name="LogOut" :size="18" />
         </button>
       </div>
@@ -464,7 +470,11 @@ onBeforeUnmount(() => {
   border: 0;
   color: var(--qq-text-muted);
   cursor: pointer;
-  transition: color var(--qq-transition-fast), background var(--qq-transition-fast), transform var(--qq-transition-fast);
+  transition:
+    color var(--qq-transition-fast),
+    background var(--qq-transition-fast),
+    border-radius var(--qq-transition-spring),
+    transform var(--qq-transition-spring-fast);
 }
 
 .brand-mark {
@@ -540,8 +550,10 @@ onBeforeUnmount(() => {
   background: var(--qq-shell-control-hover);
 }
 
-.domain-btn:active {
-  transform: scale(0.97);
+.domain-btn:active,
+.rail-tool:active:not(:disabled) {
+  transform: scale(0.94);
+  border-radius: var(--qq-radius-xl);
 }
 
 .domain-btn.active {
@@ -996,6 +1008,12 @@ onBeforeUnmount(() => {
   .section-panel__indicator--animated {
     transition: none;
   }
+
+  .domain-btn:active,
+  .rail-tool:active:not(:disabled) {
+    transform: none;
+    border-radius: var(--qq-radius-sm);
+  }
 }
 </style>
 
@@ -1003,5 +1021,11 @@ onBeforeUnmount(() => {
 html[data-motion="reduced"] .domain-rail__indicator--animated,
 html[data-motion="reduced"] .section-panel__indicator--animated {
   transition: none;
+}
+
+html[data-motion="reduced"] .domain-btn:active,
+html[data-motion="reduced"] .rail-tool:active:not(:disabled) {
+  transform: none;
+  border-radius: var(--qq-radius-sm);
 }
 </style>

@@ -10,6 +10,7 @@
         @click.self="close"
       >
         <div class="cmd-palette__panel" @keydown="onPanelKeydown">
+          <span class="qq-beam" aria-hidden="true" />
           <div class="cmd-palette__whisper" aria-hidden="true" />
           <div class="cmd-palette__search">
             <UiIcon name="Search" :size="16" class="cmd-palette__search-icon" />

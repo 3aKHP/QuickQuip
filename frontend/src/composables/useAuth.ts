@@ -2,6 +2,7 @@ import { ref } from 'vue'
 import type { Ref } from 'vue'
 import { getAuthState, login as apiLogin, logout as apiLogout } from '../api/auth'
 import { setUnauthorizedHandler } from '../api/index'
+import { triggerLightFieldSonar, triggerRouteWarp } from '../lib/lightFieldBus'
 import { toast, toastMsg } from '../toast'
 
 interface ApiError {
@@ -37,6 +38,9 @@ async function handleLogin(password: string): Promise<void> {
   authError.value = ''
   try {
     await apiLogin(password)
+    // 登录解锁瞬间触发星海跃迁与中心能量环，配合工作台空间展开
+    triggerRouteWarp('forward', 1.9)
+    triggerLightFieldSonar({ kind: 'success', scale: 1.45 })
     authenticated.value = true
     toastMsg.value = null
   } catch (error: unknown) {

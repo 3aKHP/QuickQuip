@@ -148,7 +148,8 @@ onUnmounted(() => {
     border-color var(--qq-transition-fast),
     color var(--qq-transition-fast),
     box-shadow var(--qq-transition-fast),
-    transform var(--qq-transition-fast);
+    border-radius var(--qq-transition-spring),
+    transform var(--qq-transition-spring-fast);
   user-select: none;
 }
 
@@ -190,10 +191,6 @@ onUnmounted(() => {
     transform: translate(-50%, -50%) scale(1);
     opacity: 0;
   }
-}
-
-.ui-btn:active:not(:disabled) {
-  transform: translateY(1px) scale(0.975);
 }
 
 .ui-btn:disabled {
@@ -247,6 +244,8 @@ onUnmounted(() => {
 .ui-btn--primary:hover:not(:disabled) {
   background: var(--qq-primary-hover);
   border-color: var(--qq-primary-hover);
+  box-shadow: 0 4px 14px var(--qq-primary-shadow);
+  transform: translateY(-1px);
 }
 
 .ui-btn--secondary {
@@ -281,6 +280,12 @@ onUnmounted(() => {
   background: var(--qq-surface-strong);
 }
 
+/* M3 Expressive 触觉形变：置于所有 variant :hover 之后，确保主按钮按压可压下并揉圆 */
+.ui-btn:active:not(:disabled) {
+  transform: translateY(1px) scale(0.965);
+  border-radius: var(--qq-radius-morph);
+}
+
 .ui-btn__loading {
   animation: spin 0.8s linear infinite;
 }
@@ -290,6 +295,16 @@ onUnmounted(() => {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .ui-btn {
+    transition: background-color var(--qq-transition-fast), border-color var(--qq-transition-fast), color var(--qq-transition-fast);
+  }
+
+  .ui-btn:active:not(:disabled),
+  .ui-btn--primary:hover:not(:disabled) {
+    transform: none;
+    border-radius: var(--qq-radius-md);
+  }
+
   .ui-btn__ripple {
     display: none;
   }
@@ -297,6 +312,16 @@ onUnmounted(() => {
 </style>
 
 <style>
+html[data-motion="reduced"] .ui-btn {
+  transition: background-color var(--qq-transition-fast), border-color var(--qq-transition-fast), color var(--qq-transition-fast);
+}
+
+html[data-motion="reduced"] .ui-btn:active:not(:disabled),
+html[data-motion="reduced"] .ui-btn--primary:hover:not(:disabled) {
+  transform: none;
+  border-radius: var(--qq-radius-md);
+}
+
 html[data-motion="reduced"] .ui-btn__ripple {
   display: none;
 }

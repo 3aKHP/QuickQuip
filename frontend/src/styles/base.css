@@ -376,7 +376,18 @@ code {
   grid-template-columns: repeat(auto-fit, minmax(175px, 1fr));
 }
 
-/* ── Specular Pointer Glow（指针追光 1px 边缘高光；静止时完全隐形）── */
+/* ── Specular Pointer Glow & 3D Tilt Glare（指针追光 1.5px 边框 + 玻璃镜面扫光）── */
+@property --qq-beam-angle {
+  syntax: "<angle>";
+  initial-value: 0deg;
+  inherits: false;
+}
+
+@keyframes qq-beam-orbit {
+  from { --qq-beam-angle: 0deg; }
+  to   { --qq-beam-angle: 360deg; }
+}
+
 .qq-glow-card {
   position: relative;
 }
@@ -392,24 +403,40 @@ code {
   transition: opacity 180ms var(--qq-ease-out);
 }
 
-/* 极浅表层漫反射微光 */
+/* 表层漫反射微光 + 3D 微倾时的斜向玻璃镜面反光 */
 .qq-glow-card::before {
-  background: radial-gradient(
-    220px circle at var(--mx, -999px) var(--my, -999px),
-    var(--glow-sheen, var(--qq-specular-sheen)),
-    transparent 70%
-  );
+  background:
+    radial-gradient(
+      260px circle at var(--mx, -999px) var(--my, -999px),
+      var(--glow-sheen, var(--qq-specular-sheen)),
+      transparent 72%
+    );
   z-index: 0;
 }
 
-/* 1px 镜面边框追光（mask-composite 仅露出边框 1px 环；inset: 0 兼容 overflow: hidden 卡片） */
+.qq-tilt-card.qq-glow-card::before {
+  opacity: max(var(--glow-opacity, 0), var(--glare-opacity, 0));
+  background:
+    radial-gradient(
+      210px circle at var(--glare-x, 50%) var(--glare-y, 50%),
+      color-mix(in srgb, var(--qq-glare-color) calc(var(--glare-opacity, 0) * 100%), transparent),
+      transparent 64%
+    ),
+    radial-gradient(
+      260px circle at var(--mx, -999px) var(--my, -999px),
+      var(--glow-sheen, var(--qq-specular-sheen)),
+      transparent 72%
+    );
+}
+
+/* 1.5px 镜面边框追光（mask-composite 仅露出边框环；inset: 0 兼容 overflow: hidden 卡片） */
 .qq-glow-card::after {
   inset: 0;
-  padding: 1px;
+  padding: 1.5px;
   background: radial-gradient(
-    240px circle at var(--mx, -999px) var(--my, -999px),
+    260px circle at var(--mx, -999px) var(--my, -999px),
     var(--glow-color, var(--qq-specular-border)),
-    transparent 65%
+    transparent 66%
   );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
@@ -422,14 +449,65 @@ code {
   z-index: 2;
 }
 
+/* 焦点容器单点游走流光边框（仅用于登录舱、Dashboard Hero、Command Palette 等主焦点） */
+.qq-beam {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  padding: 1.5px;
+  pointer-events: none;
+  z-index: 3;
+  background: conic-gradient(
+    from var(--qq-beam-angle, 0deg) at 50% 50%,
+    transparent 0deg,
+    transparent 292deg,
+    var(--qq-beam-primary) 334deg,
+    var(--qq-beam-secondary) 352deg,
+    transparent 360deg
+  );
+  -webkit-mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  -webkit-mask-composite: xor;
+  mask:
+    linear-gradient(#fff 0 0) content-box,
+    linear-gradient(#fff 0 0);
+  mask-composite: exclude;
+  animation: qq-beam-orbit 6.4s linear infinite;
+  opacity: 0.85;
+}
+
+/* 微磁吸：采用独立 CSS translate 属性，与 :active transform scale 互不冲突 */
+.qq-magnetic {
+  translate: var(--mag-x, 0px) var(--mag-y, 0px);
+}
+
 @media (prefers-reduced-motion: reduce) {
   .qq-glow-card::before,
-  .qq-glow-card::after {
+  .qq-glow-card::after,
+  .qq-beam {
     display: none;
+  }
+
+  .qq-tilt-card {
+    transform: none !important;
+  }
+
+  .qq-magnetic {
+    translate: none !important;
   }
 }
 
 html[data-motion="reduced"] .qq-glow-card::before,
-html[data-motion="reduced"] .qq-glow-card::after {
+html[data-motion="reduced"] .qq-glow-card::after,
+html[data-motion="reduced"] .qq-beam {
   display: none;
+}
+
+html[data-motion="reduced"] .qq-tilt-card {
+  transform: none !important;
+}
+
+html[data-motion="reduced"] .qq-magnetic {
+  translate: none !important;
 }

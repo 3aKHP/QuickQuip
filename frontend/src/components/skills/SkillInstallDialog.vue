@@ -1,5 +1,6 @@
 <template>
-  <div class="install-overlay" @click.self="requestClose">
+  <Teleport to="body">
+    <div class="install-overlay" @click.self="requestClose">
     <UiCard padding="lg" shadow="lg" class="install-card" role="dialog" aria-modal="true" aria-labelledby="skill-install-title">
       <div class="install-head">
         <h3 id="skill-install-title" class="install-title">安装 Skill</h3>
@@ -90,7 +91,8 @@
         >确认安装</UiButton>
       </div>
     </UiCard>
-  </div>
+    </div>
+  </Teleport>
 </template>
 
 <script setup lang="ts">
