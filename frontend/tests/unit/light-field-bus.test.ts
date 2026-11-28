@@ -37,14 +37,18 @@ describe('lightFieldBus', () => {
     expect(received[0]).toEqual({ type: 'domain', domain: 'llm' })
 
     triggerRouteWarp('forward')
+    triggerRouteWarp('forward', 1.9)
     triggerLightFieldSonar({ x: 100, y: 200, kind: 'success' })
-    expect(received).toHaveLength(3)
+    triggerLightFieldSonar({ x: 50, y: 60, kind: 'ripple', scale: 1.25 })
+    expect(received).toHaveLength(5)
     expect(received[1]).toEqual({ type: 'warp', direction: 'forward' })
-    expect(received[2]).toEqual({ type: 'sonar', payload: { x: 100, y: 200, kind: 'success' } })
+    expect(received[2]).toEqual({ type: 'warp', direction: 'forward', intensity: 1.9 })
+    expect(received[3]).toEqual({ type: 'sonar', payload: { x: 100, y: 200, kind: 'success' } })
+    expect(received[4]).toEqual({ type: 'sonar', payload: { x: 50, y: 60, kind: 'ripple', scale: 1.25 } })
 
     unsub()
     triggerRouteWarp('back')
-    expect(received).toHaveLength(3)
+    expect(received).toHaveLength(5)
   })
 
   it('tracks API in-flight count and lastOk state without dropping below zero', () => {

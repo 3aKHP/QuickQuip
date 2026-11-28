@@ -1,5 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { useTheme } from '@/composables/useTheme'
+import { resetLightFieldBus, subscribeLightField, type LightFieldEvent } from '@/lib/lightFieldBus'
 
 describe('useTheme toggleTheme', () => {
   beforeEach(() => {
@@ -19,6 +20,9 @@ describe('useTheme toggleTheme', () => {
   })
 
   it('uses View Transitions circular clipPath reveal when supported', async () => {
+    resetLightFieldBus()
+    const fieldEvents: LightFieldEvent[] = []
+    const unsub = subscribeLightField(e => fieldEvents.push(e))
     const animateMock = vi.fn()
     const startVtMock = vi.fn((cb: () => void) => {
       cb()
@@ -30,6 +34,7 @@ describe('useTheme toggleTheme', () => {
     const { theme, toggleTheme } = useTheme()
     toggleTheme({ x: 40, y: 80 })
     await Promise.resolve()
+    unsub()
 
     expect(theme.value).toBe('dark')
     expect(document.documentElement.getAttribute('data-theme')).toBe('dark')
@@ -42,6 +47,9 @@ describe('useTheme toggleTheme', () => {
     expect(keyframes.clipPath[0]).toBe('circle(0px at 40px 80px)')
     expect(keyframes.clipPath[1]).toContain('at 40px 80px)')
     expect(options.pseudoElement).toBe('::view-transition-new(root)')
+    expect(fieldEvents).toEqual([
+      { type: 'sonar', payload: { x: 40, y: 80, kind: 'action', scale: 1.35 } },
+    ])
   })
 
   it('computes next theme inside async View Transition callback to avoid rapid double-click race', async () => {

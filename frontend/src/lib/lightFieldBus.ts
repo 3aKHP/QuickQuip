@@ -8,17 +8,18 @@
  */
 
 export type WarpDirection = 'forward' | 'back' | 'switch'
-export type SonarKind = 'action' | 'success' | 'error'
+export type SonarKind = 'action' | 'success' | 'error' | 'ripple'
 
 export interface SonarEvent {
   x?: number
   y?: number
   kind: SonarKind
+  scale?: number
 }
 
 export type LightFieldEvent =
   | { type: 'domain'; domain: string }
-  | { type: 'warp'; direction: WarpDirection }
+  | { type: 'warp'; direction: WarpDirection; intensity?: number }
   | { type: 'sonar'; payload: SonarEvent }
 
 export interface ApiActivitySnapshot {
@@ -55,19 +56,23 @@ export function setLightFieldDomain(domain: string): void {
   for (const fn of fieldListeners) fn(event)
 }
 
-export function triggerRouteWarp(direction: WarpDirection = 'switch'): void {
-  const event: LightFieldEvent = { type: 'warp', direction }
+export function triggerRouteWarp(direction: WarpDirection = 'switch', intensity?: number): void {
+  const event: LightFieldEvent = intensity !== undefined
+    ? { type: 'warp', direction, intensity }
+    : { type: 'warp', direction }
   for (const fn of fieldListeners) fn(event)
 }
 
 export function triggerLightFieldSonar(opts: Partial<SonarEvent> = {}): void {
+  const payload: SonarEvent = {
+    x: opts.x,
+    y: opts.y,
+    kind: opts.kind ?? 'action',
+  }
+  if (opts.scale !== undefined) payload.scale = opts.scale
   const event: LightFieldEvent = {
     type: 'sonar',
-    payload: {
-      x: opts.x,
-      y: opts.y,
-      kind: opts.kind ?? 'action',
-    },
+    payload,
   }
   for (const fn of fieldListeners) fn(event)
 }
