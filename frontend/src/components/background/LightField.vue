@@ -1,10 +1,13 @@
 <template>
-  <canvas
-    ref="canvasRef"
-    class="light-field"
-    :class="`light-field--${mode}`"
-    aria-hidden="true"
-  />
+  <div class="light-field-layer" :class="`light-field-layer--${mode}`" :style="auroraVars" aria-hidden="true">
+    <div class="light-field-aurora light-field-aurora--a" />
+    <div class="light-field-aurora light-field-aurora--b" />
+    <canvas
+      ref="canvasRef"
+      class="light-field"
+      :class="`light-field--${mode}`"
+    />
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -12,6 +15,7 @@ import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
 import { useTheme } from '../../composables/useTheme'
 import { useMotionPrefs } from '../../composables/useMotionPrefs'
 import { getLightFieldDomain, subscribeLightField } from '../../lib/lightFieldBus'
+import { resolveDomainPalette } from './light-field/config'
 import { createLightFieldStage } from './light-field/stage'
 
 const props = withDefaults(defineProps<{
@@ -25,8 +29,17 @@ const { theme } = useTheme()
 const { lowMotion } = useMotionPrefs()
 const isDark = computed(() => theme.value === 'dark')
 const isShowcase = computed(() => props.mode === 'showcase')
+const activeDomain = ref(props.domain || getLightFieldDomain())
 
-// 舞台负责粒子物理/视差投影/域染色/单帧编排；本组件只管生命周期与调度
+const auroraVars = computed(() => {
+  const palette = resolveDomainPalette(activeDomain.value)
+  return {
+    '--lf-primary': `${palette.primary[0]}, ${palette.primary[1]}, ${palette.primary[2]}`,
+    '--lf-secondary': `${palette.secondary[0]}, ${palette.secondary[1]}, ${palette.secondary[2]}`,
+  }
+})
+
+// 舞台负责粒子物理/视差投影/域染色/单帧编排；流动极光由 GPU 合成 CSS 层承担
 const stage = createLightFieldStage({
   isDark: () => isDark.value,
   isShowcase: () => isShowcase.value,
@@ -109,7 +122,9 @@ onMounted(() => {
     systemReducedMotion.value = reducedMotionMql.matches
     reducedMotionMql.addEventListener('change', onReducedMotionChange)
   } catch { /* ignore */ }
-  stage.setDomain(props.domain || getLightFieldDomain(), true)
+  const initial = props.domain || getLightFieldDomain()
+  activeDomain.value = initial
+  stage.setDomain(initial, true)
   const canvas = canvasRef.value
   if (canvas) stage.resize(canvas)
   stage.centerPointer()
@@ -120,6 +135,7 @@ onMounted(() => {
 
   unsubscribeBus = subscribeLightField((event) => {
     if (event.type === 'domain') {
+      activeDomain.value = event.domain || 'overview'
       const changed = stage.setDomain(event.domain, shouldStatic())
       if (changed && shouldStatic()) draw(performance.now())
       return
@@ -137,7 +153,9 @@ onMounted(() => {
 })
 
 watch(() => props.domain, (domain) => {
-  const changed = stage.setDomain(domain || 'overview', shouldStatic())
+  const normalized = domain || 'overview'
+  activeDomain.value = normalized
+  const changed = stage.setDomain(normalized, shouldStatic())
   if (changed && shouldStatic()) draw(performance.now())
 })
 
@@ -160,12 +178,68 @@ onUnmounted(() => {
 </script>
 
 <style scoped>
-.light-field {
+.light-field-layer {
   position: fixed;
   inset: 0;
-  width: 100vw;
-  height: 100vh;
   z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+}
+
+/* 纯 GPU 合成流动极光柔光球（零每帧 Canvas 全屏填充） */
+.light-field-aurora {
+  position: absolute;
+  border-radius: 50%;
+  pointer-events: none;
+  will-change: transform;
+  opacity: 0.78;
+}
+
+.light-field-layer--showcase .light-field-aurora {
+  opacity: 1;
+}
+
+.light-field-aurora--a {
+  width: 68vmax;
+  height: 68vmax;
+  top: -22vmax;
+  right: -12vmax;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(var(--lf-primary, 18, 183, 245), var(--qq-aurora-alpha-a, 0.11)) 0%,
+    rgba(var(--lf-primary, 18, 183, 245), 0) 68%
+  );
+  animation: lf-aurora-a 18s ease-in-out infinite alternate;
+}
+
+.light-field-aurora--b {
+  width: 62vmax;
+  height: 62vmax;
+  bottom: -24vmax;
+  left: -14vmax;
+  background: radial-gradient(
+    circle at 50% 50%,
+    rgba(var(--lf-secondary, 6, 182, 212), var(--qq-aurora-alpha-b, 0.095)) 0%,
+    rgba(var(--lf-secondary, 6, 182, 212), 0) 68%
+  );
+  animation: lf-aurora-b 22s ease-in-out infinite alternate;
+}
+
+@keyframes lf-aurora-a {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(-5vw, 4vh, 0) scale(1.07); }
+}
+
+@keyframes lf-aurora-b {
+  from { transform: translate3d(0, 0, 0) scale(1); }
+  to   { transform: translate3d(6vw, -5vh, 0) scale(1.08); }
+}
+
+.light-field {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
   pointer-events: none;
   opacity: var(--qq-background-field-opacity);
   mix-blend-mode: var(--qq-background-field-blend);
@@ -176,5 +250,24 @@ onUnmounted(() => {
 .light-field--showcase {
   opacity: 1;
   mix-blend-mode: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .light-field-aurora {
+    animation: none;
+    will-change: auto;
+  }
+}
+</style>
+
+<style>
+[data-theme="dark"] {
+  --qq-aurora-alpha-a: 0.19;
+  --qq-aurora-alpha-b: 0.16;
+}
+
+html[data-motion="reduced"] .light-field-aurora {
+  animation: none;
+  will-change: auto;
 }
 </style>

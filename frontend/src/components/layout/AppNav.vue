@@ -261,13 +261,13 @@ function setPageLinkRef(path: string, el: Element | ComponentPublicInstance | nu
 }
 
 const domainIndicatorStyle = computed(() => ({
-  transform: `translate(${domainInd.x}px, ${domainInd.y}px)`,
+  transform: `translate3d(${domainInd.x}px, ${domainInd.y}px, 0)`,
   width: `${domainInd.w}px`,
   height: `${domainInd.h}px`,
 }))
 
 const pageIndicatorStyle = computed(() => ({
-  transform: `translate(${pageInd.x}px, ${pageInd.y}px)`,
+  transform: `translate3d(${pageInd.x}px, ${pageInd.y}px, 0)`,
   width: `${pageInd.w}px`,
   height: `${pageInd.h}px`,
 }))
@@ -513,9 +513,9 @@ onBeforeUnmount(() => {
   left: 0;
   border-radius: var(--qq-radius-sm);
   background: var(--qq-shell-control-active);
-  box-shadow: inset 2.5px 0 0 var(--active-domain-color, var(--qq-primary));
-  backdrop-filter: blur(10px) saturate(1.14);
-  -webkit-backdrop-filter: blur(10px) saturate(1.14);
+  box-shadow:
+    inset 2.5px 0 0 var(--active-domain-color, var(--qq-primary)),
+    inset 0 1px 0 var(--qq-shell-glass-highlight);
   pointer-events: none;
   z-index: 0;
 }
@@ -523,7 +523,6 @@ onBeforeUnmount(() => {
 .domain-rail__indicator--animated {
   transition:
     transform var(--qq-transition-spring),
-    height var(--qq-transition-spring),
     box-shadow var(--qq-transition-base);
 }
 
@@ -563,8 +562,6 @@ onBeforeUnmount(() => {
 .domain-rail__items:not(.has-indicator) .domain-btn.active {
   background: var(--qq-shell-control-active);
   box-shadow: inset 2px 0 0 var(--domain-color, var(--qq-primary));
-  backdrop-filter: blur(10px) saturate(1.14);
-  -webkit-backdrop-filter: blur(10px) saturate(1.14);
 }
 
 .domain-rail__tools {
@@ -692,8 +689,6 @@ onBeforeUnmount(() => {
   background: var(--qq-shell-control-active);
   border: 1px solid var(--qq-shell-glass-border);
   box-shadow: inset 0 1px 0 var(--qq-shell-glass-highlight);
-  backdrop-filter: blur(10px) saturate(1.14);
-  -webkit-backdrop-filter: blur(10px) saturate(1.14);
   pointer-events: none;
   z-index: 0;
 }
@@ -711,10 +706,7 @@ onBeforeUnmount(() => {
 }
 
 .section-panel__indicator--animated {
-  transition:
-    transform var(--qq-transition-spring),
-    width var(--qq-transition-spring),
-    height var(--qq-transition-spring);
+  transition: transform var(--qq-transition-spring);
 }
 
 .page-link {
@@ -778,8 +770,6 @@ onBeforeUnmount(() => {
   background: var(--qq-shell-control-active);
   border: 1px solid var(--qq-shell-glass-border);
   box-shadow: inset 0 1px 0 var(--qq-shell-glass-highlight);
-  backdrop-filter: blur(10px) saturate(1.14);
-  -webkit-backdrop-filter: blur(10px) saturate(1.14);
 }
 
 .section-panel__nav:not(.has-indicator) .page-link.active::before {

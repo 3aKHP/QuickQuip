@@ -59,6 +59,9 @@ export function usePointerGlow(containerRef: Ref<HTMLElement | null>) {
   let pointerInside = false
   let pointerDirty = false
   let attachedEl: HTMLElement | null = null
+  let mutationObserver: MutationObserver | null = null
+  let cachedGlowCards: HTMLElement[] = []
+  let glowCardsDirty = true
   let reducedMql: MediaQueryList | null = null
   let coarseMql: MediaQueryList | null = null
   let systemReduced = false
@@ -106,15 +109,24 @@ export function usePointerGlow(containerRef: Ref<HTMLElement | null>) {
     hoveredMagEl = null
   }
 
+  function getGlowCards(): HTMLElement[] {
+    if (!attachedEl) return []
+    if (glowCardsDirty) {
+      cachedGlowCards = attachedEl.matches('[data-glow-card]')
+        ? [attachedEl]
+        : Array.from(attachedEl.querySelectorAll<HTMLElement>('[data-glow-card]'))
+      glowCardsDirty = false
+    }
+    return cachedGlowCards
+  }
+
   function updateTargetsFromPointer() {
     if (!attachedEl) return
     const px = pendingX
     const py = pendingY
 
-    // 1. Glow 邻近高光卡片：先批量读取几何信息再批量写入样式，避免 layout thrashing
-    const glowCards = attachedEl.matches('[data-glow-card]')
-      ? [attachedEl]
-      : Array.from(attachedEl.querySelectorAll<HTMLElement>('[data-glow-card]'))
+    // 1. Glow 邻近高光卡片：命中 DOM 缓存 + 先批量读取几何信息再批量写入样式，避免全树查询与 layout thrashing
+    const glowCards = getGlowCards()
 
     const glowMeasurements: Array<{ card: HTMLElement; rect: DOMRect }> = []
     if (pointerInside) {
@@ -333,6 +345,10 @@ export function usePointerGlow(containerRef: Ref<HTMLElement | null>) {
       raf = 0
     }
     lastFrameMs = 0
+    mutationObserver?.disconnect()
+    mutationObserver = null
+    cachedGlowCards = []
+    glowCardsDirty = true
     if (attachedEl) {
       attachedEl.removeEventListener('pointermove', onPointerMove)
       attachedEl.removeEventListener('pointerleave', releasePointer)
@@ -349,6 +365,13 @@ export function usePointerGlow(containerRef: Ref<HTMLElement | null>) {
     detach()
     if (!el || disabledByEnv()) return
     attachedEl = el
+    glowCardsDirty = true
+    if (typeof MutationObserver !== 'undefined') {
+      mutationObserver = new MutationObserver(() => {
+        glowCardsDirty = true
+      })
+      mutationObserver.observe(el, { childList: true, subtree: true })
+    }
     el.addEventListener('pointermove', onPointerMove, { passive: true })
     el.addEventListener('pointerleave', releasePointer, { passive: true })
     window.addEventListener('blur', releasePointer)

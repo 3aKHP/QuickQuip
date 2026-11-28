@@ -1,8 +1,18 @@
 <template>
-  <article :class="['ui-stat-card', `ui-stat-card--${variant}`, 'qq-glow-card', 'qq-tilt-card']" data-glow-card data-tilt-card>
+  <component
+    :is="to ? 'router-link' : 'article'"
+    :to="to || undefined"
+    :class="cardClasses"
+    data-glow-card
+    :data-tilt-card="to ? '' : undefined"
+    :data-tilt-max="to ? '3.4' : undefined"
+  >
     <div class="ui-stat-card__head">
       <span class="ui-stat-card__label">{{ label }}<UiInfoTip v-if="tip" :text="tip" /></span>
-      <UiIcon v-if="icon" :name="icon" :size="15" class="ui-stat-card__icon" />
+      <span class="ui-stat-card__head-right">
+        <UiIcon v-if="icon" :name="icon" :size="15" class="ui-stat-card__icon" />
+        <UiIcon v-if="to" name="ArrowUpRight" :size="13" class="ui-stat-card__arrow" aria-hidden="true" />
+      </span>
     </div>
     <div class="ui-stat-card__value-row">
       <strong class="ui-stat-card__value">
@@ -12,14 +22,15 @@
       <small v-if="unit" class="ui-stat-card__unit">{{ unit }}</small>
     </div>
     <small v-if="sub" class="ui-stat-card__sub">{{ sub }}</small>
-  </article>
+  </component>
 </template>
 
 <script setup lang="ts">
 /**
  * 统计卡。
- * - 传入 countTo（数值）时默认启用 UiDigitRoll 机械滚轮动效（可通过 :digit-roll="false" 切回 count-up）；
- * - 传入字符串 value 时可显式开启 digit-roll 让数值型遥测指标平滑滚轮过渡。
+ * - 传入 to（路由路径）时渲染为可点击入口卡，启用 3D 玻璃微倾与右上角跳转微箭头；
+ * - 未传入 to 的纯遥测统计卡仅保留柔和邻近追光边框，避免“看起来像按钮但点不动”的可供性错位；
+ * - 传入 countTo（数值）时默认启用 UiDigitRoll 机械滚轮动效（可通过 :digit-roll="false" 切回 count-up）。
  */
 import { computed } from 'vue'
 import UiIcon from './UiIcon.vue'
@@ -37,6 +48,8 @@ const props = withDefaults(defineProps<{
   sub?: string
   icon?: string
   variant?: 'default' | 'primary' | 'warn'
+  /** 可选目标路由：传入后整卡作为导航入口渲染，并启用 3D 微倾与跳转提示 */
+  to?: string
   /** 数值型指标：传入后启用数字滚轮过渡（覆盖 value 的展示） */
   countTo?: number
   /** 数值展示格式化（如万缩写），默认千分位取整 */
@@ -50,10 +63,21 @@ const props = withDefaults(defineProps<{
   sub: undefined,
   icon: undefined,
   variant: 'default',
+  to: undefined,
   countTo: undefined,
   countFormat: undefined,
   digitRoll: undefined,
 })
+
+const cardClasses = computed(() => [
+  'ui-stat-card',
+  `ui-stat-card--${props.variant}`,
+  'qq-glow-card',
+  {
+    'ui-stat-card--clickable': Boolean(props.to),
+    'qq-tilt-card': Boolean(props.to),
+  },
+])
 
 const useOdometer = computed(() => {
   if (props.digitRoll !== undefined) return props.digitRoll
@@ -80,15 +104,36 @@ const displayValue = computed(() => {
   border: 1px solid var(--qq-border);
   border-radius: var(--qq-radius-card);
   background: var(--qq-surface);
+  color: var(--qq-text);
+  text-decoration: none;
   box-shadow: var(--qq-shadow-card);
+  transition: border-color var(--qq-transition-fast), box-shadow var(--qq-transition-fast);
+}
+
+.ui-stat-card--clickable {
+  cursor: pointer;
+}
+
+.ui-stat-card--clickable:hover {
+  border-color: var(--qq-primary-border);
+  box-shadow: var(--qq-shadow-card-hover);
+}
+
+.ui-stat-card--clickable:focus-visible {
+  outline: none;
+  box-shadow: 0 0 0 2px var(--qq-primary-glow), var(--qq-shadow-card-hover);
 }
 
 .ui-stat-card--primary {
   color: var(--qq-on-primary);
   background: var(--qq-gradient-brand);
   border-color: transparent;
-  --glow-color: rgba(255, 255, 255, 0.55);
-  --glow-sheen: rgba(255, 255, 255, 0.10);
+  --glow-color: rgba(255, 255, 255, 0.58);
+  --glow-sheen: rgba(255, 255, 255, 0.12);
+}
+
+.ui-stat-card--primary.ui-stat-card--clickable:hover {
+  border-color: rgba(255, 255, 255, 0.36);
 }
 
 .ui-stat-card--warn {
@@ -111,6 +156,13 @@ const displayValue = computed(() => {
   gap: var(--qq-gap-sm);
 }
 
+.ui-stat-card__head-right {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  flex-shrink: 0;
+}
+
 .ui-stat-card__label,
 .ui-stat-card__sub {
   color: var(--qq-text-muted);
@@ -128,10 +180,30 @@ const displayValue = computed(() => {
   flex-shrink: 0;
 }
 
+.ui-stat-card__arrow {
+  color: var(--qq-text-quiet);
+  opacity: 0.45;
+  transform: translate(0, 0);
+  transition: transform var(--qq-transition-fast), opacity var(--qq-transition-fast), color var(--qq-transition-fast);
+}
+
+.ui-stat-card--clickable:hover .ui-stat-card__arrow,
+.ui-stat-card--clickable:focus-visible .ui-stat-card__arrow {
+  opacity: 1;
+  color: var(--qq-primary-ink);
+  transform: translate(2px, -2px);
+}
+
 .ui-stat-card--primary .ui-stat-card__label,
 .ui-stat-card--primary .ui-stat-card__sub,
-.ui-stat-card--primary .ui-stat-card__icon {
-  color: rgba(255, 255, 255, 0.82);
+.ui-stat-card--primary .ui-stat-card__icon,
+.ui-stat-card--primary .ui-stat-card__arrow {
+  color: rgba(255, 255, 255, 0.84);
+}
+
+.ui-stat-card--primary.ui-stat-card--clickable:hover .ui-stat-card__arrow,
+.ui-stat-card--primary.ui-stat-card--clickable:focus-visible .ui-stat-card__arrow {
+  color: #ffffff;
 }
 
 /* 渐变卡上的说明图标需反色：UiInfoTip 默认 muted 色对比度不足，
@@ -170,5 +242,27 @@ const displayValue = computed(() => {
 
 .ui-stat-card--primary .ui-stat-card__unit {
   color: rgba(255, 255, 255, 0.82);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ui-stat-card__arrow {
+    transition: none;
+  }
+
+  .ui-stat-card--clickable:hover .ui-stat-card__arrow,
+  .ui-stat-card--clickable:focus-visible .ui-stat-card__arrow {
+    transform: none;
+  }
+}
+</style>
+
+<style>
+html[data-motion="reduced"] .ui-stat-card__arrow {
+  transition: none;
+}
+
+html[data-motion="reduced"] .ui-stat-card--clickable:hover .ui-stat-card__arrow,
+html[data-motion="reduced"] .ui-stat-card--clickable:focus-visible .ui-stat-card__arrow {
+  transform: none;
 }
 </style>

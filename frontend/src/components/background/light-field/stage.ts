@@ -21,7 +21,6 @@ import {
   type SonarRing,
 } from './config'
 import {
-  drawAuroraMesh,
   drawCursorConstellation,
   drawLinks,
   drawMouseHalo,
@@ -220,9 +219,9 @@ export function createLightFieldStage(flags: StageFlags) {
     }
   }
 
-  /** 视口尺寸变化：重设 canvas 位图尺寸与 DPR 变换，并重建粒子 */
+  /** 视口尺寸变化：重设 canvas 位图尺寸与 DPR 变换（背景柔光封顶 1.5x 减少 44% 填充像素），并重建粒子 */
   function resize(canvas: HTMLCanvasElement) {
-    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+    const dpr = Math.min(window.devicePixelRatio || 1, 1.5)
     canvas.width = Math.floor(window.innerWidth * dpr)
     canvas.height = Math.floor(window.innerHeight * dpr)
     canvas.getContext('2d')?.setTransform(dpr, 0, 0, dpr, 0, 0)
@@ -278,7 +277,6 @@ export function createLightFieldStage(flags: StageFlags) {
     const px = (mouseX - cx) * PARALLAX
     const py = (mouseY - cy) * PARALLAX
 
-    drawAuroraMesh(ctx, t, w, h, dark, showcase, currentPrimary, currentSecondary, warpEnergy)
     drawRays(ctx, t, w, h, px, py, dark, showcase, currentPrimary, currentSecondary, warpEnergy * warpSign)
 
     haloX += (mouseX - haloX) * haloStep
