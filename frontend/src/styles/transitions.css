@@ -12,11 +12,10 @@
   position: relative;
   z-index: 1;
   transition:
-    opacity 250ms var(--qq-ease-out),
-    transform 280ms var(--qq-ease-out),
-    filter 250ms var(--qq-ease-out);
+    opacity 210ms var(--qq-ease-out),
+    transform 240ms var(--qq-ease-out);
   transform-origin: 50% 14%;
-  will-change: opacity, transform, filter;
+  will-change: opacity, transform;
 }
 
 .page-shell-leave-active {
@@ -27,95 +26,84 @@
   z-index: 0;
   pointer-events: none;
   transition:
-    opacity 170ms var(--qq-ease-out),
-    transform 190ms var(--qq-ease-out),
-    filter 170ms var(--qq-ease-out);
+    opacity 130ms var(--qq-ease-out),
+    transform 150ms var(--qq-ease-out);
   transform-origin: 50% 14%;
-  will-change: opacity, transform, filter;
+  will-change: opacity, transform;
 }
 
 .page-shell-enter-from {
   opacity: 0;
-  filter: blur(2px) saturate(0.92);
-  transform: translateY(12px) scale(1.015);
+  transform: translate3d(0, 10px, 0) scale(1.012);
 }
 
 .page-shell-leave-to {
   opacity: 0;
-  filter: saturate(0.9);
-  transform: translateY(-6px) scale(0.984);
+  transform: translate3d(0, -5px, 0) scale(0.988);
 }
 
 .route-motion-back .page-shell-enter-from {
   opacity: 0;
-  filter: blur(1.5px);
-  transform: translateY(-8px) scale(0.985);
+  transform: translate3d(0, -7px, 0) scale(0.988);
 }
 
 .route-motion-back .page-shell-leave-to {
   opacity: 0;
-  transform: translateY(8px) scale(1.014);
+  transform: translate3d(0, 7px, 0) scale(1.012);
 }
 
 .route-motion-switch .page-shell-enter-from {
   opacity: 0;
-  filter: blur(1.5px);
-  transform: translateY(8px) scale(0.99);
+  transform: translate3d(0, 7px, 0) scale(0.992);
 }
 
 .route-motion-switch .page-shell-leave-to {
   opacity: 0;
-  transform: translateY(-4px) scale(0.992);
+  transform: translate3d(0, -4px, 0) scale(0.994);
 }
 
-/* ── 登录解锁 → 工作台展开仪式转场 ── */
+/* ── 登录解锁 → 工作台展开仪式转场（纯 GPU opacity + transform）── */
 .auth-unlock-enter-active {
   transition:
-    opacity 320ms var(--qq-ease-out),
-    transform 360ms var(--qq-ease-out),
-    filter 320ms var(--qq-ease-out);
+    opacity 280ms var(--qq-ease-out),
+    transform 320ms var(--qq-ease-out);
   transform-origin: 50% 42%;
 }
 
 .auth-unlock-leave-active {
   transition:
-    opacity 200ms var(--qq-ease-out),
-    transform 220ms var(--qq-ease-out),
-    filter 200ms var(--qq-ease-out);
+    opacity 180ms var(--qq-ease-out),
+    transform 200ms var(--qq-ease-out);
   transform-origin: 50% 48%;
 }
 
 .auth-unlock-enter-from {
   opacity: 0;
-  transform: scale(0.968);
-  filter: blur(4px);
+  transform: scale(0.97);
 }
 
 .auth-unlock-leave-to {
   opacity: 0;
-  transform: scale(0.935);
-  filter: blur(3px);
+  transform: scale(0.94);
 }
 
-/* ── 交错瀑布入场（Staggered Cascade；通过内联 --stagger-i 控制错峰）── */
+/* ── 交错瀑布入场（纯 GPU 合成，无动态 blur 掉帧；通过 --stagger-i 控制错峰）── */
 @keyframes qq-cascade-in {
   from {
     opacity: 0;
-    translate: 0 12px;
+    translate: 0 11px;
     scale: 0.986;
-    filter: blur(2px);
   }
   to {
     opacity: 1;
     translate: none;
     scale: none;
-    filter: none;
   }
 }
 
 .qq-stagger-item {
-  animation: qq-cascade-in 380ms var(--qq-ease-out) both;
-  animation-delay: calc(var(--stagger-i, 0) * 38ms);
+  animation: qq-cascade-in 340ms var(--qq-ease-out) both;
+  animation-delay: calc(var(--stagger-i, 0) * 32ms);
 }
 
 /* ── Route Trace Sweep（换页顶部蓝青辉光流带横扫）── */
@@ -307,20 +295,20 @@ a:hover .qq-ico--nudge {
   transform: rotate(90deg) scale(0.55);
 }
 
-/* ── Tab Pane（标签页内容切换：淡入 + 微位移）── */
+/* ── Tab Pane（标签页内容切换：脆生快退 + 轻盈浮入）── */
 .tab-pane-enter-active {
   transition:
-    opacity 180ms var(--qq-ease-out),
-    transform 200ms var(--qq-ease-out);
+    opacity 145ms var(--qq-ease-out),
+    transform 160ms var(--qq-ease-out);
 }
 
 .tab-pane-leave-active {
-  transition: opacity 100ms var(--qq-ease-out);
+  transition: opacity 55ms var(--qq-ease-out);
 }
 
 .tab-pane-enter-from {
   opacity: 0;
-  transform: translateY(8px);
+  transform: translate3d(0, 5px, 0);
 }
 
 .tab-pane-leave-to {

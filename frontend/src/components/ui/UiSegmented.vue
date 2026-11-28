@@ -56,10 +56,11 @@ function setBtnRef(key: string, el: Element | ComponentPublicInstance | null) {
   else btnMap.delete(key)
 }
 
+// 固定基准尺寸 + 纯 GPU translate3d/scale 过渡，切换零 Layout/Paint 回流
+const BASE_W = 100
+const BASE_H = 28
 const indicatorStyle = computed(() => ({
-  transform: `translate(${indicator.x}px, ${indicator.y}px)`,
-  width: `${indicator.w}px`,
-  height: `${indicator.h}px`,
+  transform: `translate3d(${indicator.x}px, ${indicator.y}px, 0) scale(${(indicator.w / BASE_W).toFixed(4)}, ${(indicator.h / BASE_H).toFixed(4)})`,
 }))
 
 function measure(animate = true) {
@@ -128,7 +129,10 @@ onUnmounted(() => {
   position: absolute;
   top: 0;
   left: 0;
-  border-radius: var(--qq-radius-sm);
+  width: 100px;
+  height: 28px;
+  transform-origin: 0 0;
+  border-radius: 4px;
   background: var(--qq-surface);
   box-shadow: var(--qq-shadow-sm);
   pointer-events: none;
@@ -136,10 +140,7 @@ onUnmounted(() => {
 }
 
 .ui-segmented__indicator--animated {
-  transition:
-    transform var(--qq-transition-spring),
-    width var(--qq-transition-spring),
-    height var(--qq-transition-spring);
+  transition: transform var(--qq-transition-spring);
 }
 
 .ui-segmented__item {

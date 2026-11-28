@@ -74,10 +74,11 @@ function setBtnRef(key: string, el: Element | ComponentPublicInstance | null) {
   else btnMap.delete(key)
 }
 
+// 固定基准尺寸 + 纯 GPU translate3d/scale 过渡，切换选项卡零 Layout/Paint 回流
+const BASE_W = 100
+const BASE_H = 32
 const indicatorStyle = computed(() => ({
-  transform: `translate(${indicator.x}px, ${indicator.y}px)`,
-  width: `${indicator.w}px`,
-  height: `${indicator.h}px`,
+  transform: `translate3d(${indicator.x}px, ${indicator.y}px, 0) scale(${(indicator.w / BASE_W).toFixed(4)}, ${(indicator.h / BASE_H).toFixed(4)})`,
 }))
 
 function measure(animate = true) {
@@ -150,22 +151,22 @@ onUnmounted(() => {
   background: var(--qq-surface-strong);
 }
 
-/* 滑动指示条：首次量测不播放飞入动画，切换时平滑跟随 */
+/* 滑动指示条：基准盒 100×32，由纯 GPU transform 缩放与平移，避免切换时动画 width/height 触发回流 */
 .ui-tabs__indicator {
   position: absolute;
   top: 0;
   left: 0;
-  border-radius: calc(var(--qq-radius-card) - 3px);
+  width: 100px;
+  height: 32px;
+  transform-origin: 0 0;
+  border-radius: 4px;
   background: var(--qq-surface);
   box-shadow: var(--qq-shadow-card);
   pointer-events: none;
 }
 
 .ui-tabs__indicator--animated {
-  transition:
-    transform var(--qq-transition-spring),
-    width var(--qq-transition-spring),
-    height var(--qq-transition-spring);
+  transition: transform var(--qq-transition-spring);
 }
 
 .ui-tabs__item {

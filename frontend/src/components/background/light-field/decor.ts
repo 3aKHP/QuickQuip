@@ -1,4 +1,5 @@
-// LightField 装饰层：流动极光底幕、光束/圆弧、鼠标光晕、指针星座牵丝、暗色连线与双环声呐
+// LightField 装饰层（高性能无冗余渐变版）：光束/圆弧、鼠标光晕、指针星座牵丝、暗色连线与双环声呐
+// 流动极光底幕由 LightField.vue 的纯 GPU 合成 CSS 层渲染，避免每帧 3 次全屏像素填充。
 import {
   CURSOR_LINK_MAX,
   CURSOR_LINK_RADIUS,
@@ -12,54 +13,6 @@ function rgba(rgb: RGB, alpha: number): string {
   return `rgba(${Math.round(rgb[0])}, ${Math.round(rgb[1])}, ${Math.round(rgb[2])}, ${alpha.toFixed(3)})`
 }
 
-// 流动极光底幕（暗色深空极光 / 亮色通透棱镜流彩），随工作域色流体漫染
-export function drawAuroraMesh(
-  ctx: CanvasRenderingContext2D,
-  t: number,
-  w: number,
-  h: number,
-  isDark: boolean,
-  isShowcase: boolean,
-  primaryRgb: RGB,
-  secondaryRgb: RGB,
-  warpEnergy = 0,
-) {
-  const k = (isShowcase ? 1.15 : 0.85) * (1 + Math.min(warpEnergy, 1.5) * 0.22)
-  const diag = Math.max(w, h)
-  const blobs = [
-    {
-      x: w * (0.76 + Math.sin(t * 0.14) * 0.08),
-      y: h * (0.16 + Math.cos(t * 0.11) * 0.07),
-      r: diag * 0.56,
-      rgb: primaryRgb,
-      alpha: (isDark ? 0.16 : 0.105) * k,
-    },
-    {
-      x: w * (0.14 + Math.cos(t * 0.12 + 1.4) * 0.09),
-      y: h * (0.84 + Math.sin(t * 0.15 + 0.8) * 0.07),
-      r: diag * 0.52,
-      rgb: secondaryRgb,
-      alpha: (isDark ? 0.14 : 0.09) * k,
-    },
-    {
-      x: w * (0.52 + Math.sin(t * 0.09 + 2.6) * 0.11),
-      y: h * (0.48 + Math.cos(t * 0.13 + 1.9) * 0.09),
-      r: diag * 0.42,
-      rgb: isDark ? primaryRgb : ([245, 158, 11] as RGB),
-      alpha: (isDark ? 0.075 : 0.032) * k,
-    },
-  ]
-
-  for (const blob of blobs) {
-    const g = ctx.createRadialGradient(blob.x, blob.y, 0, blob.x, blob.y, blob.r)
-    g.addColorStop(0, rgba(blob.rgb, blob.alpha))
-    g.addColorStop(0.55, rgba(blob.rgb, blob.alpha * 0.32))
-    g.addColorStop(1, rgba(blob.rgb, 0))
-    ctx.fillStyle = g
-    ctx.fillRect(0, 0, w, h)
-  }
-}
-
 // 鼠标光晕：随域色过渡的径向微光；位置由调用方 lerp 后传入
 export function drawMouseHalo(
   ctx: CanvasRenderingContext2D,
@@ -71,24 +24,24 @@ export function drawMouseHalo(
   primaryRgb: RGB,
   secondaryRgb: RGB,
 ) {
-  const breathe = 1 + Math.sin(t * 0.9) * 0.07
+  const breathe = 1 + Math.sin(t * 0.9) * 0.06
   const k = isShowcase ? 1.08 : 0.82
-  const radius = (isDark ? 380 : 320) * breathe
+  const radius = (isDark ? 340 : 280) * breathe
   const g = ctx.createRadialGradient(haloX, haloY, 0, haloX, haloY, radius)
   if (isDark) {
-    g.addColorStop(0, rgba(primaryRgb, 0.26 * k))
-    g.addColorStop(0.45, rgba(secondaryRgb, 0.12 * k))
+    g.addColorStop(0, rgba(primaryRgb, 0.24 * k))
+    g.addColorStop(0.45, rgba(secondaryRgb, 0.10 * k))
     g.addColorStop(1, rgba(secondaryRgb, 0))
   } else {
-    g.addColorStop(0, rgba(primaryRgb, 0.18 * k))
-    g.addColorStop(0.45, rgba(secondaryRgb, 0.08 * k))
+    g.addColorStop(0, rgba(primaryRgb, 0.16 * k))
+    g.addColorStop(0.45, rgba(secondaryRgb, 0.07 * k))
     g.addColorStop(1, rgba(secondaryRgb, 0))
   }
   ctx.fillStyle = g
   ctx.fillRect(haloX - radius, haloY - radius, radius * 2, radius * 2)
 }
 
-// 指针星座牵丝：指针向半径内最近粒子拉出纤细发光引力丝线，营造可把玩的物理光场手感
+// 指针星座牵丝：零 CanvasGradient 分配，按距离直接着色并批量绘点
 export function drawCursorConstellation(
   ctx: CanvasRenderingContext2D,
   haloX: number,
@@ -119,23 +72,19 @@ export function drawCursorConstellation(
 
   ctx.save()
   ctx.lineWidth = isDark ? 0.9 : 0.85
-  const peakAlpha = (isDark ? 0.44 : 0.30) * (isShowcase ? 1.1 : 0.92)
+  const peakAlpha = (isDark ? 0.42 : 0.28) * (isShowcase ? 1.1 : 0.92)
   for (const c of candidates) {
     const ratio = 1 - Math.sqrt(c.d2) / CURSOR_LINK_RADIUS
     const alpha = ratio * ratio * peakAlpha
-    if (alpha <= 0.01) continue
+    if (alpha <= 0.012) continue
 
-    const grad = ctx.createLinearGradient(haloX, haloY, c.sx, c.sy)
-    grad.addColorStop(0, rgba(secondaryRgb, alpha * 0.85))
-    grad.addColorStop(1, rgba(primaryRgb, alpha * 0.28))
-    ctx.strokeStyle = grad
+    ctx.strokeStyle = rgba(secondaryRgb, alpha * 0.72)
     ctx.beginPath()
     ctx.moveTo(haloX, haloY)
     ctx.lineTo(c.sx, c.sy)
     ctx.stroke()
 
-    // 端点星芒微核
-    ctx.fillStyle = rgba(primaryRgb, Math.min(0.85, alpha * 1.4))
+    ctx.fillStyle = rgba(primaryRgb, Math.min(0.85, alpha * 1.35))
     ctx.beginPath()
     ctx.arc(c.sx, c.sy, 1.5, 0, Math.PI * 2)
     ctx.fill()
@@ -175,12 +124,7 @@ export function drawRays(
   ]
 
   for (const ray of rays) {
-    const grad = ctx.createLinearGradient(0, 0, w, 0)
-    grad.addColorStop(0, 'rgba(255, 255, 255, 0)')
-    grad.addColorStop(0.18, ray.color)
-    grad.addColorStop(0.82, ray.color)
-    grad.addColorStop(1, 'rgba(255, 255, 255, 0)')
-    ctx.strokeStyle = grad
+    ctx.strokeStyle = ray.color
     ctx.lineWidth = ray.width
     ctx.beginPath()
     ctx.moveTo(-40, ray.y + driftY)
@@ -235,7 +179,7 @@ export function drawLinks(ctx: CanvasRenderingContext2D, pts: ScreenPoint[], pri
   ctx.restore()
 }
 
-// 双环声呐 / 点击水波：清晰通透的主波前 + 滞后次级内环 + 径向微晕
+// 双环声呐 / 点击水波：零全圆渐变填充，改用主细环 + 宽柔光描边 + 滞后次级内环
 export function drawSonarRings(
   ctx: CanvasRenderingContext2D,
   rings: SonarRing[],
@@ -253,6 +197,14 @@ export function drawSonarRings(
     const alpha = baseAlpha * fade
     if (alpha <= 0.005 || ring.radius <= 1) continue
 
+    // 柔和光晕宽描边（替代昂贵的全圆 createRadialGradient 填充）
+    const glowR = Math.max(1, ring.radius - 4)
+    ctx.strokeStyle = rgba(ring.rgb, alpha * 0.22)
+    ctx.lineWidth = isRipple ? 8 : 12
+    ctx.beginPath()
+    ctx.arc(ring.x, ring.y, glowR, 0, Math.PI * 2)
+    ctx.stroke()
+
     // 主波前细环
     ctx.strokeStyle = rgba(ring.rgb, alpha)
     ctx.lineWidth = isRipple ? 1.35 : 1.75
@@ -260,7 +212,7 @@ export function drawSonarRings(
     ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2)
     ctx.stroke()
 
-    // 滞后次级内环（双波前质感）
+    // 滞后次级内环
     const echoRadius = ring.radius * 0.78
     if (echoRadius > 8) {
       ctx.strokeStyle = rgba(ring.rgb, alpha * 0.48)
@@ -269,17 +221,6 @@ export function drawSonarRings(
       ctx.arc(ring.x, ring.y, echoRadius, 0, Math.PI * 2)
       ctx.stroke()
     }
-
-    // 柔和内沿尾晕，增强空间波前立体感
-    const band = isRipple ? 24 : 36
-    const inner = Math.max(0, ring.radius - band)
-    const grad = ctx.createRadialGradient(ring.x, ring.y, inner, ring.x, ring.y, ring.radius)
-    grad.addColorStop(0, rgba(ring.rgb, 0))
-    grad.addColorStop(1, rgba(ring.rgb, alpha * 0.28))
-    ctx.fillStyle = grad
-    ctx.beginPath()
-    ctx.arc(ring.x, ring.y, ring.radius, 0, Math.PI * 2)
-    ctx.fill()
   }
   ctx.restore()
 }

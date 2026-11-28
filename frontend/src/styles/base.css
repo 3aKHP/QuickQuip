@@ -377,15 +377,9 @@ code {
 }
 
 /* ── Specular Pointer Glow & 3D Tilt Glare（指针追光 1.5px 边框 + 玻璃镜面扫光）── */
-@property --qq-beam-angle {
-  syntax: "<angle>";
-  initial-value: 0deg;
-  inherits: false;
-}
-
-@keyframes qq-beam-orbit {
-  from { --qq-beam-angle: 0deg; }
-  to   { --qq-beam-angle: 360deg; }
+@keyframes qq-beam-spin {
+  from { transform: translate(-50%, -50%) rotate(0deg); }
+  to   { transform: translate(-50%, -50%) rotate(360deg); }
 }
 
 .qq-glow-card {
@@ -449,22 +443,15 @@ code {
   z-index: 2;
 }
 
-/* 焦点容器单点游走流光边框（仅用于登录舱、Dashboard Hero、Command Palette 等主焦点） */
+/* 焦点容器单点游走流光边框（纯 GPU transform 旋转光盘 + mask 边框窗口，主线程 0 重绘） */
 .qq-beam {
   position: absolute;
   inset: 0;
   border-radius: inherit;
   padding: 1.5px;
   pointer-events: none;
+  overflow: hidden;
   z-index: 3;
-  background: conic-gradient(
-    from var(--qq-beam-angle, 0deg) at 50% 50%,
-    transparent 0deg,
-    transparent 292deg,
-    var(--qq-beam-primary) 334deg,
-    var(--qq-beam-secondary) 352deg,
-    transparent 360deg
-  );
   -webkit-mask:
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
@@ -473,8 +460,26 @@ code {
     linear-gradient(#fff 0 0) content-box,
     linear-gradient(#fff 0 0);
   mask-composite: exclude;
-  animation: qq-beam-orbit 6.4s linear infinite;
   opacity: 0.85;
+}
+
+.qq-beam::before {
+  content: "";
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: max(180%, 720px);
+  aspect-ratio: 1;
+  background: conic-gradient(
+    from 0deg at 50% 50%,
+    transparent 0deg,
+    transparent 292deg,
+    var(--qq-beam-primary) 334deg,
+    var(--qq-beam-secondary) 352deg,
+    transparent 360deg
+  );
+  will-change: transform;
+  animation: qq-beam-spin 6.4s linear infinite;
 }
 
 /* 微磁吸：采用独立 CSS translate 属性，与 :active transform scale 互不冲突 */
