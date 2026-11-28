@@ -1,5 +1,5 @@
 <template>
-  <article :class="['ui-stat-card', `ui-stat-card--${variant}`, 'qq-glow-card']" data-glow-card>
+  <article :class="['ui-stat-card', `ui-stat-card--${variant}`, 'qq-glow-card', 'qq-tilt-card']" data-glow-card data-tilt-card>
     <div class="ui-stat-card__head">
       <span class="ui-stat-card__label">{{ label }}<UiInfoTip v-if="tip" :text="tip" /></span>
       <UiIcon v-if="icon" :name="icon" :size="15" class="ui-stat-card__icon" />

@@ -112,13 +112,14 @@
   --qq-toast-border-info: rgba(18, 183, 245, 0.50);
   --qq-toast-border-error: rgba(250, 81, 81, 0.50);
 
-  /* ── Radius（收敛：4 / 6 / 12 / 全圆）── */
+  /* ── Radius（收敛：4 / 6 / 12 / 14形变 / 全圆）── */
   --qq-radius-sm: 4px;
   --qq-radius-md: 6px;
   --qq-radius-nav: 6px;
   --qq-radius-btn: 6px;
   --qq-radius-card: 6px;
   --qq-radius-xl: 12px;
+  --qq-radius-morph: 14px;
   --qq-radius-full: 9999px;
 
   /* ── Spacing ── */
@@ -174,11 +175,14 @@
   --qq-transition-spring: 260ms var(--qq-ease-spring);
   --qq-transition-spring-soft: 320ms var(--qq-ease-spring-soft);
 
-  /* ── Tactile Ripple & Specular Glow（克制触觉涟漪与指针追光描边）── */
-  --qq-ripple-color: rgba(18, 183, 245, 0.22);
-  --qq-ripple-on-solid: rgba(255, 255, 255, 0.28);
-  --qq-specular-border: rgba(18, 183, 245, 0.42);
-  --qq-specular-sheen: rgba(18, 183, 245, 0.06);
+  /* ── Tactile Ripple, Specular Glow & Border Beam（玻璃高光、镜面扫光与焦点流光束）── */
+  --qq-ripple-color: rgba(18, 183, 245, 0.26);
+  --qq-ripple-on-solid: rgba(255, 255, 255, 0.34);
+  --qq-specular-border: rgba(18, 183, 245, 0.62);
+  --qq-specular-sheen: rgba(18, 183, 245, 0.09);
+  --qq-glare-color: rgba(255, 255, 255, 0.42);
+  --qq-beam-primary: rgba(18, 183, 245, 0.85);
+  --qq-beam-secondary: rgba(6, 182, 212, 0.65);
 
   /* ── Layout ── */
   --qq-domain-rail-width: 72px;
@@ -219,8 +223,8 @@
   --qq-shell-control-active: rgba(255, 255, 255, 0.54);
   --qq-shell-shadow: rgba(18, 60, 95, 0.05);
 
-  /* ── Background Field（光场层，克制强度）── */
-  --qq-background-field-opacity: 0.85;
+  /* ── Background Field（光场层）── */
+  --qq-background-field-opacity: 0.92;
   --qq-background-field-blend: normal;
 
   /* ── Route Trace Sweep（换页光带）── */
@@ -351,7 +355,7 @@
   --qq-shell-control-active: rgba(17, 24, 32, 0.58);
   --qq-shell-shadow: rgba(0, 0, 0, 0.24);
 
-  --qq-background-field-opacity: 0.78;
+  --qq-background-field-opacity: 0.88;
   --qq-background-field-blend: screen;
 
   --qq-toggle-off: #3a4452;
@@ -367,8 +371,11 @@
   --qq-trace-request: rgba(245, 158, 11, 0.34);
   --qq-trace-response: rgba(34, 211, 238, 0.34);
 
-  --qq-ripple-color: rgba(56, 208, 248, 0.24);
-  --qq-ripple-on-solid: rgba(255, 255, 255, 0.26);
-  --qq-specular-border: rgba(56, 208, 248, 0.48);
-  --qq-specular-sheen: rgba(56, 208, 248, 0.08);
+  --qq-ripple-color: rgba(56, 208, 248, 0.28);
+  --qq-ripple-on-solid: rgba(255, 255, 255, 0.30);
+  --qq-specular-border: rgba(56, 208, 248, 0.72);
+  --qq-specular-sheen: rgba(56, 208, 248, 0.12);
+  --qq-glare-color: rgba(255, 255, 255, 0.16);
+  --qq-beam-primary: rgba(56, 208, 248, 0.92);
+  --qq-beam-secondary: rgba(34, 211, 238, 0.68);
 }

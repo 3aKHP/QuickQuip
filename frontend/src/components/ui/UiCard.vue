@@ -1,5 +1,5 @@
 <template>
-  <div :class="classes" :tabindex="clickable ? 0 : undefined">
+  <div :class="classes" :tabindex="clickable ? 0 : undefined" :data-glow-card="clickable ? '' : undefined">
     <div v-if="accent" class="ui-card__accent" :class="`ui-card__accent--${accent}`" />
     <slot />
   </div>
@@ -22,7 +22,7 @@ const classes = computed(() => [
   'ui-card',
   `ui-card--p-${props.padding}`,
   `ui-card--shadow-${props.shadow}`,
-  { 'ui-card--clickable': props.clickable },
+  { 'ui-card--clickable': props.clickable, 'qq-glow-card': props.clickable },
 ])
 </script>
 
