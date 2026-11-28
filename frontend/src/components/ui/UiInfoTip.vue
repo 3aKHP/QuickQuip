@@ -15,7 +15,7 @@
       :aria-describedby="open ? tipId : undefined"
       @mouseenter="onMouseEnter"
       @mouseleave="onMouseLeave"
-      @click.stop="onClickToggle"
+      @click.stop.prevent="onClickToggle"
       @keydown.enter.stop.prevent="onClickToggle"
       @keydown.space.stop.prevent="onClickToggle"
       @keydown.esc.stop.prevent="closeAll"

@@ -48,7 +48,7 @@
       <UiStatCard label="回放估算" :value="fmtTokens(activeKey?.replay_tokens)" digit-roll :sub="activeKey ? `冻结历史 ${activeKey.frozen_segments} 段` : undefined" unit="tokens" icon="Database" tip="工具历史与原生块的回放估算，单独受回放预算约束。" />
       <UiStatCard label="信封 ≈ 每轮" :value="kpiEnvelope" digit-roll unit="tok/轮" icon="Mail" tip="【轮次上下文】信封的每轮固定输入成本（时间范围内每轮均值）。" />
       <UiStatCard label="本纪元已存活" :value="kpiAge" icon="Hourglass" :tip="epochAgeTip" />
-      <div class="kpi ring-card qq-glow-card qq-tilt-card" data-glow-card data-tilt-card>
+      <div class="kpi ring-card qq-glow-card" data-glow-card>
         <div class="ring" :class="{ urgent: coldUrgent }">
           <svg viewBox="0 0 44 44">
             <circle class="ring-bg" cx="22" cy="22" r="18" />

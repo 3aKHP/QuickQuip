@@ -51,10 +51,10 @@
 
       <!-- Top stat cards -->
       <div class="dash-cards">
-        <UiStatCard class="qq-stagger-item" style="--stagger-i: 3" label="活跃群组" variant="primary" icon="Users" :count-to="data.totalGroups" :count-format="fmt" tip="有过消息统计记录的群数量（自统计开始累计）；机器人自身发言不计入，也不等于机器人当前所在的全部群。" />
-        <UiStatCard class="qq-stagger-item" style="--stagger-i: 4" label="累计消息" icon="MessageCircle" :count-to="data.totalMessages" :count-format="fmt" tip="各群成员消息数合计，机器人自己的回复不计；自统计开始累计、无时间窗口，重启不清零。" />
-        <UiStatCard class="qq-stagger-item" style="--stagger-i: 5" label="活跃用户" icon="Radar" :count-to="data.totalUsers" :count-format="fmt" tip="统计中出现过的不同发言者数，同一 QQ 号跨群只计一次。" />
-        <UiStatCard class="qq-stagger-item" style="--stagger-i: 6" label="金币用户" icon="Coins" :count-to="data.goldUserCount" :count-format="fmt" :sub="`总金币 ${fmt(data.totalGold)}`" tip="游戏经济中建有金币账户的用户数（按群开户，同一 QQ 在两个群算两个）；副标题为全部群的金币余额合计。" />
+        <UiStatCard class="qq-stagger-item" style="--stagger-i: 3" to="/groups" label="活跃群组" variant="primary" icon="Users" :count-to="data.totalGroups" :count-format="fmt" tip="有过消息统计记录的群数量（自统计开始累计）；机器人自身发言不计入，也不等于机器人当前所在的全部群。" />
+        <UiStatCard class="qq-stagger-item" style="--stagger-i: 4" to="/stats" label="累计消息" icon="MessageCircle" :count-to="data.totalMessages" :count-format="fmt" tip="各群成员消息数合计，机器人自己的回复不计；自统计开始累计、无时间窗口，重启不清零。" />
+        <UiStatCard class="qq-stagger-item" style="--stagger-i: 5" to="/stats" label="活跃用户" icon="Radar" :count-to="data.totalUsers" :count-format="fmt" tip="统计中出现过的不同发言者数，同一 QQ 号跨群只计一次。" />
+        <UiStatCard class="qq-stagger-item" style="--stagger-i: 6" to="/game-economy" label="金币用户" icon="Coins" :count-to="data.goldUserCount" :count-format="fmt" :sub="`总金币 ${fmt(data.totalGold)}`" tip="游戏经济中建有金币账户的用户数（按群开户，同一 QQ 在两个群算两个）；副标题为全部群的金币余额合计。" />
       </div>
 
       <!-- Row 2: rankings -->
